@@ -195,11 +195,14 @@ func (c *Classifier) Classify(ctx context.Context, req sdk.Request) (sdk.Respons
 	if err != nil {
 		return sdk.Response{}, err
 	}
-	// A 200 response cost money whatever its answers: report it first, unknown when it says nothing
-	// usable.
-	reportUsage(req, raw, c.price)
+	// A 200 response cost money whatever its answers: account it first, unknown when it says
+	// nothing usable. The usage also goes back in the response, for callers without Used.
+	usage := responseUsage(raw, c.price)
+	if req.Used != nil {
+		req.Used(usage)
+	}
 	if err := httpx.NoDuplicateKeys(raw); err != nil {
-		return sdk.Response{}, err
+		return sdk.Response{Usage: usage}, err
 	}
 	var wr wireResponse
 	if err := json.Unmarshal(raw, &wr); err != nil {
@@ -215,7 +218,7 @@ func (c *Classifier) Classify(ctx context.Context, req sdk.Request) (sdk.Respons
 			return sdk.Response{}, errors.New("the response answers a question that was not asked")
 		}
 	}
-	var resp sdk.Response
+	resp := sdk.Response{Usage: usage}
 	for _, q := range req.Questions {
 		wa, ok := wr.Answers[q.ID]
 		if !ok {
@@ -231,10 +234,11 @@ func (c *Classifier) Classify(ctx context.Context, req sdk.Request) (sdk.Respons
 	return resp, nil
 }
 
-// reportUsage reports the input tokens of a response; missing, null or negative is unknown.
-func reportUsage(req sdk.Request, raw []byte, price float64) {
-	if req.Used == nil {
-		return
+// responseUsage reads the input tokens of a response. Missing, null, negative, or a body with a
+// repeated key (whose last value a decoder would trust) is unknown.
+func responseUsage(raw []byte, price float64) sdk.Usage {
+	if httpx.NoDuplicateKeys(raw) != nil {
+		return sdk.Usage{Unknown: true}
 	}
 	var u struct {
 		Usage struct {
@@ -242,11 +246,10 @@ func reportUsage(req sdk.Request, raw []byte, price float64) {
 		} `json:"usage"`
 	}
 	if json.Unmarshal(raw, &u) != nil || u.Usage.InputTokens == nil || *u.Usage.InputTokens < 0 {
-		req.Used(sdk.Usage{Unknown: true})
-		return
+		return sdk.Usage{Unknown: true}
 	}
 	n := *u.Usage.InputTokens
-	req.Used(sdk.Usage{InputTokens: n, CostUSD: float64(n) * price / 1e6})
+	return sdk.Usage{InputTokens: n, CostUSD: float64(n) * price / 1e6}
 }
 
 // convert maps a wire answer to the SDK, refusing a wrong type or value fields of another kind

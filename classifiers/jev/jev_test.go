@@ -288,3 +288,14 @@ func TestUsageIsReportedOrUnknown(t *testing.T) {
 		}
 	}
 }
+
+func TestUsageWithoutCallbackAndDuplicates(t *testing.T) {
+	s := newServer(t, func(_ int, _ map[string]any, w http.ResponseWriter) { io.WriteString(w, okResp) })
+	resp, err := newTest(t, s.URL).Classify(context.Background(), req)
+	if err != nil || resp.Usage.InputTokens != 1000000 {
+		t.Fatalf("a caller without Used still gets the usage in the response: %+v %v", resp.Usage, err)
+	}
+	if u := responseUsage([]byte(`{"usage":{"input_tokens":100},"usage":{"input_tokens":0}}`), 1); !u.Unknown {
+		t.Errorf("repeated usage must be unknown, not the last value: %+v", u)
+	}
+}
