@@ -38,7 +38,8 @@ func TestCheck(t *testing.T) {
 		{ID: "y", Kind: sdk.Noul, Text: "?"},
 		{ID: "s", Kind: sdk.Score, Text: "?", Min: 1, Max: 5},
 	}
-	ok := []sdk.Answer{{QuestionID: "k", Choice: "unclear"}, {QuestionID: "y", Yes: 0.3}, {QuestionID: "s", Score: 2}}
+	f := func(v float64) *float64 { return &v }
+	ok := []sdk.Answer{{QuestionID: "k", Choice: "unclear"}, {QuestionID: "y", Yes: f(0.3)}, {QuestionID: "s", Score: f(2)}}
 	if _, err := Check(qs, sdk.Response{Answers: ok}); err != nil {
 		t.Fatal(err)
 	}
@@ -46,8 +47,11 @@ func TestCheck(t *testing.T) {
 		"has no answer":    ok[:2],
 		"not an option":    {{QuestionID: "k", Choice: "c"}, ok[1], ok[2]},
 		"unknown option":   {{QuestionID: "k", Choice: "a", Probabilities: map[string]float64{"z": 0.1}}, ok[1], ok[2]},
-		"outside [0, 1]":   {ok[0], {QuestionID: "y", Yes: 1.5}, ok[2]},
-		"outside [1, 5]":   {ok[0], ok[1], {QuestionID: "s", Score: 9}},
+		"outside [0, 1]":   {ok[0], {QuestionID: "y", Yes: f(1.5)}, ok[2]},
+		"outside [1, 5]":   {ok[0], ok[1], {QuestionID: "s", Score: f(9)}},
+		"exactly a yes":    {ok[0], {QuestionID: "y"}, ok[2]},
+		"exactly a score":  {ok[0], ok[1], {QuestionID: "s"}},
+		"carries a yes":    {{QuestionID: "k", Choice: "a", Yes: f(1)}, ok[1], ok[2]},
 		"answered twice":   append(append([]sdk.Answer{}, ok...), ok[0]),
 		"unknown question": append(append([]sdk.Answer{}, ok...), sdk.Answer{QuestionID: "x"}),
 	}
@@ -55,5 +59,22 @@ func TestCheck(t *testing.T) {
 		if _, err := Check(qs, sdk.Response{Answers: answers}); err == nil || !strings.Contains(err.Error(), want) {
 			t.Errorf("want %q, got %v", want, err)
 		}
+	}
+}
+
+func TestFactsMustBeStructural(t *testing.T) {
+	for _, v := range []any{`t.Errorf("DO_NOT_EXPORT")`, "a\nb", "x := 1", map[string]int{}} {
+		var p sdk.Payload
+		p.Fact("assertions", v)
+		if _, err := State(p, Source); err == nil {
+			t.Errorf("fact %q must be refused", v)
+		}
+	}
+	var p sdk.Payload
+	p.Fact("about", "the result of IsExpired")
+	p.Fact("n", 3)
+	p.Fact("ok", true)
+	if _, err := State(p, Facts); err != nil {
+		t.Fatal(err)
 	}
 }

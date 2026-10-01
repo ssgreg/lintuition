@@ -7,6 +7,9 @@ Checks whether comments, logs and test descriptions match what your code does.
 metrics.go:10:30: counter Help describes a current value, not a running total: "Disk I/O utilization." (metric-type-vs-help)
 	ioSeconds = prom.NewCounter(prom.CounterOpts{Name: "io_seconds_total", Help: ioHelp})
 	                            ^
+premature/premature.go:13:2: success logged before SaveConfig has returned: "config saved to disk" (premature-success)
+	slog.Info("config saved to disk")
+	^
 ```
 
 > Status: early development (pre-v0.1). The interfaces and the config may change.
@@ -79,6 +82,17 @@ person-written text does leave the machine when the backend is remote.
 | linter | checks |
 |---|---|
 | `metric-type-vs-help` | Prometheus metric Help that describes a different kind of value than the metric type records |
+| `premature-success` | a log line reports success before the call that can still fail |
+| `table-case-vs-expectation` | a table test case whose name says the opposite of its boolean expectation |
+
+Each linter has defect / fixed twins in [testdata/twins](testdata/twins), checked by
+[`linttest`](linttest) with `// want` comments, like `analysistest`.
+
+Facts are read through `go/types`: an error result is found by its type, not by the variable's
+name; a log call is a level-named call of a logger package that returns nothing (so `zap.Error(err)`
+is a field, not a log line); a table row is bound to the function called in the loop over that
+table. A shape the analyzer sees but cannot read, such as a message built at run time, is counted
+as unsupported rather than silently dropped.
 
 ## Classifiers
 

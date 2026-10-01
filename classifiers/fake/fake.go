@@ -121,9 +121,9 @@ func (c *Classifier) match(linter string, q sdk.Question, state string) (sdk.Ans
 			a.Choice = r.Choice
 			a.Probabilities = spread(q, r.Choice, p)
 		case r.Yes != nil && q.Kind == sdk.Noul:
-			a.Yes = *r.Yes
+			a.Yes = r.Yes
 		case r.Score != nil && q.Kind == sdk.Score:
-			a.Score = *r.Score
+			a.Score = r.Score
 		default:
 			continue
 		}
@@ -139,9 +139,11 @@ func unclear(q sdk.Question) sdk.Answer {
 		a.Choice = sdk.Unclear
 		a.Probabilities = spread(q, sdk.Unclear, 1)
 	case sdk.Noul:
-		a.Yes = 0.5
+		half := 0.5
+		a.Yes = &half
 	case sdk.Score:
-		a.Score = (q.Min + q.Max) / 2
+		mid := (q.Min + q.Max) / 2
+		a.Score = &mid
 	}
 	return a
 }

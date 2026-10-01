@@ -5,6 +5,7 @@ package classify
 import (
 	"fmt"
 	"math"
+	"regexp"
 	"sort"
 
 	"github.com/ssgreg/lintuition/sdk"
@@ -45,6 +46,9 @@ func State(p sdk.Payload, policy string) (map[string]any, error) {
 		return nil
 	}
 	for _, k := range sortedKeys(p.Facts) {
+		if err := checkFact(k, p.Facts[k]); err != nil {
+			return nil, err
+		}
 		if err := add(k, p.Facts[k]); err != nil {
 			return nil, err
 		}
@@ -98,6 +102,9 @@ func checkAnswer(q sdk.Question, a sdk.Answer) error {
 	}
 	switch q.Kind {
 	case sdk.Choice:
+		if a.Yes != nil || a.Score != nil {
+			return fmt.Errorf("a choice answer carries a yes or score value")
+		}
 		domain := map[string]bool{}
 		for _, o := range q.WithUnclear() {
 			domain[o.Key] = true
@@ -114,12 +121,18 @@ func checkAnswer(q sdk.Question, a sdk.Answer) error {
 			}
 		}
 	case sdk.Noul:
-		if !prob(a.Yes) {
-			return fmt.Errorf("yes probability %v is outside [0, 1]", a.Yes)
+		if a.Yes == nil || a.Choice != "" || a.Score != nil || len(a.Probabilities) > 0 {
+			return fmt.Errorf("a yes/no answer needs exactly a yes probability")
+		}
+		if !prob(*a.Yes) {
+			return fmt.Errorf("yes probability %v is outside [0, 1]", *a.Yes)
 		}
 	case sdk.Score:
-		if math.IsNaN(a.Score) || a.Score < q.Min || a.Score > q.Max {
-			return fmt.Errorf("score %v is outside [%v, %v]", a.Score, q.Min, q.Max)
+		if a.Score == nil || a.Choice != "" || a.Yes != nil || len(a.Probabilities) > 0 {
+			return fmt.Errorf("a score answer needs exactly a score")
+		}
+		if v := *a.Score; math.IsNaN(v) || v < q.Min || v > q.Max {
+			return fmt.Errorf("score %v is outside [%v, %v]", v, q.Min, q.Max)
 		}
 	}
 	return nil
@@ -132,4 +145,31 @@ func sortedKeys[V any](m map[string]V) []string {
 	}
 	sort.Strings(ks)
 	return ks
+}
+
+// factRE is what a structural fact string may look like: identifiers and short descriptions built
+// from them ("the result of IsExpired", "counter"). Quotes, braces, operators and newlines mean
+// source text was put in the wrong field.
+var factRE = regexp.MustCompile(`^[A-Za-z0-9_ .,/()-]{0,120}$`)
+
+// checkFact refuses a fact that is not a scalar or a plain short string. Trusted extractor code can
+// still mislabel source as a fact; this catches the common shapes, it is not a sandbox.
+func checkFact(k string, v any) error {
+	switch v := v.(type) {
+	case bool, int, int64, float64:
+		return nil
+	case string:
+		if !factRE.MatchString(v) {
+			return fmt.Errorf("fact %q does not look structural (%q); send it as prose or source", k, v)
+		}
+		return nil
+	case []string:
+		for _, s := range v {
+			if err := checkFact(k, s); err != nil {
+				return err
+			}
+		}
+		return nil
+	}
+	return fmt.Errorf("fact %q has unsupported type %T", k, v)
 }

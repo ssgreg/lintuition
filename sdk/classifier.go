@@ -87,10 +87,11 @@ type Answer struct {
 	Choice string
 	// Probabilities are per-option probabilities of a Choice question, if the backend provides them.
 	Probabilities map[string]float64
-	// Yes is the probability of yes for a Noul question.
-	Yes float64
-	// Score is the value of a Score question.
-	Score float64
+	// Yes is the probability of yes for a Noul question; nil for any other kind. A pointer, so a
+	// missing value is not read as 0.
+	Yes *float64
+	// Score is the value of a Score question; nil for any other kind.
+	Score *float64
 	// Confidence is what the backend reports as its confidence, and ConfidenceMeaning says what that
 	// number is. A threshold must name the field it reads; the two are not interchangeable.
 	Confidence        *float64

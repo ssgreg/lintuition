@@ -53,6 +53,8 @@ func TestDecide(t *testing.T) {
 	}{
 		{counter, choice("current", 0.9), true, false},
 		{counter, choice("total", 0.9), false, false},
+		{counter, choice("total", 0.3), false, true},
+		{counter, map[string]sdk.Answer{"kind": {QuestionID: "kind", Choice: "total"}}, false, true},
 		{counter, choice("current", 0.6), false, true},
 		{counter, choice("unclear", 0.9), false, true},
 		{counter, map[string]sdk.Answer{"kind": {QuestionID: "kind", Choice: "current"}}, false, true},

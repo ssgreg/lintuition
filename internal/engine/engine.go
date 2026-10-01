@@ -291,8 +291,10 @@ func evidence(cl string, answers map[string]sdk.Answer) *report.Evidence {
 			if p, ok := a.Probability(a.Choice); ok {
 				ev.Scores[id] = p
 			}
-		default:
-			ev.Scores[id] = a.Yes
+		case a.Yes != nil:
+			ev.Scores[id] = *a.Yes
+		case a.Score != nil:
+			ev.Scores[id] = *a.Score
 		}
 	}
 	return ev

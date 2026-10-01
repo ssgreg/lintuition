@@ -178,15 +178,16 @@ func (r *rule) Decide(c *sdk.Candidate, answers map[string]sdk.Answer) sdk.Decis
 		return sdk.Abstain("the Help does not say what kind of value it is")
 	}
 	kind := c.Local["kind"]
-	if a.Choice == expected[kind] {
-		return sdk.Clean()
-	}
+	// Weak support abstains whichever way the answer goes, so "clean" means as much as "finding".
 	p, ok := a.Probability(a.Choice)
 	if !ok {
 		return sdk.Abstain("the classifier gave no probability for its answer")
 	}
 	if p < r.threshold {
 		return sdk.Abstain(fmt.Sprintf("answer %s at %.2f is below the threshold %.2f", a.Choice, p, r.threshold))
+	}
+	if a.Choice == expected[kind] {
+		return sdk.Clean()
 	}
 	return sdk.Report("%s Help describes %s, not %s: %q", kind, describe[a.Choice], describe[expected[kind]], clip(c.Local["help"], 80))
 }

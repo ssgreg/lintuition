@@ -1,0 +1,27 @@
+version: "2"
+
+linters:
+  default: none
+  enable: [metric-type-vs-help, premature-success, table-case-vs-expectation]
+
+semantic:
+  classifier: fake
+  classifiers:
+    fake:
+      # Every question must be scripted: an unscripted one fails the run instead of passing quietly.
+      unmatched: error
+      rules:
+        # metric-type-vs-help
+        - {question: kind, when: "Disk I/O utilization", choice: current, probability: 0.9}
+        - {question: kind, when: "Total seconds spent", choice: total, probability: 0.95}
+        - {question: kind, when: "since the process started", choice: total, probability: 0.9}
+        - {question: kind, when: "running now", choice: current, probability: 0.95}
+        - {question: kind, when: "See the runbook", choice: unclear, probability: 0.8}
+        # premature-success
+        - {question: claim, when: "config saved to disk", choice: completed, probability: 0.7}
+        - {question: claim, when: "saving config", choice: starting, probability: 0.9}
+        - {question: claim, when: "upload 3 of 5", choice: progress, probability: 0.9}
+        # table-case-vs-expectation
+        - {question: outcome, when: "expired when the deadline", choice: "true", probability: 0.95}
+        - {question: outcome, when: "not expired before the deadline", choice: "false", probability: 0.95}
+        - {question: outcome, when: "passed=false", choice: unstated, probability: 0.9}
