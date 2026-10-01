@@ -2,7 +2,7 @@ version: "2"
 
 linters:
   default: none
-  enable: [metric-type-vs-help, premature-success, table-case-vs-expectation, log-sensitive-field, log-key-value-role]
+  enable: [metric-type-vs-help, premature-success, table-case-vs-expectation, log-sensitive-field, log-key-value-role, normal-event-at-error]
 
 semantic:
   classifier: fake
@@ -32,7 +32,13 @@ semantic:
         - {linter: log-sensitive-field, question: role, when: "value req.User", choice: personal, probability: 0.9}
         - {linter: log-sensitive-field, question: role, when: "value req.TokenID", choice: public, probability: 0.9}
         - {linter: log-sensitive-field, question: role, when: "\"message\":\"retrying upload\"", choice: public, probability: 0.95}
+        - {linter: log-sensitive-field, question: role, when: "\"message\":\"cache miss, loading from the database\"", choice: public, probability: 0.9}
+        - {linter: log-sensitive-field, question: role, when: "\"message\":\"disk quota exceeded, uploads are paused\"", choice: public, probability: 0.9}
+        - {linter: log-sensitive-field, question: role, when: "\"message\":\"failed to save the upload\"", choice: public, probability: 0.9}
         # log-key-value-role
         - {linter: log-key-value-role, question: role, when: "key remaining_attempts, value elapsedAttempts", choice: conflict, probability: 0.9}
         - {linter: log-key-value-role, question: role, when: "key attempts_made, value elapsedAttempts", choice: same, probability: 0.9}
         - {linter: log-key-value-role, question: role, when: "key remaining_attempts, value v,", choice: insufficient, probability: 0.9}
+        # normal-event-at-error
+        - {linter: normal-event-at-error, question: event, when: "cache miss, loading from the database", choice: routine, probability: 0.95}
+        - {linter: normal-event-at-error, question: event, when: "disk quota exceeded, uploads are paused", choice: degradation, probability: 0.9}

@@ -10,6 +10,7 @@ import (
 	_ "github.com/ssgreg/lintuition/linters/logkeyrole"
 	_ "github.com/ssgreg/lintuition/linters/logsensitive"
 	_ "github.com/ssgreg/lintuition/linters/metrictypevshelp"
+	_ "github.com/ssgreg/lintuition/linters/normalaterror"
 	_ "github.com/ssgreg/lintuition/linters/prematuresuccess"
 	_ "github.com/ssgreg/lintuition/linters/tablecase"
 )
