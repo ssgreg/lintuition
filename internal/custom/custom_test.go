@@ -28,6 +28,8 @@ func TestManifestValidation(t *testing.T) {
 		"version: v0.1.0\nplugins: [{module: a.com/x, import: b.com/y, version: v1.0.0}]\n":            "not inside module",
 		"version: v0.1.0\nplugins: [{module: a.com/x, version: v1.0.0, extra: 1}]\n":                   "field extra not found",
 		"version: v0.1.0\nname: ../evil\nplugins: [{module: a.com/x, version: v1.0.0}]\n":              "name",
+		"version: v0.1.0\nplugins: [{module: a.com/x, version: v1.0.0}]\n---\nversion: v0.2.0\n":       "only one YAML document",
+		"version: v0.1.0\nplugins: [{module: a.com/x/v2, version: v1.0.0}]\n":                          "plugins[0].version",
 	} {
 		if _, err := Load(write(t, body)); err == nil || !strings.Contains(err.Error(), want) {
 			t.Errorf("%q: got %v, want %q", body, err, want)
@@ -51,7 +53,7 @@ func TestGenerate(t *testing.T) {
 			t.Errorf("go.mod lacks %q:\n%s", want, mod)
 		}
 	}
-	for _, want := range []string{`_ "example.com/p/lint"`, `_ "example.com/q"`, `_ "github.com/ssgreg/lintuition/builtin"`, `"example.com/p v1.2.3"`} {
+	for _, want := range []string{`_ "example.com/p/lint"`, `_ "example.com/q"`, `_ "github.com/ssgreg/lintuition/builtin"`, "cli.Plugins = plugins"} {
 		if !strings.Contains(string(main), want) {
 			t.Errorf("main.go lacks %q:\n%s", want, main)
 		}
@@ -91,5 +93,89 @@ func TestBuildWithExamplePlugins(t *testing.T) {
 	res, err := cmd.CombinedOutput()
 	if code := cmd.ProcessState.ExitCode(); code != 1 || !strings.Contains(string(res), "todo.go:3:1: TODO names no owner, ticket or date (todo-owner)") || strings.Contains(string(res), "todo.go:6") {
 		t.Fatalf("exit %d\n%s", code, res)
+	}
+}
+
+func TestLocalVersionFollowsTheMajor(t *testing.T) {
+	for path, prefix := range map[string]string{"example.com/p": "v0.0.0-", "example.com/p/v2": "v2.0.0-", "example.com/p/v3": "v3.0.0-", "gopkg.in/yaml.v3": "v3.0.0-"} {
+		if v := localVersion(path); !strings.HasPrefix(v, prefix) {
+			t.Errorf("localVersion(%q) = %q, want prefix %q", path, v, prefix)
+		}
+	}
+}
+
+func TestResolvedRejectsDrift(t *testing.T) {
+	m := &Manifest{Version: "v0.1.0", Plugins: []Plugin{{Module: "example.com/pin", Version: "v1.0.0"}, {Module: "example.com/loc", Path: "/src/loc"}}}
+	mods := map[string]listedModule{
+		lintuitionModule:  {Path: lintuitionModule, Version: "v0.1.0"},
+		"example.com/pin": {Path: "example.com/pin", Version: "v1.1.0"},
+		"example.com/loc": {Path: "example.com/loc", Replace: &struct{ Path, Version string }{Path: "/src/loc"}},
+	}
+	if _, err := m.resolved(mods); err == nil || !strings.Contains(err.Error(), "selects v1.1.0, not the pinned v1.0.0") {
+		t.Fatalf("drift: %v", err)
+	}
+	mods["example.com/pin"] = listedModule{Path: "example.com/pin", Version: "v1.0.0"}
+	lines, err := m.resolved(mods)
+	if err != nil || strings.Join(lines, ";") != "example.com/pin v1.0.0;example.com/loc local /src/loc" {
+		t.Fatalf("%v %v", lines, err)
+	}
+}
+
+func buildManifest(t *testing.T, root, extra string, plugins ...string) (*Manifest, error) {
+	t.Helper()
+	body := "path: " + root + "\ndestination: " + t.TempDir() + "\n" + extra + "plugins:\n"
+	for _, p := range plugins {
+		body += p + "\n"
+	}
+	return Load(write(t, body))
+}
+
+func TestBuildRejectsBadPlugins(t *testing.T) {
+	if testing.Short() {
+		t.Skip("builds binaries")
+	}
+	root, _ := filepath.Abs("../..")
+	// A local /v2 plugin that registers a classifier named like a built-in.
+	plug := t.TempDir()
+	os.WriteFile(filepath.Join(plug, "go.mod"), []byte("module example.com/dup/v2\n\ngo 1.26\n\nrequire github.com/ssgreg/lintuition v0.0.0\n\nreplace github.com/ssgreg/lintuition => "+root+"\n"), 0o644)
+	os.WriteFile(filepath.Join(plug, "dup.go"), []byte(`package dup
+
+import (
+	"context"
+
+	"github.com/ssgreg/lintuition/sdk"
+)
+
+type c struct{}
+
+func (c) Capabilities() sdk.Capabilities { return sdk.Capabilities{Kinds: []sdk.Kind{sdk.Noul}, Local: true} }
+func (c) Classify(context.Context, sdk.Request) (sdk.Response, error) { return sdk.Response{}, nil }
+
+func init() {
+	sdk.RegisterClassifier(sdk.ClassifierFactory{Name: "fake", New: func(any) (sdk.Classifier, error) { return c{}, nil }})
+}
+`), 0o644)
+	cmd := exec.Command("go", "mod", "tidy")
+	cmd.Dir, cmd.Env = plug, append(os.Environ(), "GOWORK=off")
+	if out, err := cmd.CombinedOutput(); err != nil {
+		t.Fatalf("%v\n%s", err, out)
+	}
+	m, err := buildManifest(t, root, "", "  - {module: example.com/dup/v2, path: "+plug+"}")
+	if err != nil {
+		t.Fatal(err)
+	}
+	var log strings.Builder
+	_, err = m.Build(context.Background(), &log)
+	if err == nil || !strings.Contains(err.Error(), "does not start") || !strings.Contains(err.Error(), `"fake" registered twice`) {
+		t.Fatalf("a duplicate registration must fail the build (and the /v2 path must get that far): %v\n%s", err, log.String())
+	}
+	if _, err := os.Stat(filepath.Join(m.abs(m.Destination), m.Name)); !os.IsNotExist(err) {
+		t.Fatal("a binary that cannot start must not be left at the target")
+	}
+	// A directory where the binary should go.
+	m, _ = buildManifest(t, root, "name: output\n", "  - {module: example.com/lintuition-keywords, path: "+filepath.Join(root, "examples/plugins/keywords")+"}")
+	os.MkdirAll(filepath.Join(m.abs(m.Destination), "output"), 0o755)
+	if _, err := m.Build(context.Background(), &log); err == nil || !strings.Contains(err.Error(), "is a directory") {
+		t.Fatalf("directory at the target: %v", err)
 	}
 }
