@@ -156,7 +156,7 @@ func runCmd(code *int) *cobra.Command {
 			if err := report.Write(c, res.Issues, res.Run, cmd.OutOrStdout(), cmd.ErrOrStderr()); err != nil {
 				return err
 			}
-			summary(cmd.ErrOrStderr(), res, dryRun)
+			summary(cmd.ErrOrStderr(), res, dryRun, c.ShowStats())
 			switch {
 			case res.Run.Incomplete:
 				*code = ExitIncomplete
@@ -184,8 +184,8 @@ func runCmd(code *int) *cobra.Command {
 	return cmd
 }
 
-func summary(w io.Writer, res *engine.Result, dryRun bool) {
-	var cand, asked, abst, skip, fail, planned int
+func summary(w io.Writer, res *engine.Result, dryRun, stats bool) {
+	var cand, asked, abst, skip, fail, planned, unsup int
 	for _, l := range res.Run.Linters {
 		cand += l.Candidates
 		asked += l.Asked
@@ -193,18 +193,22 @@ func summary(w io.Writer, res *engine.Result, dryRun bool) {
 		skip += l.Skipped
 		fail += l.Failed
 		planned += l.Planned
+		unsup += l.Unsupported
 	}
-	if dryRun {
+	switch {
+	case !stats && !dryRun:
+	case dryRun:
 		fmt.Fprintf(w, "dry run: %d packages, %d candidates: %d requests planned, %d skipped, %d failed",
 			res.Run.Stats.Packages, cand, planned, skip, fail)
-	} else {
-		fmt.Fprintf(w, "%d issue(s). %d packages, %d candidates: %d asked, %d abstained, %d skipped, %d failed. %d requests",
-			len(res.Issues), res.Run.Stats.Packages, cand, asked, abst, skip, fail, res.Run.Stats.Requests)
+		fmt.Fprintln(w)
+	default:
+		fmt.Fprintf(w, "%d issue(s). %d packages, %d candidates: %d asked, %d abstained, %d skipped, %d unsupported, %d failed. %d requests",
+			len(res.Issues), res.Run.Stats.Packages, cand, asked, abst, skip, unsup, fail, res.Run.Stats.Requests)
+		if res.Run.Stats.CostUSD > 0 {
+			fmt.Fprintf(w, ", $%.4f", res.Run.Stats.CostUSD)
+		}
+		fmt.Fprintln(w)
 	}
-	if res.Run.Stats.CostUSD > 0 {
-		fmt.Fprintf(w, ", $%.4f", res.Run.Stats.CostUSD)
-	}
-	fmt.Fprintln(w)
 	if res.Run.Incomplete {
 		fmt.Fprintln(w, "INCOMPLETE run:")
 		for _, p := range res.Run.Problems {

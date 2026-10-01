@@ -27,9 +27,15 @@ func (c *Config) Select(registry []sdk.Linter) ([]Enabled, error) {
 			}
 		}
 	}
+	// Settings are validated for every linter they name, enabled or not, so a typo in a shared
+	// config fails now and not the day someone enables the linter.
 	for n := range c.Linters.Settings {
-		if _, ok := byName[n]; !ok {
+		l, ok := byName[n]
+		if !ok {
 			return nil, fmt.Errorf("linters.settings: unknown linter %q", n)
+		}
+		if _, err := c.rule(l); err != nil {
+			return nil, err
 		}
 	}
 	on := map[string]bool{}
@@ -62,25 +68,34 @@ func (c *Config) Select(registry []sdk.Linter) ([]Enabled, error) {
 	sort.Strings(names)
 	out := make([]Enabled, 0, len(names))
 	for _, n := range names {
-		l := byName[n]
-		var settings any
-		if l.NewSettings != nil {
-			settings = l.NewSettings()
-			if node, ok := c.Linters.Settings[n]; ok {
-				if err := DecodeNode(node, settings); err != nil {
-					return nil, fmt.Errorf("linters.settings.%s: %w", n, err)
-				}
-			}
-		} else if _, ok := c.Linters.Settings[n]; ok {
-			return nil, fmt.Errorf("linters.settings.%s: the linter takes no settings", n)
-		}
-		r, err := l.New(settings)
+		r, err := c.rule(byName[n])
 		if err != nil {
-			return nil, fmt.Errorf("linter %s: %w", n, err)
+			return nil, err
 		}
-		out = append(out, Enabled{Linter: l, Rule: r})
+		out = append(out, Enabled{Linter: byName[n], Rule: r})
 	}
 	return out, nil
+}
+
+// rule decodes a linter's settings strictly and builds its rule.
+func (c *Config) rule(l sdk.Linter) (sdk.Rule, error) {
+	var settings any
+	node, has := c.Linters.Settings[l.Name]
+	if l.NewSettings != nil {
+		settings = l.NewSettings()
+		if has {
+			if err := DecodeNode(node, settings); err != nil {
+				return nil, fmt.Errorf("linters.settings.%s: %w", l.Name, err)
+			}
+		}
+	} else if has {
+		return nil, fmt.Errorf("linters.settings.%s: the linter takes no settings", l.Name)
+	}
+	r, err := l.New(settings)
+	if err != nil {
+		return nil, fmt.Errorf("linters.settings.%s: %w", l.Name, err)
+	}
+	return r, nil
 }
 
 // Classifier builds the configured classifier backend. It returns nil, nil when none is configured.

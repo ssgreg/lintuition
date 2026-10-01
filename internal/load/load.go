@@ -59,6 +59,11 @@ func Run(ctx context.Context, opts Options, analyzers []*analysis.Analyzer) (*Re
 		return nil, fmt.Errorf("load packages: %w", err)
 	}
 	res := &Result{Candidates: map[*analysis.Analyzer][]*sdk.Candidate{}}
+	if len(pkgs) == 0 {
+		// An empty match analyses nothing; a mistyped CI target must not pass as clean.
+		res.Problems = append(res.Problems, Problem{Package: strings.Join(patterns, " "), Err: "no packages matched"})
+		return res, nil
+	}
 	var good []*packages.Package
 	for _, p := range variants(pkgs) {
 		if len(p.Errors) > 0 {

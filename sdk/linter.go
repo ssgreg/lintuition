@@ -25,6 +25,10 @@ type Candidate struct {
 	Payload Payload
 	// Local holds facts the rule's Decide needs that are never sent.
 	Local map[string]string
+	// Unsupported, when set, says why the analyzer saw the shape but could not extract the facts (a
+	// message built at run time, say). Such a candidate is never asked; it is counted as unsupported, so
+	// a run shows what it did not cover instead of looking clean.
+	Unsupported string
 }
 
 // Payload is the outbound state of a candidate. Every field is one of three kinds, and the configured

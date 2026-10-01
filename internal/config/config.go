@@ -10,6 +10,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"math"
 	"os"
 	"path/filepath"
 	"time"
@@ -45,7 +46,6 @@ type Run struct {
 	ModulesDownloadMode string `yaml:"modules-download-mode"`
 	// RelativePathMode is how report paths are made relative: cfg, wd, gomod, gitroot.
 	RelativePathMode string `yaml:"relative-path-mode"`
-	Concurrency      int    `yaml:"concurrency"`
 }
 
 // Linters is the `linters` section.
@@ -98,9 +98,10 @@ type SeverityRule struct {
 
 // Output is the `output` section.
 type Output struct {
-	Formats   Formats  `yaml:"formats"`
-	SortOrder []string `yaml:"sort-order"`
-	ShowStats *bool    `yaml:"show-stats"`
+	Formats Formats `yaml:"formats"`
+	// ShowStats prints the run summary to stderr (default true). Problems that make a run
+	// incomplete are printed whatever it says.
+	ShowStats *bool `yaml:"show-stats"`
 }
 
 // Formats is `output.formats`: each set format writes to its own path (stdout, stderr or a file).
@@ -114,7 +115,6 @@ type TextFormat struct {
 	Path             string `yaml:"path"`
 	PrintLinterName  *bool  `yaml:"print-linter-name"`
 	PrintIssuedLines *bool  `yaml:"print-issued-lines"`
-	Colors           *bool  `yaml:"colors"`
 }
 
 // PathFormat is a format with only a destination.
@@ -201,7 +201,10 @@ func Load(path string) (*Config, error) {
 		if err := decodeStrict(bytes.NewReader(b), c); err != nil {
 			return nil, fmt.Errorf("%s: %w", path, err)
 		}
-		c.Path = path
+		// Absolute, so cfg-relative report paths do not depend on how -c was spelled.
+		if c.Path, err = filepath.Abs(path); err != nil {
+			return nil, err
+		}
 	}
 	c.applyDefaults()
 	if err := c.validate(); err != nil {
@@ -218,6 +221,14 @@ func decodeStrict(r io.Reader, v any) error {
 	dec.KnownFields(true)
 	if err := dec.Decode(v); err != nil && !errors.Is(err, io.EOF) {
 		return err
+	}
+	// A second document would be silently ignored, and with it whatever policy it sets.
+	var extra yaml.Node
+	if err := dec.Decode(&extra); !errors.Is(err, io.EOF) {
+		if err != nil {
+			return err
+		}
+		return fmt.Errorf("line %d: only one YAML document is allowed", extra.Line)
 	}
 	return nil
 }
@@ -285,8 +296,14 @@ func (c *Config) validate() error {
 	if c.Run.IssuesExitCode != nil && (*c.Run.IssuesExitCode < 0 || *c.Run.IssuesExitCode == 2 || *c.Run.IssuesExitCode > 255) {
 		return fmt.Errorf("run.issues-exit-code: %d is reserved or out of range (2 means an incomplete run)", *c.Run.IssuesExitCode)
 	}
-	if c.Semantic.Budget.MaxRequests < 0 || c.Semantic.Budget.MaxCostUSD < 0 {
-		return errors.New("semantic.budget: caps must not be negative")
+	if c.Semantic.Budget.MaxRequests < 0 {
+		return errors.New("semantic.budget.max-requests: must not be negative")
+	}
+	if cost := c.Semantic.Budget.MaxCostUSD; math.IsNaN(cost) || math.IsInf(cost, 0) || cost < 0 {
+		return fmt.Errorf("semantic.budget.max-cost-usd: %v must be a finite number, 0 or more", cost)
+	}
+	if err := c.Output.Formats.checkDestinations(); err != nil {
+		return err
 	}
 	if c.Semantic.Concurrency < 1 {
 		return errors.New("semantic.concurrency: must be at least 1")
@@ -309,3 +326,47 @@ func (c *Config) Tests() bool {
 
 // Revalidate checks the config again after command-line flags changed it.
 func (c *Config) Revalidate() error { return c.validate() }
+
+// checkDestinations refuses two formats writing to one place, and machine-readable output on stderr,
+// which carries the run summary and problems.
+func (f Formats) checkDestinations() error {
+	seen := map[string]string{}
+	add := func(format, path string) error {
+		key := path
+		switch path {
+		case "", "stdout":
+			key = "stdout"
+		case "stderr":
+			if format != "text" {
+				return fmt.Errorf("output.formats.%s.path: stderr carries the run summary; use stdout or a file", format)
+			}
+		default:
+			abs, err := filepath.Abs(path)
+			if err != nil {
+				return err
+			}
+			key = abs
+		}
+		if other, ok := seen[key]; ok {
+			return fmt.Errorf("output.formats.%s.path: %s already gets the %s output", format, path, other)
+		}
+		seen[key] = format
+		return nil
+	}
+	if f.Text != nil {
+		if err := add("text", f.Text.Path); err != nil {
+			return err
+		}
+	}
+	if f.JSON != nil {
+		if err := add("json", f.JSON.Path); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+// ShowStats reports whether the run summary is printed (default true).
+func (c *Config) ShowStats() bool {
+	return c.Output.ShowStats == nil || *c.Output.ShowStats
+}

@@ -93,9 +93,15 @@ func Run(ctx context.Context, o Options) (*Result, error) {
 		st := report.LinterStatus{Name: e.Linter.Name, Enabled: true}
 		var jobs []*job
 		for _, cand := range loaded.Candidates[e.Linter.Analyzer] {
-			cand.Pos.Filename = rel(base, cand.Pos.Filename)
+			// Files are read by their absolute name; only the reported name is made relative.
+			abs := cand.Pos.Filename
+			cand.Pos.Filename = rel(base, abs)
 			st.Candidates++
-			if proc.Covers(e.Linter.Name, cand.Pos.Filename) || isGenerated(c, generated, filepath.Join(base, cand.Pos.Filename)) {
+			if cand.Unsupported != "" {
+				st.Unsupported++
+				continue
+			}
+			if proc.Covers(e.Linter.Name, cand.Pos.Filename) || isGenerated(c, generated, abs) {
 				st.Skipped++
 				continue
 			}

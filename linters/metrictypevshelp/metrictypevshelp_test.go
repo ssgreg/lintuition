@@ -18,6 +18,10 @@ func TestExtraction(t *testing.T) {
 			if len(c.Payload.Facts) > 0 || len(c.Payload.Source) > 0 {
 				t.Errorf("%s: only the Help may be sent, payload %+v", c.Subject, c.Payload)
 			}
+			if c.Unsupported != "" {
+				got = append(got, fmt.Sprintf("%d %s unsupported: %s", c.Pos.Line, c.Subject, c.Unsupported))
+				continue
+			}
 			got = append(got, fmt.Sprintf("%d %s %s %q", c.Pos.Line, c.Subject, c.Local["kind"], c.Payload.Prose["help"]))
 		}
 	}
@@ -26,6 +30,7 @@ func TestExtraction(t *testing.T) {
 		`16 in_flight gauge "Requests being served now."`,
 		`17 latency_seconds histogram "Latency."`,
 		`18 size_bytes summary "Sizes."`,
+		`19 dynamic_total unsupported: Help is built at run time`,
 	}
 	if strings.Join(got, "\n") != strings.Join(want, "\n") {
 		t.Fatalf("candidates:\n%s\nwant:\n%s", strings.Join(got, "\n"), strings.Join(want, "\n"))

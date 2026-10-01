@@ -55,6 +55,10 @@ severity:
       linters: [metric-type-vs-help]
 
 output:
+  # Print the run summary to stderr. Problems that make a run incomplete are printed regardless.
+  # Default: true.
+  show-stats: true
+  # Each format needs its own destination; machine-readable formats cannot use stderr.
   formats:
     # Default when no format is set: text to stdout.
     text:

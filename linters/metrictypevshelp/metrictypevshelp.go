@@ -64,15 +64,11 @@ func init() {
 		Analyzer:    Analyzer,
 		NewSettings: func() any { return &Settings{} },
 		New: func(s any) (sdk.Rule, error) {
-			st := s.(*Settings)
-			r := &rule{threshold: 0.8}
-			if st.Threshold != nil {
-				if *st.Threshold <= 0 || *st.Threshold > 1 {
-					return nil, fmt.Errorf("threshold %v is outside (0, 1]", *st.Threshold)
-				}
-				r.threshold = *st.Threshold
+			t, err := sdk.Threshold(s.(*Settings).Threshold, 0.8)
+			if err != nil {
+				return nil, err
 			}
-			return r, nil
+			return &rule{threshold: t}, nil
 		},
 	})
 }
@@ -105,19 +101,37 @@ func run(pass *analysis.Pass) (any, error) {
 				name = v
 			}
 		}
-		// A Help built at run time is not evidence we can read; an empty one is promlint's business.
-		if !helpKnown || strings.TrimSpace(help) == "" {
-			return
-		}
 		c := &sdk.Candidate{
 			Pos:     pass.Fset.Position(lit.Pos()),
 			Subject: name,
 			Local:   map[string]string{"kind": kind, "help": help},
 		}
+		switch {
+		case !hasHelp(lit):
+			// No Help at all is promlint's business.
+			return
+		case !helpKnown:
+			c.Unsupported = "Help is built at run time"
+			out = append(out, c)
+			return
+		case strings.TrimSpace(help) == "":
+			return
+		}
 		c.Payload.AddProse("help", help)
 		out = append(out, c)
 	})
 	return out, nil
+}
+
+func hasHelp(lit *ast.CompositeLit) bool {
+	for _, el := range lit.Elts {
+		if kv, ok := el.(*ast.KeyValueExpr); ok {
+			if k, ok := kv.Key.(*ast.Ident); ok && k.Name == "Help" {
+				return true
+			}
+		}
+	}
+	return false
 }
 
 // metricKind resolves the literal's type by object identity, so a renamed import or a local alias of

@@ -27,6 +27,8 @@ type LinterStatus struct {
 	Asked      int    `json:"Asked"`
 	Abstained  int    `json:"Abstained"`
 	Skipped    int    `json:"Skipped"`
+	// Unsupported counts shapes the analyzer saw but could not extract facts for.
+	Unsupported int `json:"Unsupported"`
 	// Planned counts the requests a dry run would have sent.
 	Planned int `json:"Planned"`
 	Failed  int `json:"Failed"`
