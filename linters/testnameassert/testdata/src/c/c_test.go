@@ -314,3 +314,28 @@ func TestValidateAcceptsConverted(t *testing.T) { // 39 candidate: a conversion 
 		t.Fatal(error(err))
 	}
 }
+
+func errFn() error { return ErrEmpty }
+
+func TestValidateAcceptsErrorText(t *testing.T) { // 40 candidate: err.Error() on the asserted error
+	err := Validate("x")
+	if err != nil {
+		t.Log(err.Error())
+		t.Fatal(err.Error())
+	}
+}
+
+func TestValidateAcceptsOtherText(t *testing.T) { // 41 unsupported: Error() on a different error
+	other := ErrEmpty
+	err := Validate("x")
+	if err != nil {
+		t.Fatal(other.Error())
+	}
+}
+
+func TestValidateAcceptsCallText(t *testing.T) { // 42 unsupported: Error() on a call result
+	err := Validate("x")
+	if err != nil {
+		t.Fatal(errFn().Error())
+	}
+}
