@@ -117,6 +117,7 @@ person-written text does leave the machine when the backend is remote.
 
 | linter | checks |
 |---|---|
+| `log-sensitive-field` | a structured log field that logs a secret (token, password, key material) as is |
 | `metric-type-vs-help` | Prometheus metric Help that describes a different kind of value than the metric type records |
 | `premature-success` | a log line reports success before the call that can still fail |
 | `table-case-vs-expectation` | a table test case whose name says the opposite of its boolean expectation |

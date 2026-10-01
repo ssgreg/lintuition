@@ -26,6 +26,9 @@ linters:
     metric-type-vs-help:
       # Minimum probability of the classifier's answer for a finding. Default: 0.8.
       threshold: 0.8
+    log-sensitive-field:
+      # Minimum probability that the most sensitive field value is a secret. Default: 0.85.
+      threshold: 0.85
   exclusions:
     # Generated files: lax (default; also loose "do not edit" markers), strict (the standard header only), disable.
     generated: lax

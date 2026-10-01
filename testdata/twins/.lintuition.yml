@@ -2,7 +2,7 @@ version: "2"
 
 linters:
   default: none
-  enable: [metric-type-vs-help, premature-success, table-case-vs-expectation]
+  enable: [metric-type-vs-help, premature-success, table-case-vs-expectation, log-sensitive-field]
 
 semantic:
   classifier: fake
@@ -27,3 +27,7 @@ semantic:
         - {question: outcome, when: "passed=false", choice: unstated, probability: 0.9}
         - {question: outcome, when: "whether expired", choice: "false", probability: 0.95}
         - {question: outcome, when: "whether valid", choice: "true", probability: 0.95}
+        # log-sensitive-field
+        - {linter: log-sensitive-field, question: role, when: "value req.Password", choice: secret, probability: 0.95}
+        - {linter: log-sensitive-field, question: role, when: "value req.User", choice: personal, probability: 0.9}
+        - {linter: log-sensitive-field, question: role, when: "value req.TokenID", choice: public, probability: 0.9}
