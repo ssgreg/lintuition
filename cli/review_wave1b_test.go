@@ -7,6 +7,7 @@ import (
 	"net/http/httptest"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 )
 
@@ -64,6 +65,55 @@ func TestSentinelMarginNeedsTheCompetingProbability(t *testing.T) {
 			code, out, errs := run("run", "./...")
 			if code != tc.code {
 				t.Fatalf("exit %d, want %d\n%s%s", code, tc.code, out, errs)
+			}
+		})
+	}
+}
+
+// unitAnswers answers what a correct classifier would: the unit the wording next to the verb names.
+func unitAnswers(state map[string]any) string {
+	format, _ := state["format"].(string)
+	verb, _ := state["verb"].(string)
+	v := strings.Fields(verb)[0]
+	rest := format[strings.Index(format, v)+len(v):]
+	u := "unspecified"
+	switch {
+	case strings.HasPrefix(rest, " ms"):
+		u = "milliseconds"
+	case strings.HasPrefix(rest, " s"):
+		u = "seconds"
+	}
+	return choice("unit", u, `{"`+u+`":0.99}`)
+}
+
+func TestHumanUnitBindsLikeFmt(t *testing.T) {
+	for _, tc := range []struct {
+		name, call, finding string
+	}{
+		// fmt prints "% seconds; one 1.000000 seconds; two 1000 ms": both units are right.
+		{"human-percent-binding", `fmt.Sprintf("%5% seconds; one %f seconds; two %d ms", d.Seconds(), d.Milliseconds())`, ""},
+		// Millis prints its own number in milliseconds: "elapsed 1000 ms" is right.
+		{"human-stringer-conversion", `fmt.Sprintf("elapsed %v ms", Millis(d.Seconds()))`, ""},
+		{"human-ordinary-mismatch", `fmt.Sprintf("took %.0f ms", d.Seconds())`, "text says milliseconds, the value is in seconds"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			src := `package p
+
+import (
+	"fmt"
+	"time"
+)
+
+type Millis float64
+
+func (m Millis) String() string { return fmt.Sprintf("%.0f", float64(m)*1000) }
+
+func F(d time.Duration) string { return ` + tc.call + ` }
+`
+			jevModule(t, "human-unit-contradiction", src, unitAnswers)
+			code, out, errs := run("run", "./...")
+			if tc.finding == "" && code != 0 || tc.finding != "" && (code != 1 || !strings.Contains(out, tc.finding)) {
+				t.Fatalf("exit %d\n%s%s", code, out, errs)
 			}
 		})
 	}
