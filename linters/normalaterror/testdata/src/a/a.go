@@ -65,3 +65,7 @@ func c13() {
 func c14(err error) {
 	slog.Error("request canceled by client", "err", err) // 14 candidate: an error field does not name a failure in the message
 }
+
+func c15() {
+	slog.Error("planned failover completed successfully") // 15 candidate: a failover is not a failure
+}

@@ -50,7 +50,7 @@ func init() {
 		Name:        Name,
 		Doc:         "an expected routine event (cache miss, retry scheduled, client went away) logged at error level",
 		Standard:    true,
-		Version:     "1",
+		Version:     "2",
 		Analyzer:    Analyzer,
 		NewSettings: func() any { return &Settings{} },
 		New: func(s any) (sdk.Rule, error) {
@@ -102,6 +102,7 @@ func candidate(pass *analysis.Pass, call *ast.CallExpr) *sdk.Candidate {
 var wordRE = regexp.MustCompile(`[a-z]+(?:'[a-z]+)?`)
 
 var failureWords = map[string]bool{
+	"fail": true, "fails": true, "failed": true, "failing": true, "failure": true, "failures": true,
 	"error": true, "errors": true, "err": true, "errored": true, "cannot": true, "can't": true, "cant": true,
 	"couldn't": true, "unable": true, "invalid": true, "panic": true, "panicked": true, "crash": true,
 	"crashed": true, "refused": true, "denied": true, "timeout": true, "timed": true, "abort": true,
@@ -110,11 +111,13 @@ var failureWords = map[string]bool{
 }
 
 // namesFailure reports whether a message says, in its own words, that something failed: failed,
-// error, cannot, unable, could not, timed out. Such a message is an error by its own account.
+// error, cannot, unable, could not, timed out. Such a message is an error by its own account. Words
+// are matched whole: a failover or a failback is an operation, not a failure. A negated failure
+// ("finished without errors") is still read as one, a known limit: such a message is not asked.
 func namesFailure(message string) bool {
 	ws := wordRE.FindAllString(strings.ToLower(message), -1)
 	for i, w := range ws {
-		if failureWords[w] || strings.HasPrefix(w, "fail") {
+		if failureWords[w] {
 			return true
 		}
 		if (w == "could" || w == "can" || w == "did") && i+1 < len(ws) && ws[i+1] == "not" {
