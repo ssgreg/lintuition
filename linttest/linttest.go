@@ -84,23 +84,20 @@ func Run(t testing.TB, dir string, patterns ...string) *Result {
 	}
 	sort.Strings(keys)
 	for _, k := range keys {
-		left := append([]*regexp.Regexp(nil), wants[k]...)
-		for _, is := range got[k] {
-			matched := -1
-			for i, re := range left {
-				if re.MatchString(is.Text) {
-					matched = i
-					break
-				}
+		pats, issues := wants[k], got[k]
+		byPat := match(pats, issues)
+		used := map[int]bool{}
+		for p, i := range byPat {
+			if i < 0 {
+				t.Errorf("%s: no finding matching %q", k, pats[p])
+			} else {
+				used[i] = true
 			}
-			if matched < 0 {
-				t.Errorf("%s: unexpected finding: %s (%s)", k, is.Text, is.FromLinter)
-				continue
-			}
-			left = append(left[:matched], left[matched+1:]...)
 		}
-		for _, re := range left {
-			t.Errorf("%s: no finding matching %q", k, re)
+		for i, is := range issues {
+			if !used[i] {
+				t.Errorf("%s: unexpected finding: %s (%s)", k, is.Text, is.FromLinter)
+			}
 		}
 	}
 	return &Result{Issues: res.Issues, Run: res.Run}
@@ -145,4 +142,41 @@ func readFileWants(dir, p string, out map[string][]*regexp.Regexp) error {
 		}
 	}
 	return sc.Err()
+}
+
+// match pairs patterns with findings one to one, as many as possible (a maximum bipartite
+// matching), so the order of the patterns on a line does not matter. It returns, for each pattern,
+// the index of its finding or -1.
+func match(pats []*regexp.Regexp, issues []report.Issue) []int {
+	ofIssue := make([]int, len(issues))
+	for i := range ofIssue {
+		ofIssue[i] = -1
+	}
+	var try func(p int, seen []bool) bool
+	try = func(p int, seen []bool) bool {
+		for i, is := range issues {
+			if seen[i] || !pats[p].MatchString(is.Text) {
+				continue
+			}
+			seen[i] = true
+			if ofIssue[i] < 0 || try(ofIssue[i], seen) {
+				ofIssue[i] = p
+				return true
+			}
+		}
+		return false
+	}
+	for p := range pats {
+		try(p, make([]bool, len(issues)))
+	}
+	out := make([]int, len(pats))
+	for p := range out {
+		out[p] = -1
+	}
+	for i, p := range ofIssue {
+		if p >= 0 {
+			out[p] = i
+		}
+	}
+	return out
 }

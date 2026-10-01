@@ -93,14 +93,20 @@ func run(pass *analysis.Pass) (any, error) {
 	return out, nil
 }
 
-// ownCalls returns the calls of a function body, not of closures defined in it.
+// ownCalls returns the calls a function body makes: its own, and those of closures it invokes on
+// the spot (func(){...}(), go func(){...}(), defer func(){...}()), whose work may be what a later
+// log reports. Closures only stored or passed on are not looked into.
 func ownCalls(body *ast.BlockStmt) []*ast.CallExpr {
 	var out []*ast.CallExpr
+	invoked := map[*ast.FuncLit]bool{}
 	ast.Inspect(body, func(n ast.Node) bool {
 		switch n := n.(type) {
 		case *ast.FuncLit:
-			return false
+			return invoked[n]
 		case *ast.CallExpr:
+			if fl, ok := ast.Unparen(n.Fun).(*ast.FuncLit); ok {
+				invoked[fl] = true
+			}
 			out = append(out, n)
 		}
 		return true

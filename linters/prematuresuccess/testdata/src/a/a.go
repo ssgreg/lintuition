@@ -138,6 +138,21 @@ func c19(a, b Client) error {
 
 func c20(c Client) error {
 	go func() { _ = c.SaveConfig() }()
-	log.Print("config saved to disk") // 20 candidate: a call inside a closure is not an earlier call of this function
+	log.Print("config saved to disk") // 20 unsupported: a closure run on the spot may be what the log reports
+	return c.SaveConfig()
+}
+
+func c21(a, b Client) error {
+	if err := func() error { return a.SaveConfig() }(); err != nil {
+		return err
+	}
+	log.Print("config saved to disk") // 21 unsupported: an invoked closure completed the earlier call
+	return b.SaveConfig()
+}
+
+func c22(c Client) error {
+	retry := func() error { return c.SaveConfig() }
+	_ = retry
+	log.Print("config saved to disk") // 22 candidate: a closure only stored does not run here
 	return c.SaveConfig()
 }

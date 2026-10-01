@@ -242,7 +242,7 @@ func (c *Classifier) Classify(ctx context.Context, req sdk.Request) (sdk.Respons
 	if err != nil {
 		return sdk.Response{}, err
 	}
-	if err := uniqueAnswerKeys(raw); err != nil {
+	if err := noDuplicateKeys(raw); err != nil {
 		return sdk.Response{}, err
 	}
 	var wr wireResponse
@@ -318,39 +318,56 @@ func convert(q sdk.Question, wa wireAnswer) (sdk.Answer, error) {
 	return a, nil
 }
 
-// uniqueAnswerKeys refuses a response whose answers object names a question twice; a JSON decoder
-// would silently keep the last one.
-func uniqueAnswerKeys(raw []byte) error {
-	var top map[string]json.RawMessage
-	if err := json.Unmarshal(raw, &top); err != nil {
-		return errors.New("the response is not a JSON object")
-	}
-	ans, ok := top["answers"]
-	if !ok {
-		return errors.New("the response has no answers")
-	}
-	dec := json.NewDecoder(bytes.NewReader(ans))
-	if t, err := dec.Token(); err != nil || t != json.Delim('{') {
-		return errors.New("the response's answers are not an object")
-	}
-	seen := map[string]bool{}
-	for dec.More() {
+// noDuplicateKeys refuses a response with a repeated key in any JSON object (two "answers", two
+// answers to one question, two "choice" fields): a decoder would silently keep the last one.
+func noDuplicateKeys(raw []byte) error {
+	dec := json.NewDecoder(bytes.NewReader(raw))
+	var walk func() error
+	walk = func() error {
 		t, err := dec.Token()
 		if err != nil {
-			return errors.New("the response's answers are malformed")
+			return err
 		}
-		k, _ := t.(string)
-		if seen[k] {
-			return errors.New("the response answers one question twice")
+		switch t {
+		case json.Delim('{'):
+			seen := map[string]bool{}
+			for dec.More() {
+				kt, err := dec.Token()
+				if err != nil {
+					return err
+				}
+				k, _ := kt.(string)
+				if seen[k] {
+					return errDuplicate
+				}
+				seen[k] = true
+				if err := walk(); err != nil {
+					return err
+				}
+			}
+			_, err = dec.Token()
+			return err
+		case json.Delim('['):
+			for dec.More() {
+				if err := walk(); err != nil {
+					return err
+				}
+			}
+			_, err = dec.Token()
+			return err
 		}
-		seen[k] = true
-		var skip json.RawMessage
-		if err := dec.Decode(&skip); err != nil {
-			return errors.New("the response's answers are malformed")
+		return nil
+	}
+	if err := walk(); err != nil {
+		if errors.Is(err, errDuplicate) {
+			return errors.New("the response repeats a key in one object")
 		}
+		return errors.New("the response is not valid JSON")
 	}
 	return nil
 }
+
+var errDuplicate = errors.New("duplicate key")
 
 // apiError is a failure the service reported, including a redirect, which is never followed. It never carries the request or response body: a
 // service may echo the input, and the input may be private.

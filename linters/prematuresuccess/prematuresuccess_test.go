@@ -66,7 +66,9 @@ func TestExtraction(t *testing.T) {
 		`16 unsupported`,
 		`18 unsupported`,
 		`19 unsupported`,
-		`20 SaveConfig "config saved to disk"`,
+		`20 unsupported`,
+		`21 unsupported`,
+		`22 SaveConfig "config saved to disk"`,
 	}
 	if strings.Join(got, "\n") != strings.Join(want, "\n") {
 		t.Fatalf("candidates:\n%s\n\nwant:\n%s", strings.Join(got, "\n"), strings.Join(want, "\n"))

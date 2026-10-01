@@ -244,6 +244,9 @@ func TestMalformedAnswersRejectedWithoutQuotingThem(t *testing.T) {
 		"mixed":       `{"answers":{"kind":{"type":"choice","choice":"current","noul":0.5},"yes":{"type":"noul","noul":0.5},"lvl":{"type":"score","score":1}}}`,
 		"wrong type":  `{"answers":{"kind":{"type":"` + marker + `"},"yes":{"type":"noul","noul":0.5},"lvl":{"type":"score","score":1}}}`,
 		"bad json":    `{"answers":{"kind":` + marker,
+		"two choices": `{"answers":{"kind":{"type":"choice","choice":"total","choice":"current"},"yes":{"type":"noul","noul":0.5},"lvl":{"type":"score","score":1}}}`,
+		"two envelopes": `{"answers":{"kind":{"type":"choice","choice":"total"},"yes":{"type":"noul","noul":0.5},"lvl":{"type":"score","score":1}},` +
+			`"answers":{"kind":{"type":"choice","choice":"current"},"yes":{"type":"noul","noul":0.5},"lvl":{"type":"score","score":1}}}`,
 	} {
 		s := newServer(t, func(int, map[string]any, http.ResponseWriter) {})
 		s.Config.Handler = http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) { io.WriteString(w, body) })
