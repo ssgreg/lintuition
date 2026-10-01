@@ -63,3 +63,10 @@ func TestHarnessReadsOnlySelectedPackages(t *testing.T) {
 		}
 	}
 }
+
+func TestHarnessMatchesOneToOne(t *testing.T) {
+	errs := runRecorded(t, "../testdata/harness", "./sameline")
+	if len(errs) != 1 || !strings.Contains(errs[0], "sameline/sameline.go:6: unexpected finding") {
+		t.Fatalf("one want must cover one finding, two wants two; got %q", errs)
+	}
+}

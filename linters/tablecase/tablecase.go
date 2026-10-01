@@ -177,6 +177,7 @@ func bindings(pass *analysis.Pass, body *ast.BlockStmt, lit *ast.CompositeLit, t
 		}
 		defs := callDefs(info, rs.Body)
 		bind := func(fieldSide, other ast.Expr) {
+			pos := fieldSide.Pos()
 			f, ok := fieldOf(info, fieldSide, rowObj)
 			if !ok {
 				return
@@ -186,7 +187,7 @@ func bindings(pass *analysis.Pass, body *ast.BlockStmt, lit *ast.CompositeLit, t
 				b = &binding{}
 				out[f.Name()] = b
 			}
-			callee, transformed := resultOf(info, other, defs)
+			callee, transformed := resultOf(info, other, pos, defs)
 			switch {
 			case transformed:
 				b.conflict = "the expectation is compared in a transformed form"
@@ -194,6 +195,9 @@ func bindings(pass *analysis.Pass, body *ast.BlockStmt, lit *ast.CompositeLit, t
 				b.conflict = "the expectation is compared with results of different calls"
 			case callee != nil:
 				b.callee = callee
+			case generic[f.Name()]:
+				// Compared with something whose call is not established: it may be anything.
+				b.conflict = "the expectation is compared with a value not established as one call's result"
 			}
 		}
 		ast.Inspect(rs.Body, func(n ast.Node) bool {
@@ -250,31 +254,71 @@ func fieldOf(info *types.Info, e ast.Expr, row types.Object) (*types.Var, bool) 
 	return f, true
 }
 
-// callDefs maps a variable to the bool-returning call it was defined from in the loop body:
-// got := F(tt.in), or got, err := F(tt.in) at F's bool result.
-func callDefs(info *types.Info, body *ast.BlockStmt) map[types.Object]*types.Func {
-	out := map[types.Object]*types.Func{}
-	ast.Inspect(body, func(n ast.Node) bool {
-		as, ok := n.(*ast.AssignStmt)
-		if !ok || len(as.Rhs) != 1 {
-			return true
-		}
-		call, ok := ast.Unparen(as.Rhs[0]).(*ast.CallExpr)
-		if !ok {
-			return true
-		}
-		fn := facts.Callee(info, call)
-		if fn == nil {
-			return true
-		}
-		res := fn.Type().(*types.Signature).Results()
-		for i, l := range as.Lhs {
-			id, ok := l.(*ast.Ident)
-			if !ok || i >= res.Len() || !isBool(res.At(i).Type()) {
-				continue
-			}
+// def is how a loop variable got its value: from the single bool result of one call.
+type def struct {
+	fn  *types.Func
+	pos token.Pos
+}
+
+// callDefs maps each variable defined in the loop body as `got := F(...)`, where F has exactly one
+// bool result, to that call. A variable written anywhere else in the body (got = !got, got =
+// G(), &got, ++), defined from a call with several bool results, or defined twice, maps to nil: its
+// value at the comparison is not established, so the row is unsupported rather than guessed.
+func callDefs(info *types.Info, body *ast.BlockStmt) map[types.Object]*def {
+	out := map[types.Object]*def{}
+	taint := func(e ast.Expr) {
+		if id, ok := ast.Unparen(e).(*ast.Ident); ok {
 			if obj := info.ObjectOf(id); obj != nil {
-				out[obj] = fn
+				out[obj] = nil
+			}
+		}
+	}
+	ast.Inspect(body, func(n ast.Node) bool {
+		switch n := n.(type) {
+		case *ast.AssignStmt:
+			call, isCall := ast.Unparen(n.Rhs[0]).(*ast.CallExpr)
+			if n.Tok != token.DEFINE || len(n.Rhs) != 1 || !isCall {
+				for _, l := range n.Lhs {
+					taint(l)
+				}
+				return true
+			}
+			fn := facts.Callee(info, call)
+			var slots []int
+			if fn != nil {
+				res := fn.Type().(*types.Signature).Results()
+				for i := 0; i < res.Len(); i++ {
+					if isBool(res.At(i).Type()) {
+						slots = append(slots, i)
+					}
+				}
+			}
+			for i, l := range n.Lhs {
+				id, ok := l.(*ast.Ident)
+				if !ok || id.Name == "_" {
+					continue
+				}
+				obj := info.Defs[id]
+				if obj == nil {
+					taint(l) // := that reuses an existing variable is a write to it
+					continue
+				}
+				if _, seen := out[obj]; seen || fn == nil || len(slots) != 1 || slots[0] != i {
+					out[obj] = nil
+					continue
+				}
+				out[obj] = &def{fn: fn, pos: id.Pos()}
+			}
+		case *ast.IncDecStmt:
+			taint(n.X)
+		case *ast.UnaryExpr:
+			if n.Op == token.AND {
+				taint(n.X)
+			}
+		case *ast.RangeStmt:
+			taint(n.Key)
+			if n.Value != nil {
+				taint(n.Value)
 			}
 		}
 		return true
@@ -282,9 +326,10 @@ func callDefs(info *types.Info, body *ast.BlockStmt) map[types.Object]*types.Fun
 	return out
 }
 
-// resultOf says which call's bool result an expression is, directly or through a variable defined
-// from it; transformed is true for a negation, which flips what the expectation means.
-func resultOf(info *types.Info, e ast.Expr, defs map[types.Object]*types.Func) (*types.Func, bool) {
+// resultOf says which call's single bool result an expression is, directly or through a variable
+// defined from it before the comparison at pos; transformed is true for a negation, which flips
+// what the expectation means.
+func resultOf(info *types.Info, e ast.Expr, pos token.Pos, defs map[types.Object]*def) (*types.Func, bool) {
 	e = ast.Unparen(e)
 	if u, ok := e.(*ast.UnaryExpr); ok && u.Op == token.NOT {
 		return nil, true
@@ -300,7 +345,9 @@ func resultOf(info *types.Info, e ast.Expr, defs map[types.Object]*types.Func) (
 			return fn, false
 		}
 	case *ast.Ident:
-		return defs[info.ObjectOf(e)], false
+		if d := defs[info.ObjectOf(e)]; d != nil && d.pos < pos {
+			return d.fn, false
+		}
 	}
 	return nil, false
 }

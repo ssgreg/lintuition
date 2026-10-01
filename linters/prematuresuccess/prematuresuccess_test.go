@@ -27,6 +27,12 @@ func caseNo(t *testing.T, pos token.Position) string {
 	return strings.Fields(line[i+3:])[0]
 }
 
+func num(s string) int {
+	var n int
+	fmt.Sscan(s, &n)
+	return n
+}
+
 func TestExtraction(t *testing.T) {
 	res := analysistest.Run(t, analysistest.TestData(), Analyzer, "a")
 	var got []string
@@ -34,7 +40,7 @@ func TestExtraction(t *testing.T) {
 	for _, r := range res {
 		cs = append(cs, r.Result.([]*sdk.Candidate)...)
 	}
-	sort.Slice(cs, func(i, j int) bool { return cs[i].Pos.Line < cs[j].Pos.Line })
+	sort.Slice(cs, func(i, j int) bool { return num(caseNo(t, cs[i].Pos)) < num(caseNo(t, cs[j].Pos)) })
 	{
 		for _, c := range cs {
 			n := caseNo(t, c.Pos)
@@ -56,8 +62,11 @@ func TestExtraction(t *testing.T) {
 		`10 SaveConfigCopy "config saved to disk"`,
 		`13 SaveConfig "config saved to disk"`,
 		`14 unsupported`,
-		`16 unsupported`,
 		`15 SaveConfig "config saved to disk"`,
+		`16 unsupported`,
+		`18 unsupported`,
+		`19 unsupported`,
+		`20 SaveConfig "config saved to disk"`,
 	}
 	if strings.Join(got, "\n") != strings.Join(want, "\n") {
 		t.Fatalf("candidates:\n%s\n\nwant:\n%s", strings.Join(got, "\n"), strings.Join(want, "\n"))

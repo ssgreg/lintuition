@@ -142,3 +142,57 @@ func TestBindingNegatives(t *testing.T) {
 		}
 	}
 }
+
+func TestIsExpiredReassigned(t *testing.T) {
+	reassigned := []struct {
+		name string
+		want bool
+	}{
+		{name: "not expired", want: true}, // 17 unsupported: got is negated after the call
+	}
+	for _, tt := range reassigned {
+		got := IsExpired(New(false))
+		got = !got
+		if got != tt.want {
+			t.Fail()
+		}
+	}
+	later := []struct {
+		name string
+		want bool
+	}{
+		{name: "later call", want: true}, // 18 unsupported: got is written again after the comparison
+	}
+	for _, tt := range later {
+		got := Allowed(true)
+		if got != tt.want {
+			t.Fail()
+		}
+		got = IsExpired(New(false))
+		_ = got
+	}
+	slots := []struct {
+		name string
+		want bool
+	}{
+		{name: "second of two booleans", want: true}, // 19 unsupported: Both has two bool results
+	}
+	for _, tt := range slots {
+		_, valid := Both(true)
+		if valid != tt.want {
+			t.Fail()
+		}
+	}
+	ok := []struct {
+		name string
+		want bool
+	}{
+		{name: "through got", want: true}, // 20 candidate: got := Allowed(...), unmodified, compared
+	}
+	for _, tt := range ok {
+		got := Allowed(true)
+		if got != tt.want {
+			t.Fail()
+		}
+	}
+}

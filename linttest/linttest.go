@@ -1,7 +1,8 @@
 // Package linttest runs lintuition over a directory of defect / fixed twins and checks the findings
 // against `// want "regexp"` (or backquoted) comments, like analysistest does for diagnostics.
 //
-// A line with a want comment must get a finding whose text matches; any other finding is
+// A want comment holds one or more patterns, `// want "a" "b"`; each must be matched by its own
+// finding on that line, and every finding must be matched by a pattern. Any other finding is
 // unexpected. A twin without a want comment is the fixed version: it must stay quiet. The directory
 // holds its own .lintuition.yml, which names the classifier: the scripted fake for offline tests, a
 // real backend for an evaluation run.
@@ -30,7 +31,10 @@ type Result struct {
 	Run    report.Run
 }
 
-var wantRE = regexp.MustCompile("// want (`[^`]*`|\"(?:[^\"\\\\]|\\\\.)*\")")
+var (
+	wantRE    = regexp.MustCompile("// want ((?:\\s*(?:`[^`]*`|\"(?:[^\"\\\\]|\\\\.)*\"))+)")
+	patternRE = regexp.MustCompile("`[^`]*`|\"(?:[^\"\\\\]|\\\\.)*\"")
+)
 
 // Run lints the patterns in dir and checks the findings against the want comments. The run must be
 // complete: an incomplete run fails the test, whatever it found.
@@ -80,20 +84,23 @@ func Run(t testing.TB, dir string, patterns ...string) *Result {
 	}
 	sort.Strings(keys)
 	for _, k := range keys {
-		w, issues := wants[k], got[k]
-		switch {
-		case w == nil:
-			for _, is := range issues {
-				t.Errorf("%s: unexpected finding: %s (%s)", k, is.Text, is.FromLinter)
-			}
-		case len(issues) == 0:
-			t.Errorf("%s: no finding, want one matching %q", k, w)
-		default:
-			for _, is := range issues {
-				if !w.MatchString(is.Text) {
-					t.Errorf("%s: finding %q does not match %q", k, is.Text, w)
+		left := append([]*regexp.Regexp(nil), wants[k]...)
+		for _, is := range got[k] {
+			matched := -1
+			for i, re := range left {
+				if re.MatchString(is.Text) {
+					matched = i
+					break
 				}
 			}
+			if matched < 0 {
+				t.Errorf("%s: unexpected finding: %s (%s)", k, is.Text, is.FromLinter)
+				continue
+			}
+			left = append(left[:matched], left[matched+1:]...)
+		}
+		for _, re := range left {
+			t.Errorf("%s: no finding matching %q", k, re)
 		}
 	}
 	return &Result{Issues: res.Issues, Run: res.Run}
@@ -101,8 +108,8 @@ func Run(t testing.TB, dir string, patterns ...string) *Result {
 
 // readWants collects the want comments of the analysed files, the same set the patterns, build tags
 // and test selection gave the engine, keyed by file:line relative to dir.
-func readWants(dir string, files []string) (map[string]*regexp.Regexp, error) {
-	out := map[string]*regexp.Regexp{}
+func readWants(dir string, files []string) (map[string][]*regexp.Regexp, error) {
+	out := map[string][]*regexp.Regexp{}
 	for _, p := range files {
 		if err := readFileWants(dir, p, out); err != nil {
 			return nil, err
@@ -111,7 +118,7 @@ func readWants(dir string, files []string) (map[string]*regexp.Regexp, error) {
 	return out, nil
 }
 
-func readFileWants(dir, p string, out map[string]*regexp.Regexp) error {
+func readFileWants(dir, p string, out map[string][]*regexp.Regexp) error {
 	f, err := os.Open(p)
 	if err != nil {
 		return err
@@ -124,15 +131,18 @@ func readFileWants(dir, p string, out map[string]*regexp.Regexp) error {
 		if m == nil {
 			continue
 		}
-		s, err := strconv.Unquote(m[1])
-		if err != nil {
-			return fmt.Errorf("%s:%d: bad want: %v", rel, n, err)
+		for _, q := range patternRE.FindAllString(m[1], -1) {
+			s, err := strconv.Unquote(q)
+			if err != nil {
+				return fmt.Errorf("%s:%d: bad want: %v", rel, n, err)
+			}
+			re, err := regexp.Compile(s)
+			if err != nil {
+				return fmt.Errorf("%s:%d: bad want: %v", rel, n, err)
+			}
+			k := fmt.Sprintf("%s:%d", rel, n)
+			out[k] = append(out[k], re)
 		}
-		re, err := regexp.Compile(s)
-		if err != nil {
-			return fmt.Errorf("%s:%d: bad want: %v", rel, n, err)
-		}
-		out[fmt.Sprintf("%s:%d", rel, n)] = re
 	}
 	return sc.Err()
 }

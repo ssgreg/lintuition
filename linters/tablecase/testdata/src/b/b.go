@@ -16,3 +16,6 @@ var table = []struct {
 	name string
 	want bool
 }{{name: "expired", want: true}}
+
+// Both returns two booleans.
+func Both(v bool) (bool, bool) { return v, !v }

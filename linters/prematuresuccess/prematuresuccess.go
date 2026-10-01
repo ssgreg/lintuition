@@ -9,13 +9,14 @@
 // Code finds the shape: a log call followed, in the same block, by a statement that keeps an error
 // result (decided by the result's type, not the variable's name), whose callee shares a word with
 // the message. The classifier is asked only whether the message claims that call already completed.
-// When the statement before the log is a fallible call the message also matches, the log may
-// report that one; such a candidate is unsupported.
+// When the function calls, before the log, a function the message also matches, the log may report
+// that one; such a candidate is unsupported.
 package prematuresuccess
 
 import (
 	"fmt"
 	"go/ast"
+	"go/types"
 	"regexp"
 	"strings"
 
@@ -68,30 +69,63 @@ func init() {
 func run(pass *analysis.Pass) (any, error) {
 	ins := pass.ResultOf[inspect.Analyzer].(*inspector.Inspector)
 	var out []*sdk.Candidate
-	ins.Preorder([]ast.Node{(*ast.BlockStmt)(nil), (*ast.CaseClause)(nil), (*ast.CommClause)(nil)}, func(n ast.Node) {
-		var list []ast.Stmt
+	// Each function body, a closure's included, is scanned on its own: its calls, then its blocks.
+	ins.Preorder([]ast.Node{(*ast.FuncDecl)(nil), (*ast.FuncLit)(nil)}, func(n ast.Node) {
+		var body *ast.BlockStmt
 		switch n := n.(type) {
-		case *ast.BlockStmt:
-			list = n.List
-		case *ast.CaseClause:
-			list = n.Body
-		case *ast.CommClause:
-			list = n.Body
+		case *ast.FuncDecl:
+			body = n.Body
+		case *ast.FuncLit:
+			body = n.Body
 		}
-		for i := 0; i+1 < len(list); i++ {
-			var prev ast.Stmt
-			if i > 0 {
-				prev = list[i-1]
-			}
-			if c := candidate(pass, prev, list[i], list[i+1]); c != nil {
-				out = append(out, c)
-			}
+		if body == nil {
+			return
 		}
+		calls := ownCalls(body)
+		walkOwn(body, func(list []ast.Stmt) {
+			for i := 0; i+1 < len(list); i++ {
+				if c := candidate(pass, calls, list[i], list[i+1]); c != nil {
+					out = append(out, c)
+				}
+			}
+		})
 	})
 	return out, nil
 }
 
-func candidate(pass *analysis.Pass, prev, s, next ast.Stmt) *sdk.Candidate {
+// ownCalls returns the calls of a function body, not of closures defined in it.
+func ownCalls(body *ast.BlockStmt) []*ast.CallExpr {
+	var out []*ast.CallExpr
+	ast.Inspect(body, func(n ast.Node) bool {
+		switch n := n.(type) {
+		case *ast.FuncLit:
+			return false
+		case *ast.CallExpr:
+			out = append(out, n)
+		}
+		return true
+	})
+	return out
+}
+
+// walkOwn calls fn with every statement list of a function body, not of closures defined in it.
+func walkOwn(body *ast.BlockStmt, fn func([]ast.Stmt)) {
+	ast.Inspect(body, func(n ast.Node) bool {
+		switch n := n.(type) {
+		case *ast.FuncLit:
+			return false
+		case *ast.BlockStmt:
+			fn(n.List)
+		case *ast.CaseClause:
+			fn(n.Body)
+		case *ast.CommClause:
+			fn(n.Body)
+		}
+		return true
+	})
+}
+
+func candidate(pass *analysis.Pass, calls []*ast.CallExpr, s, next ast.Stmt) *sdk.Candidate {
 	es, ok := s.(*ast.ExprStmt)
 	if !ok {
 		return nil
@@ -125,18 +159,34 @@ func candidate(pass *analysis.Pass, prev, s, next ast.Stmt) *sdk.Candidate {
 		// The message is about something else; asking would only invite a guess.
 		return nil
 	}
-	// A log line right after a fallible call it also matches may report that call, done, before
-	// moving on (reset a, log, reset b). Which one it means is not in the code; do not guess.
-	if prev != nil {
-		if pf, ok := facts.FallibleStmt(pass.TypesInfo, prev); ok && sharesWord(lc.Message, pf.Callee.Name()) {
-			c.Unsupported = "the message may report the call before it"
-			return c
-		}
+	// A log line after an earlier call it also matches may report that call, done, before moving
+	// on (reset a, check, log, reset b). Which one it means is not established; do not guess.
+	if earlierMatch(pass.TypesInfo, calls, call, lc.Message) {
+		c.Unsupported = "the message may report an earlier call"
+		return c
 	}
 	c.Local["message"] = lc.Message
 	c.Payload.AddProse("message", lc.Message)
 	c.Payload.Fact("next_call", fb.Callee.Name())
 	return c
+}
+
+// earlierMatch reports whether the function calls, before the log, a function the message also
+// names, in this block or an enclosing one.
+func earlierMatch(info *types.Info, calls []*ast.CallExpr, log *ast.CallExpr, message string) bool {
+	for _, c := range calls {
+		if c.Pos() >= log.Pos() {
+			continue
+		}
+		fn := facts.Callee(info, c)
+		if fn == nil || !sharesWord(message, fn.Name()) {
+			continue
+		}
+		if _, isLog := facts.AsLogCall(info, c); !isLog {
+			return true
+		}
+	}
+	return false
 }
 
 var stop = map[string]bool{"have": true, "been": true, "with": true, "from": true, "into": true, "that": true, "this": true}
