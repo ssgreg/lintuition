@@ -61,6 +61,10 @@ func TestExtraction(t *testing.T) {
 		`10 Valid "fresh token" doc="this function reports whether the token can still be used." want=true`,
 		`11 Generic "empty string" doc="this function reports whether v is the zero value." want=true`,
 		`12 unsupported: the doc of IsExpired is not in this package`,
+		`13 unsupported: the row's expectation is written in the loop over the table`,
+		`14 unsupported: the table is written after it is built`,
+		`14 unsupported: the table is written after it is built`,
+		`15 unsupported: the table is written after it is built`,
 	}
 	if strings.Join(got, "\n") != strings.Join(want, "\n") {
 		t.Fatalf("candidates:\n%s\n\nwant:\n%s", strings.Join(got, "\n"), strings.Join(want, "\n"))

@@ -9,7 +9,10 @@
 // whether the reason is about that reported risk or about something else; Go code decides.
 //
 // A directive is read as lintuition and golangci-lint read it: `//nolint:<linters> // <reason>`.
-// The reason ends where another `//` comment starts on the same line. A directive without a
+// The reason is the whole rest of the comment, a second `//` included: a line comment runs to the
+// end of the line, and internal/report keeps it all. Only a trailing want mark in the syntax of
+// lintuition's twin harness (`// want "regexp"` or backquoted) is cut off, so a twin's expected
+// message is never sent as part of its reason. A directive without a
 // reason, a bare //nolint and //nolint:all are not candidates. A directive naming several linters
 // is unsupported (which risk the reason addresses is not established), as is a linter with no
 // known description.
@@ -86,8 +89,8 @@ var golangci = map[string]string{
 var (
 	// As internal/report reads directives, so a candidate is a directive that would suppress.
 	directiveRE = regexp.MustCompile(`^//\s*nolint:([a-z0-9][a-z0-9,-]*)\s*(?://\s*(.*))?$`)
-	// Another comment on the same line ends the reason: `// reason // see below`.
-	nextCommentRE = regexp.MustCompile(`\s//`)
+	// A trailing twin-harness mark, as internal/twins reads it: // want "regexp", or backquoted.
+	wantMarkRE = regexp.MustCompile("\\s*// want (?:\\s*(?:`[^`]*`|\"(?:[^\"\\\\]|\\\\.)*\"))+\\s*$")
 	// The engine's rule for a fact string; a description that breaks it cannot be sent as one.
 	factRE = regexp.MustCompile(`^[A-Za-z0-9_ .,/()-]{0,120}$`)
 )
@@ -122,11 +125,7 @@ func candidate(pass *analysis.Pass, c *ast.Comment) *sdk.Candidate {
 	if m == nil {
 		return nil
 	}
-	reason := m[2]
-	if loc := nextCommentRE.FindStringIndex(reason); loc != nil {
-		reason = reason[:loc[0]]
-	}
-	reason = strings.TrimSpace(reason)
+	reason := reasonOf(m[2])
 	if reason == "" {
 		return nil // no reason to check; lintuition does not honour such a directive anyway
 	}
@@ -164,6 +163,12 @@ func candidate(pass *analysis.Pass, c *ast.Comment) *sdk.Candidate {
 	cand.Payload.Fact("suppressed", desc)
 	cand.Payload.AddProse("rationale", reason)
 	return cand
+}
+
+// reasonOf returns the reason of a directive: the rest of the comment, without a trailing want
+// mark of the twin harness.
+func reasonOf(rest string) string {
+	return strings.TrimSpace(wantMarkRE.ReplaceAllString(rest, ""))
 }
 
 type rule struct{ threshold float64 }

@@ -2,8 +2,6 @@ package suppressionreason
 
 import (
 	"fmt"
-	"go/token"
-	"os"
 	"sort"
 	"strings"
 	"testing"
@@ -24,54 +22,35 @@ func init() {
 	})
 }
 
-// caseNo reads the last "// N" case number from the candidate's source line.
-func caseNo(t *testing.T, pos token.Position) string {
-	b, err := os.ReadFile(pos.Filename)
-	if err != nil {
-		t.Fatal(err)
-	}
-	line := strings.Split(string(b), "\n")[pos.Line-1]
-	i := strings.LastIndex(line, "// ")
-	if i < 0 {
-		return "?"
-	}
-	return strings.Fields(line[i+3:])[0]
-}
-
-func num(s string) int {
-	var n int
-	fmt.Sscan(s, &n)
-	return n
-}
-
 func TestExtraction(t *testing.T) {
 	res := analysistest.Run(t, analysistest.TestData(), Analyzer, "e")
 	var cs []*sdk.Candidate
 	for _, r := range res {
 		cs = append(cs, r.Result.([]*sdk.Candidate)...)
 	}
-	sort.Slice(cs, func(i, j int) bool { return num(caseNo(t, cs[i].Pos)) < num(caseNo(t, cs[j].Pos)) })
+	sort.Slice(cs, func(i, j int) bool { return cs[i].Pos.Line < cs[j].Pos.Line })
 	var got []string
 	for _, c := range cs {
-		n := caseNo(t, c.Pos)
 		if c.Unsupported != "" {
-			got = append(got, n+" unsupported: "+c.Unsupported)
+			got = append(got, fmt.Sprintf("%d unsupported: %s", c.Pos.Line, c.Unsupported))
 			continue
 		}
 		if len(c.Payload.Source) > 0 || len(c.Payload.Prose) != 1 {
-			t.Errorf("case %s: payload %+v", n, c.Payload)
+			t.Errorf("line %d: payload %+v", c.Pos.Line, c.Payload)
 		}
-		got = append(got, fmt.Sprintf("%s %s %q suppressed=%q", n, c.Payload.Facts["linter"], c.Payload.Prose["rationale"], c.Payload.Facts["suppressed"]))
+		got = append(got, fmt.Sprintf("%d %s %q suppressed=%q", c.Pos.Line, c.Payload.Facts["linter"], c.Payload.Prose["rationale"], c.Payload.Facts["suppressed"]))
 	}
+	errcheck := ` suppressed="an error returned by a call is not checked"`
 	want := []string{
-		`1 errcheck "a close error on a read-only file loses nothing" suppressed="an error returned by a call is not checked"`,
-		`2 gosec "the path comes from the operator's own config" suppressed="a security weakness, such as hard-coded credentials, injection, weak crypto or unsafe file permissions"`,
-		`6 unsupported: the directive names several linters; which one the reason addresses is not established`,
-		`7 unsupported: no description of what mylinter reports`,
-		`8 suppression-rationale "checked by hand" suppressed="a nolint reason that explains something other than what the suppressed linter reports"`,
-		`9 unsupported: the description of quoted-doc is not a plain fact`,
-		`10 lll "a URL cannot be wrapped" suppressed="a line is longer than the configured limit"`,
-		`13 errcheck "spaced directive" suppressed="an error returned by a call is not checked"`,
+		`7 errcheck "a close error on a read-only file loses nothing"` + errcheck,
+		`8 gosec "the path comes from the operator's own config" suppressed="a security weakness, such as hard-coded credentials, injection, weak crypto or unsafe file permissions"`,
+		`14 unsupported: the directive names several linters; which one the reason addresses is not established`,
+		`15 unsupported: no description of what mylinter reports`,
+		`16 suppression-rationale "checked by hand" suppressed="a nolint reason that explains something other than what the suppressed linter reports"`,
+		`17 unsupported: the description of quoted-doc is not a plain fact`,
+		`18 lll "a URL cannot be wrapped // see the style guide" suppressed="a line is longer than the configured limit"`,
+		`21 errcheck "spaced directive"` + errcheck,
+		`22 errcheck "the buffer is small // errors from this best-effort cleanup are deliberately ignored"` + errcheck,
 	}
 	if strings.Join(got, "\n") != strings.Join(want, "\n") {
 		t.Fatalf("candidates:\n%s\n\nwant:\n%s", strings.Join(got, "\n"), strings.Join(want, "\n"))
@@ -110,5 +89,21 @@ func TestDecide(t *testing.T) {
 	}
 	if d := r.Decide(c, about("other", 0.9)); d.Message != `nolint rationale is about something other than what errcheck reports: "the file is small"` {
 		t.Errorf("message: %s", d.Message)
+	}
+}
+
+func TestReasonKeepsTheWholeComment(t *testing.T) {
+	for in, want := range map[string]string{
+		"the buffer is small // errors from this cleanup are ignored": "the buffer is small // errors from this cleanup are ignored",
+		"a URL // see https://example.com/x":                          "a URL // see https://example.com/x",
+		"cleanup only // want \"a twin mark\"":                        "cleanup only",
+		"the mark // want \"is cut\" `only at the end`  ":             "the mark",
+		"a want in the middle // want \"x\" is kept":                  "a want in the middle // want \"x\" is kept",
+		"// want \"only a mark\"":                                     "",
+		"// wanted is a word":                                         "// wanted is a word",
+	} {
+		if got := reasonOf(in); got != want {
+			t.Errorf("reasonOf(%q) = %q, want %q", in, got, want)
+		}
 	}
 }

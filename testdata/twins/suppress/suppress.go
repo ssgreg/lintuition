@@ -59,3 +59,8 @@ const docURL = "https://example.com/a/very/long/path/that/goes/on/and/on/so/that
 
 // Negative: two linters are unsupported, never asked.
 var _ = os.Remove //nolint:errcheck,gosec // both fine here
+
+// Negative: a reason whose second clause, after another //, answers errcheck is read whole.
+func Cleanup(f *os.File) {
+	f.Close() //nolint:errcheck // the buffer is small // errors from this best-effort cleanup are deliberately ignored
+}

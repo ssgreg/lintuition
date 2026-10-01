@@ -71,7 +71,13 @@ func TestExtraction(t *testing.T) {
 		`19 "validate in subtest" call=Validate expect=error`,
 		`20 unsupported: the error variable of Validate is written again`,
 		`21 unsupported: the error is checked in a form not read here`,
-		`22 "validate rejects short" call=Validate expect=error`,
+		`22 unsupported: the error is checked in a form not read here`,
+		`24 unsupported: the error is checked in a form not read here`,
+		`25 unsupported: the error is checked in a form not read here`,
+		`26 unsupported: the error is checked in a form not read here`,
+		`27 unsupported: the error is checked in a form not read here`,
+		`28 "validate rejects deferred" call=Validate expect=error`,
+		`29 "validate accepts logged" call=Validate expect=no_error`,
 	}
 	if strings.Join(got, "\n") != strings.Join(want, "\n") {
 		t.Fatalf("candidates:\n%s\n\nwant:\n%s", strings.Join(got, "\n"), strings.Join(want, "\n"))

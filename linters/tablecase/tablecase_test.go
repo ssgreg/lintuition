@@ -69,6 +69,13 @@ func TestExtraction(t *testing.T) {
 		`18 unsupported`,
 		`19 unsupported`,
 		`20 "through got" about="the result of Allowed" want=true`,
+		`21 unsupported`,
+		`22 unsupported`,
+		`22 unsupported`,
+		`23 unsupported`,
+		`24 "input normalised" about="the result of Allowed" want=true`,
+		`25 unsupported`,
+		`26 "len of the table" about="the result of Allowed" want=true`,
 	}
 	if strings.Join(got, "\n") != strings.Join(want, "\n") {
 		t.Fatalf("candidates:\n%s\n\nwant:\n%s", strings.Join(got, "\n"), strings.Join(want, "\n"))

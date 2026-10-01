@@ -109,3 +109,38 @@ func TestBindings(t *testing.T) {
 		}
 	}
 }
+
+type row struct {
+	name        string
+	input, want bool
+}
+
+func TestIsReadyRowMutated(t *testing.T) {
+	tests := []row{{name: "worker is ready", input: true, want: false}} // 13 unsupported: tt.want is set in the loop
+	for _, tt := range tests {
+		tt.want = true
+		if IsReady(tt.input) != tt.want {
+			t.Fail()
+		}
+	}
+}
+
+func TestIsReadyTableReassigned(t *testing.T) {
+	tests := []row{{name: "worker is ready", input: true, want: false}} // 14 unsupported: the table is replaced
+	tests = []row{{name: "worker is ready", input: true, want: true}}   // 14 unsupported: the same table variable
+	for _, tt := range tests {
+		if IsReady(tt.input) != tt.want {
+			t.Fail()
+		}
+	}
+}
+
+func TestIsReadyIndexed(t *testing.T) {
+	tests := []row{{name: "worker is ready", input: true, want: false}} // 15 unsupported: a row written through the table
+	tests[0].want = true
+	for _, tt := range tests {
+		if IsReady(tt.input) != tt.want {
+			t.Fail()
+		}
+	}
+}

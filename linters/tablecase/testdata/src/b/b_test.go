@@ -196,3 +196,71 @@ func TestIsExpiredReassigned(t *testing.T) {
 		}
 	}
 }
+
+type readyRow struct {
+	name        string
+	input, want bool
+}
+
+func TestIsReadyWrites(t *testing.T) {
+	mutated := []readyRow{
+		{name: "row mutated", input: true, want: false}, // 21 unsupported: tt.want is set in the loop
+	}
+	for _, tt := range mutated {
+		tt.want = true
+		if Allowed(tt.input) != tt.want {
+			t.Fail()
+		}
+	}
+	reassigned := []readyRow{
+		{name: "replaced table", input: true, want: false}, // 22 unsupported: the table is replaced
+	}
+	reassigned = []readyRow{
+		{name: "replacing table", input: true, want: true}, // 22 unsupported: the same table variable
+	}
+	for _, tt := range reassigned {
+		if Allowed(tt.input) != tt.want {
+			t.Fail()
+		}
+	}
+	indexed := []readyRow{
+		{name: "row written through the table", input: true, want: false}, // 23 unsupported: tests[0].want is set
+	}
+	indexed[0].want = true
+	for _, tt := range indexed {
+		if Allowed(tt.input) != tt.want {
+			t.Fail()
+		}
+	}
+	input := []readyRow{
+		{name: "input normalised", input: true, want: true}, // 24 candidate: only the input is written
+	}
+	for _, tt := range input {
+		tt.input = !tt.input
+		if Allowed(tt.input) != tt.want {
+			t.Fail()
+		}
+	}
+	escaped := []readyRow{
+		{name: "row passed on", input: true, want: true}, // 25 unsupported: the row is passed by address
+	}
+	for _, tt := range escaped {
+		fix(&tt)
+		if Allowed(tt.input) != tt.want {
+			t.Fail()
+		}
+	}
+	lenOnly := []readyRow{
+		{name: "len of the table", input: true, want: true}, // 26 candidate: len does not write the table
+	}
+	if len(lenOnly) == 0 {
+		t.Fatal()
+	}
+	for _, tt := range lenOnly {
+		if Allowed(tt.input) != tt.want {
+			t.Fail()
+		}
+	}
+}
+
+func fix(r *readyRow) { r.want = !r.want }
