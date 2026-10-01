@@ -2,7 +2,7 @@ version: "2"
 
 linters:
   default: none
-  enable: [metric-type-vs-help, premature-success, table-case-vs-expectation, sentinel-name-vs-text, error-needs-type, human-unit-contradiction, enum-comment-shift, test-name-vs-assertion, doc-vs-table, suppression-rationale]
+  enable: [metric-type-vs-help, premature-success, table-case-vs-expectation, sentinel-name-vs-text, error-needs-type, human-unit-contradiction, enum-comment-shift, test-name-vs-assertion, doc-vs-table, suppression-rationale, log-sensitive-field, log-key-value-role, normal-event-at-error, severe-event-understated, destructive-remediation]
 
 semantic:
   classifier: fake
@@ -27,6 +27,60 @@ semantic:
         - {question: outcome, when: "passed=false", choice: unstated, probability: 0.9}
         - {question: outcome, when: "whether expired", choice: "false", probability: 0.95}
         - {question: outcome, when: "whether valid", choice: "true", probability: 0.95}
+        # log-sensitive-field
+        - {linter: log-sensitive-field, question: role, when: "value req.Password", choice: secret, probability: 0.95}
+        - {linter: log-sensitive-field, question: role, when: "value req.User", choice: personal, probability: 0.9}
+        - {linter: log-sensitive-field, question: role, when: "value req.TokenID", choice: public, probability: 0.9}
+        - {linter: log-sensitive-field, question: role, when: "\"message\":\"retrying upload\"", choice: public, probability: 0.95}
+        - {linter: log-sensitive-field, question: role, when: "\"message\":\"cache miss, loading from the database\"", choice: public, probability: 0.9}
+        - {linter: log-sensitive-field, question: role, when: "\"message\":\"disk quota exceeded, uploads are paused\"", choice: public, probability: 0.9}
+        - {linter: log-sensitive-field, question: role, when: "\"message\":\"failed to save the upload\"", choice: public, probability: 0.9}
+        # log-key-value-role
+        - {linter: log-key-value-role, question: role, when: "key remaining_attempts, value elapsedAttempts", choice: conflict, probability: 0.9}
+        - {linter: log-key-value-role, question: role, when: "key attempts_made, value elapsedAttempts", choice: same, probability: 0.9}
+        - {linter: log-key-value-role, question: role, when: "key remaining_attempts, value v,", choice: insufficient, probability: 0.9}
+        # normal-event-at-error
+        - {linter: normal-event-at-error, question: event, when: "cache miss, loading from the database", choice: routine, probability: 0.95}
+        - {linter: normal-event-at-error, question: event, when: "disk quota exceeded, uploads are paused", choice: degradation, probability: 0.9}
+        - {linter: normal-event-at-error, question: event, when: "queue full, event dropped and not retried", choice: failure, probability: 0.9}
+        # severe-event-understated
+        - {linter: severe-event-understated, question: consequence, when: "queue full, event dropped and not retried", choice: unintended_loss, probability: 0.95}
+        - {linter: severe-event-understated, question: on_purpose, when: "queue full, event dropped and not retried", yes: 0.1}
+        - {linter: severe-event-understated, question: consequence, when: "deleted expired sessions as requested", choice: routine, probability: 0.95}
+        - {linter: severe-event-understated, question: on_purpose, when: "deleted expired sessions as requested", yes: 0.95}
+        - {linter: severe-event-understated, question: consequence, when: "dropped by the sampler as configured", choice: unintended_loss, probability: 0.9}
+        - {linter: severe-event-understated, question: on_purpose, when: "dropped by the sampler as configured", yes: 0.9}
+        # severe-event-understated reads every info and debug message, the other linters' twins too.
+        - {linter: severe-event-understated, question: consequence, when: "\"message\":\"user signed in\"", choice: routine, probability: 0.95}
+        - {linter: severe-event-understated, question: on_purpose, when: "\"message\":\"user signed in\"", yes: 0.5}
+        - {linter: severe-event-understated, question: consequence, when: "\"message\":\"token rotated\"", choice: routine, probability: 0.95}
+        - {linter: severe-event-understated, question: on_purpose, when: "\"message\":\"token rotated\"", yes: 0.5}
+        - {linter: severe-event-understated, question: consequence, when: "\"message\":\"cache miss, loading from the database\"", choice: routine, probability: 0.95}
+        - {linter: severe-event-understated, question: on_purpose, when: "\"message\":\"cache miss, loading from the database\"", yes: 0.5}
+        - {linter: severe-event-understated, question: consequence, when: "\"message\":\"config saved to disk\"", choice: routine, probability: 0.95}
+        - {linter: severe-event-understated, question: on_purpose, when: "\"message\":\"config saved to disk\"", yes: 0.5}
+        - {linter: severe-event-understated, question: consequence, when: "\"message\":\"saving config to disk\"", choice: routine, probability: 0.95}
+        - {linter: severe-event-understated, question: on_purpose, when: "\"message\":\"saving config to disk\"", yes: 0.5}
+        - {linter: severe-event-understated, question: consequence, when: "\"message\":\"cache warmed\"", choice: routine, probability: 0.95}
+        - {linter: severe-event-understated, question: on_purpose, when: "\"message\":\"cache warmed\"", yes: 0.5}
+        - {linter: severe-event-understated, question: consequence, when: "\"message\":\"upload 3 of 5\"", choice: routine, probability: 0.95}
+        - {linter: severe-event-understated, question: on_purpose, when: "\"message\":\"upload 3 of 5\"", yes: 0.5}
+        # destructive-remediation
+        - {linter: destructive-remediation, question: advice, when: "delete the repository directory and run init again", choice: destructive_advice, probability: 0.95}
+        - {linter: destructive-remediation, question: states_loss, when: "delete the repository directory and run init again", yes: 0.1}
+        - {linter: destructive-remediation, question: advice, when: "erases every stored backup, so copy it elsewhere first", choice: destructive_advice, probability: 0.95}
+        - {linter: destructive-remediation, question: states_loss, when: "erases every stored backup, so copy it elsewhere first", yes: 0.95}
+        - {linter: destructive-remediation, question: advice, when: "remove the --dry-run flag to apply the plan", choice: safe_advice, probability: 0.9}
+        - {linter: destructive-remediation, question: states_loss, when: "remove the --dry-run flag to apply the plan", yes: 0.2}
+        - {linter: destructive-remediation, question: advice, when: "lock file was removed by another process", choice: no_advice, probability: 0.95}
+        - {linter: destructive-remediation, question: states_loss, when: "lock file was removed by another process", yes: 0.2}
+        # destructive-remediation reads every text with a destructive word, the other linters' twins too.
+        - {linter: destructive-remediation, question: advice, when: "\"text\":\"queue full, event dropped and not retried\"", choice: no_advice, probability: 0.95}
+        - {linter: destructive-remediation, question: states_loss, when: "\"text\":\"queue full, event dropped and not retried\"", yes: 0.5}
+        - {linter: destructive-remediation, question: advice, when: "\"text\":\"deleted expired sessions as requested\"", choice: no_advice, probability: 0.95}
+        - {linter: destructive-remediation, question: states_loss, when: "\"text\":\"deleted expired sessions as requested\"", yes: 0.5}
+        - {linter: destructive-remediation, question: advice, when: "\"text\":\"debug event dropped by the sampler as configured\"", choice: no_advice, probability: 0.95}
+        - {linter: destructive-remediation, question: states_loss, when: "\"text\":\"debug event dropped by the sampler as configured\"", yes: 0.5}
         # sentinel-name-vs-text
         - {linter: sentinel-name-vs-text, question: condition, when: "tenant record not found", choice: different, probability: 0.8}
         - {linter: sentinel-name-vs-text, question: condition, when: "tenant storage quota exceeded", choice: same, probability: 0.9}
@@ -74,3 +128,7 @@ semantic:
         - {linter: suppression-rationale, question: about, when: "only the tests call this function", choice: other, probability: 0.9}
         - {linter: suppression-rationale, question: about, when: "one flat switch over every opcode", choice: that_risk, probability: 0.9}
         - {linter: suppression-rationale, question: about, when: "a URL in a string cannot be wrapped", choice: that_risk, probability: 0.95}
+        # (destructive-remediation's twins are plain string errors, for error-needs-type: none is branchable)
+        - {linter: error-needs-type, question: branchable, when: "backup index mismatch", yes: 0.1}
+        - {linter: error-needs-type, question: branchable, when: "remove the --dry-run flag to apply the plan", yes: 0.1}
+        - {linter: error-needs-type, question: branchable, when: "lock file was removed by another process", yes: 0.2}

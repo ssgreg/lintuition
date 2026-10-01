@@ -38,6 +38,21 @@ linters:
     metric-type-vs-help:
       # Minimum probability of the classifier's answer for a finding. Default: 0.8.
       threshold: 0.8
+    log-sensitive-field:
+      # Minimum probability that the most sensitive field value is a secret. Default: 0.85.
+      threshold: 0.85
+    log-key-value-role:
+      # Minimum probability that a key names a different quantity than its value. Default: 0.85.
+      threshold: 0.85
+    normal-event-at-error:
+      # Minimum probability that an error-level message reports a routine event. Default: 0.9.
+      threshold: 0.9
+    severe-event-understated:
+      # Minimum probability that a debug or info message states an unintended loss. Default: 0.85.
+      threshold: 0.85
+    destructive-remediation:
+      # Minimum probability that a text advises a destructive step. Default: 0.85.
+      threshold: 0.85
     sentinel-name-vs-text:
       # Minimum probability of the answer either way. Default: 0.55.
       threshold: 0.55
