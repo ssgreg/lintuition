@@ -2,7 +2,7 @@ version: "2"
 
 linters:
   default: none
-  enable: [metric-type-vs-help, premature-success, table-case-vs-expectation, test-name-vs-assertion, doc-vs-table]
+  enable: [metric-type-vs-help, premature-success, table-case-vs-expectation, test-name-vs-assertion, doc-vs-table, suppression-rationale]
 
 semantic:
   classifier: fake
@@ -41,3 +41,9 @@ semantic:
         - {linter: doc-vs-table, question: condition, when: 'passed.","situation":"passed=false"', choice: not_met, probability: 0.9}
         # doc-vs-table's rows, for table-case-vs-expectation: their names say nothing about the result
         - {linter: table-case-vs-expectation, question: outcome, when: '"about":"the result of Due"', choice: unstated, probability: 0.9}
+        # suppression-rationale
+        - {linter: suppression-rationale, question: about, when: "the file is small, so reading it whole", choice: other, probability: 0.9}
+        - {linter: suppression-rationale, question: about, when: "a close error on a file opened read-only", choice: that_risk, probability: 0.9}
+        - {linter: suppression-rationale, question: about, when: "only the tests call this function", choice: other, probability: 0.9}
+        - {linter: suppression-rationale, question: about, when: "one flat switch over every opcode", choice: that_risk, probability: 0.9}
+        - {linter: suppression-rationale, question: about, when: "a URL in a string cannot be wrapped", choice: that_risk, probability: 0.95}

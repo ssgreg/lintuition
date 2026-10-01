@@ -81,7 +81,8 @@ func TestNolintSkipsTheClassifier(t *testing.T) {
 	s = strings.Replace(s, `Help: "Request latency."})`, `Help: "Request latency."}) //nolint:metric-type-vs-help`, 1)
 	os.WriteFile(p, []byte(s), 0o600)
 	code, out, errs := run("run", "--output.json.path", "stdout", "./...")
-	if code != 0 || !strings.Contains(out, `"SkippedBy":{"nolint":1}`) || !strings.Contains(errs, "3 asked") {
+	// Counted for metric-type-vs-help alone: suppression-rationale asks about the explained directive.
+	if code != 0 || !strings.Contains(out, `"Name":"metric-type-vs-help","Enabled":true,"Candidates":4,"Asked":3,"Abstained":0,"Skipped":1,"SkippedBy":{"nolint":1}`) {
 		t.Fatalf("an explained nolint skips the question; an unexplained one does not: exit %d\n%s\n%s", code, out, errs)
 	}
 }

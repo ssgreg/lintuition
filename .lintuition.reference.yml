@@ -29,6 +29,9 @@ linters:
     metric-type-vs-help:
       # Minimum probability of the classifier's answer for a finding. Default: 0.8.
       threshold: 0.8
+    suppression-rationale:
+      # Minimum probability of "the reason is about something else" for a finding. Default: 0.8.
+      threshold: 0.8
     test-name-vs-assertion:
       # Minimum probability of what the test name says about the call's error. Default: 0.9.
       threshold: 0.9
