@@ -23,6 +23,9 @@ linters:
   enable: []
   disable: []
   settings:
+    enum-comment-shift:
+      # Minimum probability of the picked constant for a decision either way. Default: 0.8.
+      threshold: 0.8
     error-needs-type:
       # Minimum probability of yes for a finding, and of no for a clean answer. Default: 0.8.
       threshold: 0.8

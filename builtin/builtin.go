@@ -7,6 +7,7 @@ import (
 	_ "github.com/ssgreg/lintuition/classifiers/fake"
 	_ "github.com/ssgreg/lintuition/classifiers/jev"
 	_ "github.com/ssgreg/lintuition/classifiers/openai"
+	_ "github.com/ssgreg/lintuition/linters/enumcomment"
 	_ "github.com/ssgreg/lintuition/linters/errorneedstype"
 	_ "github.com/ssgreg/lintuition/linters/humanunit"
 	_ "github.com/ssgreg/lintuition/linters/metrictypevshelp"

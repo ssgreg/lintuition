@@ -2,7 +2,7 @@ version: "2"
 
 linters:
   default: none
-  enable: [metric-type-vs-help, premature-success, table-case-vs-expectation, sentinel-name-vs-text, error-needs-type, human-unit-contradiction]
+  enable: [metric-type-vs-help, premature-success, table-case-vs-expectation, sentinel-name-vs-text, error-needs-type, human-unit-contradiction, enum-comment-shift]
 
 semantic:
   classifier: fake
@@ -43,3 +43,12 @@ semantic:
         - {linter: human-unit-contradiction, question: unit, when: "compaction took %d ms", choice: milliseconds, probability: 0.95}
         - {linter: human-unit-contradiction, question: unit, when: "compaction retry, backoff factor", choice: unspecified, probability: 0.9}
         - {linter: human-unit-contradiction, question: unit, when: "compaction window %.0f", choice: minutes, probability: 0.6}
+        # enum-comment-shift
+        - {linter: enum-comment-shift, question: describes, when: "a replication job waiting for a free worker", choice: PhaseQueued, probability: 0.95}
+        - {linter: enum-comment-shift, question: describes, when: "every block has been copied and verified", choice: PhaseVerified, probability: 0.9}
+        - {linter: enum-comment-shift, question: describes, when: "replica without letting writes through", choice: ModeReadOnly, probability: 0.95}
+        - {linter: enum-comment-shift, question: describes, when: "replica for writes too", choice: ModeReadWrite, probability: 0.95}
+        - {linter: enum-comment-shift, question: describes, when: "Replica storage tiers, fastest first", choice: none, probability: 0.9}
+        - {linter: enum-comment-shift, question: describes, when: "replica tier kept for a while", choice: TierWarm, probability: 0.5}
+        # (the twin's own want comment is a line comment on a constant too: a note, no constant)
+        - {linter: enum-comment-shift, question: describes, when: "want `comment describes PhaseVerified", choice: none, probability: 0.9}

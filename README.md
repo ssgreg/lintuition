@@ -117,6 +117,7 @@ person-written text does leave the machine when the backend is remote.
 
 | linter | checks |
 |---|---|
+| `enum-comment-shift` | a comment in a const block that describes a neighbouring constant, not its own |
 | `error-needs-type` | policy: a branchable condition (not found, already exists) returned as a plain string error |
 | `human-unit-contradiction` | a printf message names a different unit than the duration value it prints (`%.0f ms` of `d.Seconds()`) |
 | `metric-type-vs-help` | Prometheus metric Help that describes a different kind of value than the metric type records |
