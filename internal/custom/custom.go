@@ -120,11 +120,11 @@ func (m *Manifest) validate() error {
 			return fmt.Errorf("plugins[%d].version %q: want a semantic version", i, p.Version)
 		}
 		if err := module.CheckPath(p.Module); err != nil {
-			return fmt.Errorf("plugins[%d].module: %v", i, err)
+			return fmt.Errorf("plugins[%d].module: %w", i, err)
 		}
 		if p.Version != "" {
 			if err := module.Check(p.Module, p.Version); err != nil {
-				return fmt.Errorf("plugins[%d].version: %v", i, err)
+				return fmt.Errorf("plugins[%d].version: %w", i, err)
 			}
 		}
 		if p.Import != "" && p.Import != p.Module && !strings.HasPrefix(p.Import, p.Module+"/") {
@@ -267,7 +267,7 @@ func (m *Manifest) Build(ctx context.Context, log io.Writer) (string, error) {
 	if err != nil {
 		return "", err
 	}
-	defer os.RemoveAll(dir)
+	defer func() { _ = os.RemoveAll(dir) }()
 	if err := m.Generate(dir); err != nil {
 		return "", err
 	}
@@ -325,7 +325,7 @@ func (m *Manifest) Build(ctx context.Context, log io.Writer) (string, error) {
 	if err != nil {
 		return "", err
 	}
-	defer os.RemoveAll(stageDir)
+	defer func() { _ = os.RemoveAll(stageDir) }()
 	staged := filepath.Join(stageDir, m.Name)
 	if err := run("build", "-trimpath", "-o", staged, "."); err != nil {
 		return "", err
@@ -337,7 +337,7 @@ func (m *Manifest) Build(ctx context.Context, log io.Writer) (string, error) {
 	probe := exec.CommandContext(ctx, staged, "version")
 	probe.Stdout, probe.Stderr = io.Discard, &startErr
 	if err := probe.Run(); err != nil {
-		return "", fmt.Errorf("the built binary does not start (%v): %s", err, strings.TrimSpace(firstLine(startErr.String())))
+		return "", fmt.Errorf("the built binary does not start (%w): %s", err, strings.TrimSpace(firstLine(startErr.String())))
 	}
 	if err := os.Rename(staged, out); err != nil {
 		return "", err

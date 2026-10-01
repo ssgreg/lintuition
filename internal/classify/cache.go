@@ -110,17 +110,18 @@ func (c *Cache) Put(key string, bd Bundle) error {
 	if err != nil {
 		return err
 	}
+	// On a failure the temporary file is removed best-effort; the write's error is the one to report.
 	if _, err := f.Write(b); err != nil {
-		f.Close()
-		os.Remove(f.Name())
+		_ = f.Close()
+		_ = os.Remove(f.Name())
 		return err
 	}
 	if err := f.Close(); err != nil {
-		os.Remove(f.Name())
+		_ = os.Remove(f.Name())
 		return err
 	}
 	if err := os.Chmod(f.Name(), 0o600); err != nil {
-		os.Remove(f.Name())
+		_ = os.Remove(f.Name())
 		return err
 	}
 	return os.Rename(f.Name(), c.path(key))
@@ -158,7 +159,7 @@ func (c *Cache) Clean(expiredOnly bool) (int, error) {
 			return n, err
 		}
 		for _, f := range files {
-			if f.IsDir() || !(recordRE.MatchString(f.Name()) || tempRE.MatchString(f.Name())) {
+			if f.IsDir() || !recordRE.MatchString(f.Name()) && !tempRE.MatchString(f.Name()) {
 				continue
 			}
 			p := filepath.Join(dir, f.Name())
@@ -173,7 +174,7 @@ func (c *Cache) Clean(expiredOnly bool) (int, error) {
 			}
 			n++
 		}
-		os.Remove(dir) // only succeeds when empty
+		_ = os.Remove(dir) // only succeeds when empty
 	}
 	return n, nil
 }

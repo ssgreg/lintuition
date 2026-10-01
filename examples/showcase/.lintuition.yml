@@ -4,6 +4,10 @@ version: "2"
 linters:
   default: all
 
+# One line in tests_test.go has two findings (a copied table row that both linters catch); show both.
+issues:
+  uniq-by-line: false
+
 # Offline: scripted answers, the ones a real classifier gives for these texts. Anything not
 # scripted is answered "unclear", so the rule abstains. To run against a real classifier, copy
 # .lintuition.quickstart.yml from the repository root to jev.yml here, set `linters: default: all`

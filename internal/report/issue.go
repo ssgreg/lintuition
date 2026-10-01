@@ -265,7 +265,7 @@ func sourceLine(pos token.Position) []string {
 	if err != nil {
 		return nil
 	}
-	defer f.Close()
+	defer func() { _ = f.Close() }() // read only
 	sc := bufio.NewScanner(f)
 	for n := 1; sc.Scan(); n++ {
 		if n == pos.Line {

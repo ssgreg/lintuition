@@ -19,12 +19,14 @@ Each linter works in two steps, and the split is the whole design.
    log call is at error level, this test's `want` is compared with the result of `IsExpired`. Facts
    come from `go/types`, never from spelling. A variable named `err` is not an error until its type
    says so.
-2. **The classifier reads only the human text** (a Help string, a log message, a test name, a
-   comment) and answers one narrow multiple-choice question about it. "What kind of value does this
-   Help describe: a running total, a current value or a distribution?"
+2. **The classifier reads the human text** (a Help string, a log message, a test name, a comment),
+   sometimes with a few facts named by identifiers ("the result of IsExpired"), and answers one or
+   two narrow questions about it. "What kind of value does this Help describe: a running total, a
+   current value or a distribution?"
 
-Then Go code compares the answer with the facts and decides. The classifier never sees your source,
-never sees literal values, and never decides whether something is a finding.
+Then Go code compares the answer with the facts and decides. The classifier never sees your source
+and never decides whether something is a finding. Most facts come from object identity; where a
+linter falls back on names (a logger package, a redaction function), its section says so.
 
 Why split it like this? Because a classifier is good at reading what a sentence means and bad at
 following code. The prototype measured it: asked in one question whether a test name matched its
@@ -33,9 +35,9 @@ check, it caught 3 of 3.
 
 ## Three outcomes besides a finding
 
-You will see these counts in every run summary, so they are worth knowing.
-
-- **Clean.** The classifier answered confidently and the answer agrees with the code.
+- **Clean.** No finding under this rule: the classifier answered confidently, and the answer does not
+  conflict with the code. That includes text that makes no claim the rule can check (a case name that
+  only describes the input, a message that gives no advice). It is not proof that the text is right.
 - **Abstained.** The classifier was not confident enough. Every linter has a threshold, and below it
   the linter stays quiet whichever way the answer leans. Every multiple-choice question also has an
   "unclear" option, and choosing it abstains too.
@@ -44,23 +46,33 @@ You will see these counts in every run summary, so they are worth knowing.
   calls that could be the one a test is about. These are counted, so a run shows what it could not
   check instead of looking clean.
 
+The run summary prints asked, abstained, unsupported, skipped and failed counts per run (and per
+linter in the JSON report); clean is what is asked and neither abstained nor reported. Shapes outside
+a linter's scope (a log call with no fields, for log-sensitive-field) are not candidates and are not
+counted at all.
+
 Linters err on the side of unsupported. A missed bug costs less than a confident wrong finding that
 teaches people to ignore the tool.
 
 ## What leaves your machine
 
 The question text is fixed per linter. Candidate data goes in a separate state object: person-written
-text (Help, messages, comments, test names) as prose, and identifiers or short descriptions built from
-them ("the result of IsExpired", "value cfg.Password, type string") as facts. Go source and the values
-of literals are never sent. `semantic.payload: facts` sends structural facts only and skips every
+text as prose, sent as written, and identifiers or short descriptions built from them ("the result of
+IsExpired", "value cfg.Password, type string") as facts.
+
+So what leaves is the text the linter is about: a Help string, a log or error message, a printf
+format, a comment, a test or case name, a nolint reason. These are string literals in your code, and
+they are sent. What is never sent is Go source, and the value of anything your code logs or passes
+around: a logged field is described by where its value comes from, not by its value. `semantic.payload: facts` sends structural facts only and skips every
 linter that needs prose; `lintuition run --dry-run --preview requests.jsonl` shows exactly what would
 be sent.
 
 ## Thresholds
 
 The defaults below come from the prototype and are checked only on this repository's synthetic twins,
-not on a labelled set of real code. They also differ between backends: a 0.8 from one classifier is
-not a 0.8 from another. Treat findings as review hints, and run `lintuition eval` on your own twins
+not on a labelled set of real code. Scores are not comparable between backends: a 0.8 from one
+classifier is not a 0.8 from another, but a rule's threshold stays what you configured whichever
+backend you use. Treat findings as review hints, and run `lintuition eval` on your own twins
 before trusting a new backend or a new threshold.
 
 Every linter takes a `threshold` setting:
@@ -144,9 +156,13 @@ logger.Info("connecting", slog.String("password", cfg.Password))
 **Reads:** fields of structured loggers only: constructors that return a field type (`slog.String`,
 `zap.String`, `logf.String`), slog's key, value pairs, `slog.Group` and `WithGroup` as prefixed keys,
 and fields added along a chain (`slog.With`, logrus `WithField`, zerolog `Str`). `log.Println`'s
-arguments are not fields. It skips values that cannot hold a secret: literals (the secret is already
-in the source), booleans, times and durations, and results of functions whose name starts with a
-redaction verb (`Redact`, `MaskToken`, `HashPassword`).
+arguments are not fields. It skips booleans, times and durations, and results of functions whose name starts
+with a redaction verb (`Redact`, `MaskToken`, `HashPassword`); the name is a heuristic, not proof the
+function removes the secret.
+
+Literal values are left out too, and that is a coverage limit, not safety: telling a placeholder from
+a hard-coded secret would mean sending the literal. A committed secret logged as a literal is missed;
+a secret scanner is the tool for those.
 
 **Sends:** for each field, the key, where the value comes from and its type: "key password, value
 cfg.Password, type string". Never the value. Plus the message, when it is constant.
@@ -365,8 +381,10 @@ field in a keyed row is Go's zero value.
 describes the input ("passed=false") is clean.
 
 **Unsupported, deliberately strict:** a negated comparison, comparisons with two different calls, a
-result variable written again, a function with two bool results, and any write to the table, a row or
-its fields in any loop over the table. This binding went through several review rounds; each
+result variable written again, a function with two bool results; and, in any loop over the table, a
+write to the expectation field or the whole row, the row's address taken or the row passed on, or the
+table itself reassigned, indexed into or passed on. A write to some other field of the row (an input)
+keeps the binding. This binding went through several review rounds; each
 loosening found a passing test that got a wrong finding.
 
 ### doc-vs-table

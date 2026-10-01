@@ -88,7 +88,7 @@ func candidates(pass *analysis.Pass, call *ast.CallExpr) []*sdk.Candidate {
 		return nil
 	}
 	fields, partial := facts.Fields(pass.TypesInfo, lc)
-	c := candidate(pass, call, lc, fields, partial)
+	c := candidate(pass, call, fields, partial)
 	if c == nil {
 		return nil
 	}
@@ -103,7 +103,7 @@ func candidates(pass *analysis.Pass, call *ast.CallExpr) []*sdk.Candidate {
 	return out
 }
 
-func candidate(pass *analysis.Pass, call *ast.CallExpr, lc facts.LogCall, fields []facts.LogField, partial bool) *sdk.Candidate {
+func candidate(pass *analysis.Pass, call *ast.CallExpr, fields []facts.LogField, partial bool) *sdk.Candidate {
 	c := &sdk.Candidate{Pos: pass.Fset.Position(call.Pos()), Local: map[string]string{}}
 	var pairs, descs []string
 	for _, f := range fields {

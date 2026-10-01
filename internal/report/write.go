@@ -92,7 +92,7 @@ func to(path string, stdout, stderr io.Writer, fn func(io.Writer) error) error {
 		return err
 	}
 	if err := fn(file); err != nil {
-		file.Close()
+		_ = file.Close() // the write's error is the one to report
 		return err
 	}
 	return file.Close()

@@ -325,7 +325,7 @@ func (c *Classifier) exec(ctx context.Context, dir string, args []string) ([]byt
 			return out.Bytes(), fmt.Errorf("%s did not answer within %s", c.kind.name, c.timeout)
 		}
 		// stderr can quote the prompt; keep only that the run failed.
-		return out.Bytes(), fmt.Errorf("%s exited with %v", c.kind.name, err)
+		return out.Bytes(), fmt.Errorf("%s exited: %w", c.kind.name, err)
 	}
 	return out.Bytes(), nil
 }
@@ -395,7 +395,7 @@ func (c *Classifier) one(ctx context.Context, req sdk.Request, q sdk.Question) (
 	if err != nil {
 		return sdk.Answer{}, err
 	}
-	defer os.RemoveAll(dir)
+	defer func() { _ = os.RemoveAll(dir) }()
 	p, err := prompt(req.State, q)
 	if err != nil {
 		return sdk.Answer{}, err

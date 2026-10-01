@@ -188,7 +188,7 @@ func runCmd(code *int) *cobra.Command {
 				if previewFile, err = os.OpenFile(preview, os.O_CREATE|os.O_TRUNC|os.O_WRONLY, 0o600); err != nil {
 					return err
 				}
-				defer previewFile.Close()
+				defer func() { _ = previewFile.Close() }() // closed and checked below; this covers early returns
 				opts.Preview = previewFile
 			}
 			res, err := engine.Run(ctx, opts)

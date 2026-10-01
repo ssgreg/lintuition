@@ -1,0 +1,20 @@
+# lintuition run on its own code (the self-lint workflow). Findings are review hints: they go to
+# code scanning, they do not fail the build; an incomplete run does.
+version: "2"
+
+run:
+  issues-exit-code: 0
+
+linters:
+  default: standard
+
+# semantic stays the last section: the workflow appends the cache directory to it.
+semantic:
+  classifier: jev
+  classifiers:
+    jev:
+      model: jev-latest
+  # A few cents at most; answers are cached between runs, so only changed text is paid for.
+  budget:
+    max-requests: 5000
+    max-cost-usd: 0.05

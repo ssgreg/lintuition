@@ -90,7 +90,7 @@ func TestBuildWithExamplePlugins(t *testing.T) {
 	}
 	cmd := exec.Command(bin, "run", "./...")
 	cmd.Dir = filepath.Join(root, "testdata/plugins")
-	res, err := cmd.CombinedOutput()
+	res, _ := cmd.CombinedOutput() // the exit code is checked below
 	if code := cmd.ProcessState.ExitCode(); code != 1 || !strings.Contains(string(res), "todo.go:3:1: TODO names no owner, ticket or date (todo-owner)") || strings.Contains(string(res), "todo.go:6") {
 		t.Fatalf("exit %d\n%s", code, res)
 	}

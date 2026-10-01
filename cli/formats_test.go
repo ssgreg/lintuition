@@ -86,3 +86,17 @@ func TestNolintSkipsTheClassifier(t *testing.T) {
 		t.Fatalf("an explained nolint skips the question; an unexplained one does not: exit %d\n%s\n%s", code, out, errs)
 	}
 }
+
+// TestShowcaseCommand runs the showcase the way the README tells people to, and expects every
+// documented example, one finding each, the doubled table row included.
+func TestShowcaseCommand(t *testing.T) {
+	dir, _ := filepath.Abs("../examples/showcase")
+	t.Chdir(dir)
+	code, out, errs := run("run", "./...")
+	if n := strings.Count(out, "\n") - strings.Count(out, "\n\t"); code != 1 || strings.Count(out, ": ") < 16 {
+		t.Fatalf("exit %d, %d lines\n%s\n%s", code, n, out, errs)
+	}
+	if !strings.Contains(errs, "16 issue(s)") {
+		t.Fatalf("the showcase shows 16 findings: %s", errs)
+	}
+}

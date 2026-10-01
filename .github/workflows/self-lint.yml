@@ -1,0 +1,62 @@
+# lintuition on its own code, with the jev classifier. Needs the repository secret TYPESAFE_API_KEY;
+# without it the job is skipped. Findings go to code scanning as review hints and never fail the
+# build; an incomplete run (a package that did not load, a spent budget) does.
+name: self-lint
+
+on:
+  push:
+    branches: [main]
+  # Pull requests from this repository only: GitHub gives no secrets to pull requests from forks, and
+  # pull_request_target would hand the key to code from the fork, so forks are not linted here.
+  pull_request:
+  schedule:
+    - cron: "17 5 * * 1"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: self-lint-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  lintuition:
+    if: github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      security-events: write
+    env:
+      TYPESAFE_API_KEY: ${{ secrets.TYPESAFE_API_KEY }}
+    steps:
+      - name: skip without the key
+        id: key
+        run: |
+          if [ -z "$TYPESAFE_API_KEY" ]; then echo "TYPESAFE_API_KEY is not set; skipping"; echo "skip=true" >> "$GITHUB_OUTPUT"; fi
+      - uses: actions/checkout@v4
+        if: steps.key.outputs.skip != 'true'
+      - uses: actions/setup-go@v5
+        if: steps.key.outputs.skip != 'true'
+        with:
+          go-version-file: go.mod
+      - name: answer cache
+        if: steps.key.outputs.skip != 'true'
+        uses: actions/cache@v4
+        with:
+          path: ${{ runner.temp }}/lintuition-cache
+          key: lintuition-answers-${{ github.run_id }}
+          restore-keys: lintuition-answers-
+      - name: lintuition
+        if: steps.key.outputs.skip != 'true'
+        run: |
+          go build -o "$RUNNER_TEMP/lintuition" ./cmd/lintuition
+          cat .github/lintuition.yml > "$RUNNER_TEMP/self.yml"
+          printf '  cache:\n    dir: %s\n' "$RUNNER_TEMP/lintuition-cache" >> "$RUNNER_TEMP/self.yml"
+          "$RUNNER_TEMP/lintuition" run -c "$RUNNER_TEMP/self.yml" \
+            --output.text.path stdout --output.sarif.path lintuition.sarif --output.github-actions.path stderr ./...
+      - uses: github/codeql-action/upload-sarif@v3
+        if: always() && steps.key.outputs.skip != 'true' && hashFiles('lintuition.sarif') != ''
+        with:
+          sarif_file: lintuition.sarif
+          category: lintuition

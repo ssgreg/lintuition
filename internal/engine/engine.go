@@ -503,7 +503,7 @@ func (r *runner) ask(ctx context.Context, j *job, req sdk.Request) {
 		}
 		calls, reported = 0, false
 		resp, err := r.cl.Classify(ctx, req)
-		if calls == 0 && !(err != nil && errors.Is(err, sdk.ErrBudget)) {
+		if calls == 0 && (err == nil || !errors.Is(err, sdk.ErrBudget)) {
 			// A backend that does not call Start: count the call it made.
 			count()
 		}

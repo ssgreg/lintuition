@@ -45,7 +45,7 @@ func New(endpoint string, o Options) (*Client, error) {
 		return nil, fmt.Errorf("endpoint: %w", err)
 	}
 	// Plain HTTP only to a loopback address (a local model server, a test server, a local proxy).
-	if u.Scheme != "https" && !(u.Scheme == "http" && IsLoopback(u.Hostname())) {
+	if u.Scheme != "https" && (u.Scheme != "http" || !IsLoopback(u.Hostname())) {
 		return nil, fmt.Errorf("endpoint %q: https is required", endpoint)
 	}
 	c := &Client{endpoint: endpoint, retries: 4, Sleep: sleepCtx}
@@ -117,7 +117,7 @@ func (c *Client) Post(ctx context.Context, body []byte, header http.Header, spen
 	for attempt := 0; attempt <= c.retries; attempt++ {
 		if attempt > 0 && spend != nil {
 			if err := spend(); err != nil {
-				return nil, fmt.Errorf("%v; retry not sent: %w", last, err)
+				return nil, fmt.Errorf("%w; retry not sent: %w", last, err)
 			}
 		}
 		if err := c.limiter.Wait(ctx, c.Sleep); err != nil {
@@ -126,7 +126,7 @@ func (c *Client) Post(ctx context.Context, body []byte, header http.Header, spen
 		if start != nil {
 			if err := start(); err != nil {
 				if last != nil {
-					return nil, fmt.Errorf("%v; retry not sent: %w", last, err)
+					return nil, fmt.Errorf("%w; retry not sent: %w", last, err)
 				}
 				return nil, err
 			}
@@ -149,7 +149,7 @@ func (c *Client) Post(ctx context.Context, body []byte, header http.Header, spen
 		}
 		// The server's delay is honoured as given; the run's context bounds the total wait.
 		if dl, ok := ctx.Deadline(); ok && time.Until(dl) < wait {
-			return nil, fmt.Errorf("%v; the requested retry delay of %s exceeds the run's remaining time", last, wait.Round(time.Second))
+			return nil, fmt.Errorf("%w; the requested retry delay of %s exceeds the run's remaining time", last, wait.Round(time.Second))
 		}
 		if err := c.Sleep(ctx, wait); err != nil {
 			return nil, err
@@ -174,7 +174,7 @@ func (c *Client) once(ctx context.Context, body []byte, header http.Header) ([]b
 		// url.Error names the endpoint and the cause; credentials travel in headers and are not in it.
 		return nil, 0, err
 	}
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }() // read to the end or the limit; nothing to report on close
 	raw, err := io.ReadAll(io.LimitReader(resp.Body, 8<<20))
 	if err != nil {
 		return nil, 0, err

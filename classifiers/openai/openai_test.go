@@ -21,7 +21,7 @@ func stub(t *testing.T, top func(prompt string) map[string]float64) (*httptest.S
 	var bodies []map[string]any
 	s := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.URL.Path != "/v1/chat/completions" {
-			w.WriteHeader(404)
+			w.WriteHeader(http.StatusNotFound)
 			return
 		}
 		b, _ := io.ReadAll(r.Body)
@@ -71,7 +71,8 @@ func TestAnswersFromLogprobs(t *testing.T) {
 	s, bodies := stub(t, func(p string) map[string]float64 {
 		switch {
 		case strings.Contains(p, "describe?"):
-			return map[string]float64{"B": 0.6, " A": 0.2, "C": 0.1, "Hello": 0.1} // C is unclear
+			// " A": servers return tokens with their leading space; the adapter must trim it.
+			return map[string]float64{"B": 0.6, " A": 0.2, "C": 0.1, "Hello": 0.1} //nolint:gocritic // the map key " A" has a leading space on purpose: servers send tokens with one
 		case strings.Contains(p, "short?"):
 			return map[string]float64{"A": 0.3, "B": 0.6}
 		default:

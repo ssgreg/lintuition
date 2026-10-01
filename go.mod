@@ -1,6 +1,6 @@
 module github.com/ssgreg/lintuition
 
-go 1.26.5
+go 1.26.0
 
 require (
 	github.com/spf13/cobra v1.10.2

@@ -33,7 +33,7 @@ func readFileWants(dir, p string, out map[string][]*regexp.Regexp) error {
 	if err != nil {
 		return err
 	}
-	defer f.Close()
+	defer func() { _ = f.Close() }() // read only
 	rel, _ := filepath.Rel(dir, p)
 	sc := bufio.NewScanner(f)
 	for n := 1; sc.Scan(); n++ {
@@ -44,11 +44,11 @@ func readFileWants(dir, p string, out map[string][]*regexp.Regexp) error {
 		for _, q := range patternRE.FindAllString(m[1], -1) {
 			s, err := strconv.Unquote(q)
 			if err != nil {
-				return fmt.Errorf("%s:%d: bad want: %v", rel, n, err)
+				return fmt.Errorf("%s:%d: bad want: %w", rel, n, err)
 			}
 			re, err := regexp.Compile(s)
 			if err != nil {
-				return fmt.Errorf("%s:%d: bad want: %v", rel, n, err)
+				return fmt.Errorf("%s:%d: bad want: %w", rel, n, err)
 			}
 			k := fmt.Sprintf("%s:%d", rel, n)
 			out[k] = append(out[k], re)
