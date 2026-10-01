@@ -41,9 +41,8 @@ type Evidence struct {
 	// Agreement is, per question, how the samples split ("current 2, total 1"). Agreement of
 	// correlated samples is not a probability of being right.
 	Agreement map[string]string `json:"agreement,omitempty"`
-	// PerSample is, per question, every sample's full answer in order: the probability of every
-	// option for a choice, "yes" for a yes/no, "score" for a score, unrounded.
-	PerSample map[string][]map[string]float64 `json:"per_sample,omitempty"`
+	// PerSample is, per question, every sample's full answer in order, unrounded.
+	PerSample map[string][]Sample `json:"per_sample,omitempty"`
 	// Support says, per question, what the scores are: token probabilities (empty), a model's own
 	// statement (self-reported), probabilities renormalized over the options' share (option-mass)
 	// with that share in Confidence, or a provider summary.
@@ -274,4 +273,15 @@ func sourceLine(pos token.Position) []string {
 		}
 	}
 	return nil
+}
+
+// Sample is one sample's answer to one question.
+type Sample struct {
+	// Answer is the picked option of a choice.
+	Answer string `json:"answer,omitempty"`
+	// Probabilities are every option's probability, unchosen ones included.
+	Probabilities map[string]float64 `json:"probabilities,omitempty"`
+	Yes           *float64           `json:"yes,omitempty"`
+	Score         *float64           `json:"score,omitempty"`
+	Confidence    *float64           `json:"confidence,omitempty"`
 }

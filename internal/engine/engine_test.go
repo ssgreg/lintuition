@@ -32,15 +32,17 @@ func TestScoreAgreementIsExact(t *testing.T) {
 	if got := agreement(qs, samples)["s"]; got != "0.01 1, 0.24 1, 0.49 1" {
 		t.Errorf("agreement %q", got)
 	}
-	if got := perSample(qs, samples)["s"]; len(got) != 3 || got[0]["score"] != 0.01 || got[2]["score"] != 0.49 {
+	if got := perSample(qs, samples)["s"]; len(got) != 3 || *got[0].Score != 0.01 || *got[2].Score != 0.49 {
 		t.Errorf("per sample %v", got)
 	}
 	choice := []sdk.Question{{ID: "k", Kind: sdk.Choice, Text: "?", Options: []sdk.Option{{Key: "a"}, {Key: "b"}}}}
+	conf := 0.42
 	cs := []map[string]sdk.Answer{
-		{"k": {Choice: "a", Probabilities: map[string]float64{"a": 0.61234, "b": 0.38766}}},
-		{"k": {Choice: "a", Probabilities: map[string]float64{"a": 0.7, "b": 0.3}}},
+		{"k": {Choice: "a", Probabilities: map[string]float64{"a": 0.61234, "confidence": 0.38766}, Confidence: &conf}},
+		{"k": {Choice: "a", Probabilities: map[string]float64{"a": 0.7, "confidence": 0.3}}},
 	}
-	if got := perSample(choice, cs)["k"]; got[0]["b"] != 0.38766 || got[0]["a"] != 0.61234 {
-		t.Errorf("unchosen options and exact values must be kept: %v", got)
+	got := perSample(choice, cs)["k"]
+	if got[0].Probabilities["confidence"] != 0.38766 || got[0].Probabilities["a"] != 0.61234 || *got[0].Confidence != 0.42 || got[0].Answer != "a" {
+		t.Errorf("an option named confidence must not collide with the confidence: %+v", got)
 	}
 }

@@ -32,13 +32,21 @@ Findings are review hints with their evidence, not proofs.
 
 ```sh
 go install github.com/ssgreg/lintuition/cmd/lintuition@latest
-cd examples/sample && lintuition run ./...   # runs offline with the scripted fake classifier
 ```
 
-On your code, with Jev:
+The offline sample lives in this repository:
+
+```sh
+git clone https://github.com/ssgreg/lintuition && cd lintuition/examples/sample
+lintuition run ./...   # runs offline with the scripted fake classifier
+```
+
+On your code, with Jev (`.lintuition.quickstart.yml` is in the repository and in every release
+archive):
 
 ```sh
 cp .lintuition.quickstart.yml your/project/.lintuition.yml
+cd your/project
 export TYPESAFE_API_KEY=...
 lintuition run --dry-run --preview requests.jsonl ./...   # what would be sent, and how much
 lintuition run ./...

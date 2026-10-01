@@ -233,7 +233,7 @@ type job struct {
 	replayed  bool
 	samples   int
 	agreement map[string]string
-	perSample map[string][]map[string]float64
+	perSample map[string][]report.Sample
 	key       string
 	skipped   string
 	err       error
@@ -647,29 +647,15 @@ func agreement(qs []sdk.Question, samples []map[string]sdk.Answer) map[string]st
 
 // perSample is, per question, each sample's full answer in sample order, unrounded. Nil for one
 // sample, whose answer is the evidence itself.
-func perSample(qs []sdk.Question, samples []map[string]sdk.Answer) map[string][]map[string]float64 {
+func perSample(qs []sdk.Question, samples []map[string]sdk.Answer) map[string][]report.Sample {
 	if len(samples) < 2 {
 		return nil
 	}
-	out := map[string][]map[string]float64{}
+	out := map[string][]report.Sample{}
 	for _, q := range qs {
 		for _, s := range samples {
 			a := s[q.ID]
-			v := map[string]float64{}
-			switch {
-			case a.Choice != "":
-				for k, p := range a.Probabilities {
-					v[k] = p
-				}
-			case a.Yes != nil:
-				v["yes"] = *a.Yes
-			case a.Score != nil:
-				v["score"] = *a.Score
-			}
-			if a.Confidence != nil {
-				v["confidence"] = *a.Confidence
-			}
-			out[q.ID] = append(out[q.ID], v)
+			out[q.ID] = append(out[q.ID], report.Sample{Answer: a.Choice, Probabilities: a.Probabilities, Yes: a.Yes, Score: a.Score, Confidence: a.Confidence})
 		}
 	}
 	return out

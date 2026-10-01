@@ -25,6 +25,8 @@ type LogCall struct {
 	// Message is the constant message or format; MessageKnown is false when it is built at run time.
 	Message      string
 	MessageKnown bool
+	// MessageArg is the index of the message argument, -1 when there is none.
+	MessageArg int
 }
 
 // logPackages are the logger packages recognised by path. Any other package whose last path element
@@ -86,7 +88,7 @@ func AsLogCall(info *types.Info, call *ast.CallExpr) (LogCall, bool) {
 	if fn == nil || !isLogPackage(fn.Pkg()) || fn.Type().(*types.Signature).Results().Len() > 0 {
 		return LogCall{}, false
 	}
-	lc := LogCall{Call: call, Func: fn}
+	lc := LogCall{Call: call, Func: fn, MessageArg: -1}
 	if fn.Name() == "Msg" || fn.Name() == "Msgf" {
 		// zerolog: the level is the call the event came from.
 		inner, ok := chainRoot(call)
@@ -115,10 +117,12 @@ func AsLogCall(info *types.Info, call *ast.CallExpr) (LogCall, bool) {
 		if sig.Variadic() && i == sig.Params().Len()-1 {
 			// Print(v ...any): the first argument is the message when it is a constant string.
 			lc.Message, lc.MessageKnown = ConstString(info, call.Args[i])
+			lc.MessageArg = i
 			break
 		}
 		if b, ok := t.Underlying().(*types.Basic); ok && b.Kind() == types.String {
 			lc.Message, lc.MessageKnown = ConstString(info, call.Args[i])
+			lc.MessageArg = i
 			break
 		}
 	}
