@@ -274,3 +274,43 @@ func TestValidateRejectsStop35(t *testing.T) { // 35 unsupported: a log whose ar
 }
 
 func helper(t *testing.T) { t.Skip("skip") }
+
+func skipMessage(t *testing.T) string {
+	t.Skip("backend unavailable")
+	return "unreachable"
+}
+
+func skipT(t *testing.T) *testing.T {
+	t.Skip("backend unavailable")
+	return t
+}
+
+func TestValidateRejectsStop36(t *testing.T) { // 36 unsupported: the failure's argument may skip the test
+	err := Validate("")
+	if err != nil {
+		t.Fatal(skipMessage(t))
+	}
+}
+
+func TestValidateRejectsStop37(t *testing.T) { // 37 unsupported: the failure's receiver may skip the test
+	err := Validate("")
+	if err != nil {
+		skipT(t).Fatal(err)
+	}
+}
+
+func TestValidateRejectsStop38(t *testing.T) { // 38 unsupported: the log's receiver may skip the test
+	err := Validate("")
+	if err != nil {
+		skipT(t).Log(err)
+		t.Fatal(err)
+	}
+}
+
+func TestValidateAcceptsConverted(t *testing.T) { // 39 candidate: a conversion in the argument is not a call
+	err := Validate("x")
+	if err != nil {
+		t.Log(any(err))
+		t.Fatal(error(err))
+	}
+}

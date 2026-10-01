@@ -84,6 +84,10 @@ func TestExtraction(t *testing.T) {
 		`33 unsupported: the error is checked in a form not read here`,
 		`34 unsupported: the error is checked in a form not read here`,
 		`35 unsupported: the error is checked in a form not read here`,
+		`36 unsupported: the error is checked in a form not read here`,
+		`37 unsupported: the error is checked in a form not read here`,
+		`38 unsupported: the error is checked in a form not read here`,
+		`39 "validate accepts converted" call=Validate expect=no_error`,
 	}
 	if strings.Join(got, "\n") != strings.Join(want, "\n") {
 		t.Fatalf("candidates:\n%s\n\nwant:\n%s", strings.Join(got, "\n"), strings.Join(want, "\n"))
