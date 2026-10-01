@@ -264,3 +264,39 @@ func TestIsReadyWrites(t *testing.T) {
 }
 
 func fix(r *readyRow) { r.want = !r.want }
+
+func TestIsReadyEarlierLoop(t *testing.T) {
+	pointers := []*readyRow{
+		{name: "pointer row set earlier", input: true, want: false}, // 27 unsupported: an earlier loop sets tt.want
+	}
+	for _, tt := range pointers {
+		tt.want = true
+	}
+	for _, tt := range pointers {
+		if Allowed(tt.input) != tt.want {
+			t.Fail()
+		}
+	}
+	passed := []*readyRow{
+		{name: "pointer row passed on earlier", input: true, want: false}, // 28 unsupported: an earlier loop passes the row on
+	}
+	for _, tt := range passed {
+		fix(tt)
+	}
+	for _, tt := range passed {
+		if Allowed(tt.input) != tt.want {
+			t.Fail()
+		}
+	}
+	values := []readyRow{
+		{name: "value row set earlier", input: true, want: true}, // 29 unsupported: a write in any loop over the table
+	}
+	for _, tt := range values {
+		tt.want = false
+	}
+	for _, tt := range values {
+		if Allowed(tt.input) != tt.want {
+			t.Fail()
+		}
+	}
+}

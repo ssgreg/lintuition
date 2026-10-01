@@ -144,3 +144,15 @@ func TestIsReadyIndexed(t *testing.T) {
 		}
 	}
 }
+
+func TestIsReadyPointerEarlierLoop(t *testing.T) {
+	tests := []*row{{name: "worker is ready", input: true, want: false}} // 16 unsupported: an earlier loop sets tt.want
+	for _, tt := range tests {
+		tt.want = true
+	}
+	for _, tt := range tests {
+		if IsReady(tt.input) != tt.want {
+			t.Fail()
+		}
+	}
+}
