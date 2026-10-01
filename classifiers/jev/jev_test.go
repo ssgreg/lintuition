@@ -299,3 +299,18 @@ func TestUsageWithoutCallbackAndDuplicates(t *testing.T) {
 		t.Errorf("repeated usage must be unknown, not the last value: %+v", u)
 	}
 }
+
+func TestUsageReturnedOnRejectedAnswers(t *testing.T) {
+	for name, body := range map[string]string{
+		"shape":   `{"answers":[],"usage":{"input_tokens":100}}`,
+		"unasked": `{"answers":{"alien":{"type":"noul","noul":0.5}},"usage":{"input_tokens":100}}`,
+		"convert": `{"answers":{"kind":{"type":"noul","noul":0.5}},"usage":{"input_tokens":100}}`,
+	} {
+		s := newServer(t, func(int, map[string]any, http.ResponseWriter) {})
+		s.Config.Handler = http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) { io.WriteString(w, body) })
+		resp, err := newTest(t, s.URL).Classify(context.Background(), req)
+		if err == nil || resp.Usage.InputTokens != 100 || len(resp.Answers) != 0 {
+			t.Errorf("%s: a rejected response keeps its usage and no answers: %+v %v", name, resp, err)
+		}
+	}
+}

@@ -207,7 +207,7 @@ func (c *Classifier) Classify(ctx context.Context, req sdk.Request) (sdk.Respons
 	var wr wireResponse
 	if err := json.Unmarshal(raw, &wr); err != nil {
 		// The decoder's message can quote the body; keep only the category.
-		return sdk.Response{}, errors.New("the response is not valid JSON of the expected shape")
+		return sdk.Response{Usage: usage}, errors.New("the response is not valid JSON of the expected shape")
 	}
 	asked := map[string]bool{}
 	for _, q := range req.Questions {
@@ -215,7 +215,7 @@ func (c *Classifier) Classify(ctx context.Context, req sdk.Request) (sdk.Respons
 	}
 	for id := range wr.Answers {
 		if !asked[id] {
-			return sdk.Response{}, errors.New("the response answers a question that was not asked")
+			return sdk.Response{Usage: usage}, errors.New("the response answers a question that was not asked")
 		}
 	}
 	resp := sdk.Response{Usage: usage}
@@ -227,7 +227,7 @@ func (c *Classifier) Classify(ctx context.Context, req sdk.Request) (sdk.Respons
 		a, err := convert(q, wa)
 		if err != nil {
 			// q.ID is ours; err names only the category, never a remote value.
-			return sdk.Response{}, fmt.Errorf("question %q: %w", q.ID, err)
+			return sdk.Response{Usage: usage}, fmt.Errorf("question %q: %w", q.ID, err)
 		}
 		resp.Answers = append(resp.Answers, a)
 	}
