@@ -285,7 +285,7 @@ func (r *runner) do(ctx context.Context, jobs []*job) {
 				continue
 			}
 		}
-		if !r.reserve(r.votes) {
+		if !r.reserve(r.votes * r.callsPer(qs)) {
 			j.err = errors.New("not asked: " + r.capped)
 			continue
 		}
@@ -356,6 +356,14 @@ func (r *runner) plan(qs []sdk.Question) error {
 	return nil
 }
 
+// callsPer is how many calls one sample of a request takes.
+func (r *runner) callsPer(qs []sdk.Question) int {
+	if r.cl != nil && r.cl.Capabilities().CallsPerQuestion {
+		return len(qs)
+	}
+	return 1
+}
+
 // spent reports, before a sample is sent, that the observed cost leaves nothing of
 // semantic.budget.max-cost-usd: at or past the cap, no further sample goes out.
 func (r *runner) spent() bool {
@@ -408,14 +416,36 @@ func (r *runner) reserve(n int) bool {
 // operational failure is not a vote against.
 func (r *runner) ask(ctx context.Context, j *job, req sdk.Request) {
 	var bd classify.Bundle
+	count := func() {
+		r.mu.Lock()
+		r.sent++
+		r.mu.Unlock()
+	}
 	req.Retry = func() error {
 		if !r.reserve(1) {
 			return errors.New(r.capped)
 		}
-		r.mu.Lock()
-		r.sent++
-		r.mu.Unlock()
+		count()
 		return nil
+	}
+	req.Next = func() error {
+		// Reserved with the candidate; only the cost may have run out since.
+		if r.spent() {
+			return errors.New(r.capped)
+		}
+		count()
+		return nil
+	}
+	reported := false
+	req.Used = func(u sdk.Usage) {
+		reported = true
+		r.mu.Lock()
+		r.tokens += u.InputTokens
+		r.cost += u.CostUSD
+		r.mu.Unlock()
+		bd.Usage.InputTokens += u.InputTokens
+		bd.Usage.CostUSD += u.CostUSD
+		r.overCost()
 	}
 	for i := range r.votes {
 		// The cost of the samples already back may have spent the budget; a vote with missing
@@ -430,26 +460,22 @@ func (r *runner) ask(ctx context.Context, j *job, req sdk.Request) {
 			}
 			return
 		}
-		r.mu.Lock()
-		r.sent++
-		r.mu.Unlock()
+		count()
+		reported = false
 		resp, err := r.cl.Classify(ctx, req)
+		if !reported {
+			// A backend that does not report per call: account what it returned, even with an error.
+			req.Used(resp.Usage)
+		}
 		if err != nil {
 			j.err = fmt.Errorf("classifier %s: %w", r.clName, err)
 			return
 		}
-		r.mu.Lock()
-		r.tokens += resp.Usage.InputTokens
-		r.cost += resp.Usage.CostUSD
-		r.mu.Unlock()
-		r.overCost() // a response that crosses the cap makes the run incomplete
 		if _, err := classify.Check(req.Questions, resp); err != nil {
 			j.err = fmt.Errorf("classifier %s: invalid response: %w", r.clName, err)
 			return
 		}
 		bd.Samples = append(bd.Samples, resp.Answers)
-		bd.Usage.InputTokens += resp.Usage.InputTokens
-		bd.Usage.CostUSD += resp.Usage.CostUSD
 	}
 	if r.cache != nil && j.key != "" {
 		if err := r.cache.Put(j.key, bd); err != nil {

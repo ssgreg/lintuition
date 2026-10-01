@@ -138,6 +138,10 @@ func (c *Classifier) Ready() error {
 	return nil
 }
 
+// adapterVersion changes with the prompt or the way answers are read; it is part of the cache
+// identity, as is every setting that changes what is accepted.
+const adapterVersion = "2"
+
 // Identity names what decides an answer besides the request, for the answer cache.
 func (c *Classifier) Identity() string {
 	acct := c.account
@@ -145,7 +149,7 @@ func (c *Classifier) Identity() string {
 		sum := sha256.Sum256([]byte("lintuition-cache-scope\x00" + c.key))
 		acct = "key:" + hex.EncodeToString(sum[:8])
 	}
-	return fmt.Sprintf("openai|%s|%s|%s|t=%g", c.hc.Endpoint(), c.model, acct, c.temp)
+	return fmt.Sprintf("openai/%s|%s|%s|%s|t=%g|mass=%g", adapterVersion, c.hc.Endpoint(), c.model, acct, c.temp, c.minMass)
 }
 
 // Model is the public model identity for report evidence.
@@ -153,7 +157,7 @@ func (c *Classifier) Model() string { return c.model }
 
 // Capabilities implements sdk.Classifier.
 func (c *Classifier) Capabilities() sdk.Capabilities {
-	return sdk.Capabilities{Kinds: []sdk.Kind{sdk.Choice, sdk.Noul, sdk.Score}, Probabilities: true, Local: c.hc.Local()}
+	return sdk.Capabilities{Kinds: []sdk.Kind{sdk.Choice, sdk.Noul, sdk.Score}, Probabilities: true, Local: c.hc.Local(), CallsPerQuestion: true}
 }
 
 // system was chosen among three wordings on nine labelled cases with qwen2.5:7b; it is not tuned
@@ -245,8 +249,8 @@ type completionResponse struct {
 		Logprobs *struct {
 			Content []struct {
 				TopLogprobs []struct {
-					Token   string  `json:"token"`
-					Logprob float64 `json:"logprob"`
+					Token   string   `json:"token"`
+					Logprob *float64 `json:"logprob"`
 				} `json:"top_logprobs"`
 			} `json:"content"`
 		} `json:"logprobs"`
@@ -254,6 +258,10 @@ type completionResponse struct {
 	Usage struct {
 		PromptTokens int `json:"prompt_tokens"`
 	} `json:"usage"`
+}
+
+func (c *Classifier) usage(cr completionResponse) sdk.Usage {
+	return sdk.Usage{InputTokens: cr.Usage.PromptTokens, CostUSD: float64(cr.Usage.PromptTokens) * c.price / 1e6}
 }
 
 // Classify implements sdk.Classifier: one completion per question.
@@ -265,12 +273,16 @@ func (c *Classifier) Classify(ctx context.Context, req sdk.Request) (sdk.Respons
 	if c.key != "" {
 		header.Set("Authorization", "Bearer "+c.key)
 	}
+	used := func(u sdk.Usage) {
+		if req.Used != nil {
+			req.Used(u)
+		}
+	}
 	var resp sdk.Response
 	for i, q := range req.Questions {
-		// The first question's request was admitted by the caller; every further one is an extra
-		// transport attempt and is cleared with the budget, like a retry.
-		if i > 0 && req.Retry != nil {
-			if err := req.Retry(); err != nil {
+		// The caller reserved one call per question; it may have spent the budget since.
+		if i > 0 && req.Next != nil {
+			if err := req.Next(); err != nil {
 				return sdk.Response{}, err
 			}
 		}
@@ -289,13 +301,13 @@ func (c *Classifier) Classify(ctx context.Context, req sdk.Request) (sdk.Respons
 		if err := json.Unmarshal(raw, &cr); err != nil {
 			return sdk.Response{}, errors.New("the response is not valid JSON of the expected shape")
 		}
+		// Usage is reported before the answer is judged: a rejected completion still cost money.
+		used(c.usage(cr))
 		a, err := c.answer(q, cr)
 		if err != nil {
 			return sdk.Response{}, fmt.Errorf("question %q: %w", q.ID, err)
 		}
 		resp.Answers = append(resp.Answers, a)
-		resp.Usage.InputTokens += cr.Usage.PromptTokens
-		resp.Usage.CostUSD += float64(cr.Usage.PromptTokens) * c.price / 1e6
 	}
 	return resp, nil
 }
@@ -307,24 +319,38 @@ func (c *Classifier) answer(q sdk.Question, cr completionResponse) (sdk.Answer, 
 	}
 	keys, _ := labels(q)
 	mass := make([]float64, len(keys))
-	total := 0.0
+	total, all := 0.0, 0.0
 	for _, t := range cr.Choices[0].Logprobs.Content[0].TopLogprobs {
+		// A log probability must be present, finite and not above 0: a missing one must not read
+		// as log 0, which is certainty.
+		if t.Logprob == nil || math.IsNaN(*t.Logprob) || math.IsInf(*t.Logprob, 1) || *t.Logprob > 0 {
+			return sdk.Answer{}, errors.New("the response has a missing or invalid token log probability")
+		}
+		p := math.Exp(*t.Logprob)
+		all += p
 		tok := strings.TrimSpace(t.Token)
 		for i := range keys {
 			if strings.EqualFold(tok, letter(q, i)) {
-				p := math.Exp(t.Logprob)
 				mass[i] += p
 				total += p
 			}
 		}
 	}
-	if math.IsNaN(total) || total < c.minMass {
+	// The top tokens are alternatives for one position: their probabilities cannot add up to more
+	// than 1. Fewer tokens than asked for is fine, more than all of the mass is not.
+	if all > 1+1e-6 {
+		return sdk.Answer{}, errors.New("the response's token probabilities add up to more than 1")
+	}
+	if total <= 0 || total < c.minMass {
 		return sdk.Answer{}, fmt.Errorf("the model put %.2f of its first token on the options, under min-letter-mass %.2f", total, c.minMass)
 	}
 	for i := range mass {
 		mass[i] /= total
 	}
-	a := sdk.Answer{QuestionID: q.ID}
+	// The option probabilities are conditional on the model answering with an option; how much of
+	// its probability did is kept as the confidence, so 0.6 of mass renormalized to 1.0 shows.
+	share := total
+	a := sdk.Answer{QuestionID: q.ID, Confidence: &share, ConfidenceMeaning: sdk.ConfidenceOptionMass}
 	switch q.Kind {
 	case sdk.Choice:
 		a.Probabilities = map[string]float64{}

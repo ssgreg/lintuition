@@ -109,6 +109,9 @@ const (
 	// ConfidenceSummary is a provider's summary of its own answer distribution; it is not the
 	// probability of the picked option and not a measure of correctness.
 	ConfidenceSummary ConfidenceMeaning = "provider-summary"
+	// ConfidenceOptionMass is the share of a model's next-token probability that fell on the
+	// offered options; the option probabilities are renormalized over that share.
+	ConfidenceOptionMass ConfidenceMeaning = "option-mass"
 )
 
 // Probability returns the probability of the given option, and false if the backend gave none.
@@ -125,9 +128,17 @@ type Request struct {
 	Linter    string
 	State     map[string]any
 	Questions []Question
-	// Retry, when set, must be called before every transport attempt after the first one; an error
-	// means the run's budget does not allow it, and the classifier must stop and return an error.
+	// Retry, when set, must be called before every retry of a transport attempt; an error means the
+	// run's budget does not allow it, and the classifier must stop and return an error.
 	Retry func() error
+	// Next, when set, must be called by a backend with CallsPerQuestion before each question's call
+	// after the first. The call was reserved; an error means the budget was spent meanwhile and the
+	// backend must stop and return an error.
+	Next func() error
+	// Used, when set, should be called with each call's usage as soon as it is known, also when the
+	// answer is then rejected, so the run's cost is right and the next call can be stopped in time.
+	// When a backend calls Used, the engine ignores Response.Usage.
+	Used func(Usage)
 }
 
 // Usage is what a request cost.
@@ -152,6 +163,9 @@ type Capabilities struct {
 	Local bool
 	// MaxStateBytes limits the encoded state of one request; zero means no limit.
 	MaxStateBytes int
+	// CallsPerQuestion is true when the backend makes one call per question rather than one per
+	// request; the run's budget reserves calls accordingly.
+	CallsPerQuestion bool
 }
 
 // Supports reports whether the backend answers questions of kind k.

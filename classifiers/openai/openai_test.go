@@ -34,6 +34,10 @@ func stub(t *testing.T, top func(prompt string) map[string]float64) (*httptest.S
 		prompt := msgs[len(msgs)-1].(map[string]any)["content"].(string)
 		var tl []map[string]any
 		for tok, p := range top(prompt) {
+			if p < 0 {
+				tl = append(tl, map[string]any{"token": tok}) // no logprob
+				continue
+			}
 			tl = append(tl, map[string]any{"token": tok, "logprob": math.Log(p)})
 		}
 		json.NewEncoder(w).Encode(map[string]any{
@@ -87,6 +91,9 @@ func TestAnswersFromLogprobs(t *testing.T) {
 		by[a.QuestionID] = a
 	}
 	k := by["kind"]
+	if k.Confidence == nil || math.Abs(*k.Confidence-0.9) > 1e-9 || k.ConfidenceMeaning != sdk.ConfidenceOptionMass {
+		t.Errorf("the option mass must be kept: %+v", k)
+	}
 	if k.Choice != "current" || math.Abs(k.Probabilities["current"]-0.6/0.9) > 1e-9 || math.Abs(k.Probabilities["unclear"]-0.1/0.9) > 1e-9 {
 		t.Errorf("choice: %+v (letter mass renormalized, a non-letter token ignored)", k)
 	}
@@ -140,8 +147,42 @@ func TestExtraQuestionsSpendBudget(t *testing.T) {
 	c := newTest(t, s.URL)
 	r := req
 	r.Questions = []sdk.Question{{ID: "a", Kind: sdk.Noul, Text: "?"}, {ID: "b", Kind: sdk.Noul, Text: "?"}}
-	r.Retry = func() error { return context.Canceled }
+	r.Next = func() error { return context.Canceled }
 	if _, err := c.Classify(context.Background(), r); err == nil || len(*bodies) != 1 {
 		t.Fatalf("the second question's completion must be cleared with the budget: %v, %d sent", err, len(*bodies))
+	}
+	if !c.Capabilities().CallsPerQuestion {
+		t.Error("one call per question must be declared for planning")
+	}
+}
+
+func TestInvalidLogprobs(t *testing.T) {
+	for name, top := range map[string]map[string]float64{
+		"missing logprob": {"B": -1},
+		"more than one":   {"A": 0.9, "B": 0.9},
+	} {
+		s, _ := stub(t, func(string) map[string]float64 { return top })
+		if _, err := newTest(t, s.URL).Classify(context.Background(), sdk.Request{State: req.State, Questions: req.Questions[:1]}); err == nil {
+			t.Errorf("%s: want an error, not a confident answer", name)
+		}
+	}
+}
+
+func TestUsageReportedBeforeJudging(t *testing.T) {
+	s, _ := stub(t, func(string) map[string]float64 { return map[string]float64{"Sure": 0.9, "A": 0.05} })
+	c := newTest(t, s.URL)
+	var got []sdk.Usage
+	r := sdk.Request{State: req.State, Questions: req.Questions[:1], Used: func(u sdk.Usage) { got = append(got, u) }}
+	if _, err := c.Classify(context.Background(), r); err == nil || len(got) != 1 || got[0].InputTokens != 100 {
+		t.Fatalf("a rejected completion's usage must still be reported: %v %+v", err, got)
+	}
+}
+
+func TestIdentityTracksAcceptance(t *testing.T) {
+	low, high := 0.5, 0.9
+	a, _ := New(Settings{Model: "m", MinLetterMass: &low}, func(string) string { return "" })
+	b, _ := New(Settings{Model: "m", MinLetterMass: &high}, func(string) string { return "" })
+	if a.Identity() == b.Identity() {
+		t.Error("a stricter min-letter-mass must not reuse answers accepted under a looser one")
 	}
 }
