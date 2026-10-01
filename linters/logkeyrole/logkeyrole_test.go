@@ -39,7 +39,7 @@ func TestExtraction(t *testing.T) {
 	for _, r := range res {
 		cs = append(cs, r.Result.([]*sdk.Candidate)...)
 	}
-	sort.Slice(cs, func(i, j int) bool { return num(caseNo(t, cs[i].Pos)) < num(caseNo(t, cs[j].Pos)) })
+	sort.SliceStable(cs, func(i, j int) bool { return num(caseNo(t, cs[i].Pos)) < num(caseNo(t, cs[j].Pos)) })
 	var got []string
 	for _, c := range cs {
 		n := caseNo(t, c.Pos)
@@ -59,6 +59,8 @@ func TestExtraction(t *testing.T) {
 		`8 unsupported: a field key cannot be sent as a fact`,
 		`9 [key deadline, value started, type int]`,
 		`12 [key path, value name, type string]`,
+		`15 [key count, value total, type int]`,
+		`15 unsupported: some log fields are not readable; only the readable ones are asked about`,
 	}
 	if strings.Join(got, "\n") != strings.Join(want, "\n") {
 		t.Fatalf("candidates:\n%s\n\nwant:\n%s", strings.Join(got, "\n"), strings.Join(want, "\n"))

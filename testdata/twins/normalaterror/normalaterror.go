@@ -42,3 +42,8 @@ func save(err error) {
 		slog.Error("failed to save the upload", "err", err)
 	}
 }
+
+// Defect: a planned failover that worked is routine, though its name starts with "fail".
+func failoverDefect() {
+	slog.Error("planned failover to the standby completed") // want `routine event logged at error level`
+}

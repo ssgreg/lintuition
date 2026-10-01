@@ -75,3 +75,7 @@ func c13() {
 func c14() {
 	slog.Info("retrying", "first", items()[0]) // 14 none: an index is not a variable
 }
+
+func c15(total int, key string, n int) {
+	slog.Info("summary", "count", total, slog.Int(key, n)) // 15 candidate: a readable pair beside a dynamic key, and the unread part
+}

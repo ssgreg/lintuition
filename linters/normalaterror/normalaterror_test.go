@@ -58,6 +58,7 @@ func TestExtraction(t *testing.T) {
 		`5 fatal "client went away: %s"`,
 		`9 error "retry scheduled"`,
 		`14 error "request canceled by client"`,
+		`15 error "planned failover completed successfully"`,
 	}
 	if strings.Join(got, "\n") != strings.Join(want, "\n") {
 		t.Fatalf("candidates:\n%s\n\nwant:\n%s", strings.Join(got, "\n"), strings.Join(want, "\n"))
@@ -97,7 +98,8 @@ func TestNamesFailure(t *testing.T) {
 	for msg, want := range map[string]bool{
 		"failed to save": true, "Save failure": true, "ERROR: x": true, "cannot open": true, "could not dial": true,
 		"request timed out": true, "cache miss": false, "client went away": false, "retry scheduled": false,
-		"terror alert": false, "can notify": false,
+		"terror alert": false, "can notify": false, "planned failover completed successfully": false,
+		"failback started": false, "Failures: 3": true,
 	} {
 		if got := namesFailure(msg); got != want {
 			t.Errorf("namesFailure(%q) = %v", msg, got)

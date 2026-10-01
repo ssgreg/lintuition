@@ -39,7 +39,7 @@ func TestExtraction(t *testing.T) {
 	for _, r := range res {
 		cs = append(cs, r.Result.([]*sdk.Candidate)...)
 	}
-	sort.Slice(cs, func(i, j int) bool { return num(caseNo(t, cs[i].Pos)) < num(caseNo(t, cs[j].Pos)) })
+	sort.SliceStable(cs, func(i, j int) bool { return num(caseNo(t, cs[i].Pos)) < num(caseNo(t, cs[j].Pos)) })
 	var got []string
 	for _, c := range cs {
 		n := caseNo(t, c.Pos)
@@ -65,6 +65,10 @@ func TestExtraction(t *testing.T) {
 		`12 "" [key secret, value s, type string]`,
 		`14 "key loaded" [key key, value key, type slice of byte key cfg, value p, type pointer to a.Config]`,
 		`15 "login" [key user, value u, type string]`,
+		`15 unsupported: some log fields are not readable; only the readable ones are asked about`,
+		`16 "login" [key request_id, value requestID, type string]`,
+		`16 unsupported: some log fields are not readable; only the readable ones are asked about`,
+		`17 "key loaded" [key key, value the result of LoadEncryptionKey, type string]`,
 	}
 	if strings.Join(got, "\n") != strings.Join(want, "\n") {
 		t.Fatalf("candidates:\n%s\n\nwant:\n%s", strings.Join(got, "\n"), strings.Join(want, "\n"))
@@ -107,7 +111,9 @@ func TestDecide(t *testing.T) {
 func TestRedacts(t *testing.T) {
 	for name, want := range map[string]bool{
 		"Redact": true, "MaskToken": true, "HashPassword": true, "SHA256": true, "Redacted": true,
-		"ShareLink": false, "Token": false, "String": false, "Hmac": true,
+		"ShareLink": false, "Token": false, "String": false, "Hmac": true, "MaskedToken": true,
+		"LoadEncryptionKey": false, "GetHMACKey": false, "EncryptionKey": false, "LoadKey": false,
+		"KeyHash": false, "PasswordDigestSalt": false, "Encrypted": true,
 	} {
 		if got := redacts(name); got != want {
 			t.Errorf("redacts(%q) = %v", name, got)

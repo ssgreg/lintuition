@@ -43,6 +43,7 @@ semantic:
         - {linter: normal-event-at-error, question: event, when: "cache miss, loading from the database", choice: routine, probability: 0.95}
         - {linter: normal-event-at-error, question: event, when: "disk quota exceeded, uploads are paused", choice: degradation, probability: 0.9}
         - {linter: normal-event-at-error, question: event, when: "queue full, event dropped and not retried", choice: failure, probability: 0.9}
+        - {linter: normal-event-at-error, question: event, when: "planned failover to the standby completed", choice: routine, probability: 0.95}
         # severe-event-understated
         - {linter: severe-event-understated, question: consequence, when: "queue full, event dropped and not retried", choice: unintended_loss, probability: 0.95}
         - {linter: severe-event-understated, question: on_purpose, when: "queue full, event dropped and not retried", yes: 0.1}
@@ -74,13 +75,12 @@ semantic:
         - {linter: destructive-remediation, question: states_loss, when: "remove the --dry-run flag to apply the plan", yes: 0.2}
         - {linter: destructive-remediation, question: advice, when: "lock file was removed by another process", choice: no_advice, probability: 0.95}
         - {linter: destructive-remediation, question: states_loss, when: "lock file was removed by another process", yes: 0.2}
-        # destructive-remediation reads every text with a destructive word, the other linters' twins too.
-        - {linter: destructive-remediation, question: advice, when: "\"text\":\"queue full, event dropped and not retried\"", choice: no_advice, probability: 0.95}
-        - {linter: destructive-remediation, question: states_loss, when: "\"text\":\"queue full, event dropped and not retried\"", yes: 0.5}
-        - {linter: destructive-remediation, question: advice, when: "\"text\":\"deleted expired sessions as requested\"", choice: no_advice, probability: 0.95}
-        - {linter: destructive-remediation, question: states_loss, when: "\"text\":\"deleted expired sessions as requested\"", yes: 0.5}
-        - {linter: destructive-remediation, question: advice, when: "\"text\":\"debug event dropped by the sampler as configured\"", choice: no_advice, probability: 0.95}
-        - {linter: destructive-remediation, question: states_loss, when: "\"text\":\"debug event dropped by the sampler as configured\"", yes: 0.5}
+        - {linter: destructive-remediation, question: advice, when: "data volume is unreadable; format it", choice: destructive_advice, probability: 0.95}
+        - {linter: destructive-remediation, question: states_loss, when: "data volume is unreadable; format it", yes: 0.1}
+        # destructive-remediation asks about every constant error and log text, every other twin's
+        # too. Those are reports, not advice: one answer for the rest, after the specific ones above.
+        - {linter: destructive-remediation, question: advice, choice: no_advice, probability: 0.9}
+        - {linter: destructive-remediation, question: states_loss, yes: 0.5}
         # sentinel-name-vs-text
         - {linter: sentinel-name-vs-text, question: condition, when: "tenant record not found", choice: different, probability: 0.8}
         - {linter: sentinel-name-vs-text, question: condition, when: "tenant storage quota exceeded", choice: same, probability: 0.9}
@@ -135,3 +135,4 @@ semantic:
         - {linter: error-needs-type, question: branchable, when: "backup index mismatch", yes: 0.1}
         - {linter: error-needs-type, question: branchable, when: "remove the --dry-run flag to apply the plan", yes: 0.1}
         - {linter: error-needs-type, question: branchable, when: "lock file was removed by another process", yes: 0.2}
+        - {linter: error-needs-type, question: branchable, when: "data volume is unreadable; format it", yes: 0.2}

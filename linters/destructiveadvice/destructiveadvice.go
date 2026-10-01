@@ -4,17 +4,18 @@
 //	return errors.New("index is corrupt; delete the data directory and restart")
 //
 // Code finds error constructors (errors.New, fmt.Errorf, pkg/errors) and log calls, resolved
-// through go/types, with a constant text. Only a text with a destructive word (delete, remove, wipe,
-// reset, reinstall, drop, purge, ...) is asked about: without one it cannot advise a destructive
-// step. The classifier reads only the text and is asked whether it advises the reader, and
-// separately whether it says what would be lost or how to preserve it first.
+// through go/types, with a constant text of at least one word, and asks about every one. There is
+// no keyword prefilter: "format the data volume", "overwrite the database" and "run mkfs" advise
+// destruction in words no list anticipates, and a missed text looks checked. The cost is a request
+// per constant message; semantic.budget bounds it. The classifier reads only the text and is asked
+// whether it advises the reader, and separately whether it says what would be lost or how to
+// preserve it first.
 package destructiveadvice
 
 import (
 	"fmt"
 	"go/ast"
 	"regexp"
-	"strings"
 
 	"golang.org/x/tools/go/analysis"
 	"golang.org/x/tools/go/analysis/passes/inspect"
@@ -42,10 +43,10 @@ const (
 	statesLossMin = 0.7
 )
 
-// Analyzer extracts error and log texts that contain a destructive word.
+// Analyzer extracts constant error and log texts.
 var Analyzer = &analysis.Analyzer{
 	Name:       "destructiveadvice",
-	Doc:        "extract error and log texts with a destructive word",
+	Doc:        "extract constant error and log texts",
 	Requires:   []*analysis.Analyzer{inspect.Analyzer},
 	ResultType: sdk.CandidatesType,
 	Run:        run,
@@ -56,7 +57,7 @@ func init() {
 		Name:        Name,
 		Doc:         "an error or log message that advises deleting, wiping, resetting or reinstalling without saying what is lost",
 		Standard:    true,
-		Version:     "1",
+		Version:     "2",
 		Analyzer:    Analyzer,
 		NewSettings: func() any { return &Settings{} },
 		New: func(s any) (sdk.Rule, error) {
@@ -101,8 +102,8 @@ func candidate(pass *analysis.Pass, call *ast.CallExpr) *sdk.Candidate {
 		c.Unsupported = "the " + kind + " is not a constant string"
 		return c
 	}
-	if !destructiveWord(text) {
-		return nil
+	if !wordRE.MatchString(text) {
+		return nil // "%s: %v" advises nothing
 	}
 	c.Subject = text
 	c.Local["text"] = text
@@ -111,29 +112,7 @@ func candidate(pass *analysis.Pass, call *ast.CallExpr) *sdk.Candidate {
 	return c
 }
 
-var wordRE = regexp.MustCompile(`[a-z]+`)
-
-// destructivePrefixes are the stems of the verbs a destructive instruction uses.
-var destructivePrefixes = []string{
-	"delet", "remov", "wipe", "wiping", "eras", "reset", "reinstall", "uninstall", "drop", "purg",
-	"truncat", "reformat", "clear", "clean", "recreat", "reinit", "destroy", "discard", "nuke",
-}
-
-// destructiveWord reports whether a text has a word a destructive instruction is made of, "rm"
-// included. A text without one cannot tell its reader to destroy anything.
-func destructiveWord(text string) bool {
-	for _, w := range wordRE.FindAllString(strings.ToLower(text), -1) {
-		if w == "rm" {
-			return true
-		}
-		for _, p := range destructivePrefixes {
-			if strings.HasPrefix(w, p) {
-				return true
-			}
-		}
-	}
-	return false
-}
+var wordRE = regexp.MustCompile(`[A-Za-z]{2,}`)
 
 type rule struct{ threshold float64 }
 

@@ -7,7 +7,8 @@
 // variable's name is the evidence a person wrote. A literal, a call result, a constant, a function
 // value and an error are not. A key whose words are the value's words (user_id and userID) is the
 // same by construction and is not asked about. The classifier is told the keys and the variable
-// names, never the values, and asked whether any key names something else.
+// names, never the values, and asked whether any key names something else. Arguments that cannot
+// be read as fields are counted as a separate unsupported candidate beside the asked one.
 package logkeyrole
 
 import (
@@ -49,7 +50,7 @@ func init() {
 		Name:        Name,
 		Doc:         "a structured log key that names a different quantity or role than the variable logged under it",
 		Standard:    true,
-		Version:     "1",
+		Version:     "2",
 		Analyzer:    Analyzer,
 		NewSettings: func() any { return &Settings{} },
 		New: func(s any) (sdk.Rule, error) {
@@ -69,7 +70,7 @@ func run(pass *analysis.Pass) (any, error) {
 		if !push {
 			return true
 		}
-		if c := candidate(pass, n.(*ast.CallExpr)); c != nil {
+		for _, c := range candidates(pass, n.(*ast.CallExpr)) {
 			c.Subject = facts.EnclosingFunc(stack) + "/" + c.Subject
 			out = append(out, c)
 		}
@@ -78,12 +79,31 @@ func run(pass *analysis.Pass) (any, error) {
 	return out, nil
 }
 
-func candidate(pass *analysis.Pass, call *ast.CallExpr) *sdk.Candidate {
+// candidates returns the candidate of a log call and, when some of its arguments could not be read
+// as fields while others were asked about, an unsupported one for the unread part: a clean answer
+// about the readable fields says nothing about the rest.
+func candidates(pass *analysis.Pass, call *ast.CallExpr) []*sdk.Candidate {
 	lc, ok := facts.AsLogCall(pass.TypesInfo, call)
 	if !ok {
 		return nil
 	}
 	fields, partial := facts.Fields(pass.TypesInfo, lc)
+	c := candidate(pass, call, lc, fields, partial)
+	if c == nil {
+		return nil
+	}
+	out := []*sdk.Candidate{c}
+	if partial && c.Unsupported == "" {
+		out = append(out, &sdk.Candidate{
+			Pos:         c.Pos,
+			Subject:     "unread fields",
+			Unsupported: "some log fields are not readable; only the readable ones are asked about",
+		})
+	}
+	return out
+}
+
+func candidate(pass *analysis.Pass, call *ast.CallExpr, lc facts.LogCall, fields []facts.LogField, partial bool) *sdk.Candidate {
 	c := &sdk.Candidate{Pos: pass.Fset.Position(call.Pos()), Local: map[string]string{}}
 	var pairs, descs []string
 	for _, f := range fields {
