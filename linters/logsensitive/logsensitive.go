@@ -55,7 +55,7 @@ func init() {
 		Name:        Name,
 		Doc:         "a structured log field that logs a secret (token, password, key material) as is",
 		Standard:    true,
-		Version:     "1",
+		Version:     "2",
 		Analyzer:    Analyzer,
 		NewSettings: func() any { return &Settings{} },
 		New: func(s any) (sdk.Rule, error) {

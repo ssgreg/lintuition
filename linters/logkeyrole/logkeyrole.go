@@ -50,7 +50,7 @@ func init() {
 		Name:        Name,
 		Doc:         "a structured log key that names a different quantity or role than the variable logged under it",
 		Standard:    true,
-		Version:     "1",
+		Version:     "2",
 		Analyzer:    Analyzer,
 		NewSettings: func() any { return &Settings{} },
 		New: func(s any) (sdk.Rule, error) {
