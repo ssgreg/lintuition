@@ -152,18 +152,26 @@ func runCmd(code *int) *cobra.Command {
 			ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt)
 			defer stop()
 			opts := engine.Options{Config: c, Patterns: args, DryRun: dryRun, Log: cmd.ErrOrStderr()}
+			var previewFile *os.File
 			if preview != "" {
 				if !dryRun {
 					return errors.New("--preview needs --dry-run")
 				}
-				f, err := os.OpenFile(preview, os.O_CREATE|os.O_TRUNC|os.O_WRONLY, 0o600)
-				if err != nil {
+				if err := c.Output.Formats.CheckExtra("--preview", preview); err != nil {
 					return err
 				}
-				defer f.Close()
-				opts.Preview = f
+				if previewFile, err = os.OpenFile(preview, os.O_CREATE|os.O_TRUNC|os.O_WRONLY, 0o600); err != nil {
+					return err
+				}
+				defer previewFile.Close()
+				opts.Preview = previewFile
 			}
 			res, err := engine.Run(ctx, opts)
+			if previewFile != nil {
+				if cerr := previewFile.Close(); cerr != nil && err == nil {
+					err = fmt.Errorf("preview: %w", cerr)
+				}
+			}
 			if err != nil {
 				return err
 			}

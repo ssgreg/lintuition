@@ -3,6 +3,7 @@
 package classify
 
 import (
+	"errors"
 	"fmt"
 	"math"
 	"regexp"
@@ -77,7 +78,7 @@ func Check(qs []sdk.Question, resp sdk.Response) (map[string]sdk.Answer, error) 
 	for _, a := range resp.Answers {
 		q, ok := byID[a.QuestionID]
 		if !ok {
-			return nil, fmt.Errorf("answer to unknown question %q", a.QuestionID)
+			return nil, errors.New("an answer to a question that was not asked")
 		}
 		if _, dup := out[a.QuestionID]; dup {
 			return nil, fmt.Errorf("question %q answered twice", a.QuestionID)
@@ -110,14 +111,14 @@ func checkAnswer(q sdk.Question, a sdk.Answer) error {
 			domain[o.Key] = true
 		}
 		if !domain[a.Choice] {
-			return fmt.Errorf("choice %q is not an option", a.Choice)
+			return errors.New("the choice is not one of the options")
 		}
 		for k, p := range a.Probabilities {
 			if !domain[k] {
-				return fmt.Errorf("probability for unknown option %q", k)
+				return errors.New("a probability for an option that was not offered")
 			}
 			if !prob(p) {
-				return fmt.Errorf("probability %v of %q is outside [0, 1]", p, k)
+				return errors.New("an option probability is outside [0, 1]")
 			}
 		}
 	case sdk.Noul:

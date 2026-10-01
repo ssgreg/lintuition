@@ -352,6 +352,40 @@ func (c *Config) Tests() bool {
 // Revalidate checks the config again after command-line flags changed it.
 func (c *Config) Revalidate() error { return c.validate() }
 
+// CheckExtra refuses another output (a preview file, say) at a destination a format already uses.
+func (f Formats) CheckExtra(name, path string) error {
+	if path == "stdout" || path == "stderr" || path == "" {
+		return fmt.Errorf("%s: needs a file path", name)
+	}
+	abs, err := filepath.Abs(path)
+	if err != nil {
+		return err
+	}
+	for format, p := range map[string]*string{"text": textPath(f), "json": jsonPath(f)} {
+		if p == nil || *p == "stdout" || *p == "stderr" || *p == "" {
+			continue
+		}
+		if other, err := filepath.Abs(*p); err == nil && other == abs {
+			return fmt.Errorf("%s: %s already gets the %s output", name, path, format)
+		}
+	}
+	return nil
+}
+
+func textPath(f Formats) *string {
+	if f.Text == nil {
+		return nil
+	}
+	return &f.Text.Path
+}
+
+func jsonPath(f Formats) *string {
+	if f.JSON == nil {
+		return nil
+	}
+	return &f.JSON.Path
+}
+
 // checkDestinations refuses two formats writing to one place, and machine-readable output on stderr,
 // which carries the run summary and problems.
 func (f Formats) checkDestinations() error {

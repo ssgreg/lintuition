@@ -68,6 +68,7 @@ func init() {
 
 // Classifier is the Jev backend.
 type Classifier struct {
+	keyEnv   string
 	endpoint string
 	model    string
 	key      string
@@ -99,16 +100,19 @@ func New(s Settings, getenv func(string) string) (*Classifier, error) {
 	if env == "" {
 		env = DefaultKeyEnv
 	}
-	if c.key = getenv(env); c.key == "" {
-		return nil, fmt.Errorf("the API key is not set: export %s", env)
-	}
+	// A missing key is reported by Ready, so config verify and a dry-run preview work offline.
+	c.key, c.keyEnv = getenv(env), env
 	timeout := 60 * time.Second
 	if s.Timeout != "" {
 		if timeout, err = time.ParseDuration(s.Timeout); err != nil || timeout <= 0 {
 			return nil, fmt.Errorf("timeout %q: must be a positive duration", s.Timeout)
 		}
 	}
-	c.client = &http.Client{Timeout: timeout}
+	c.client = &http.Client{
+		Timeout: timeout,
+		// Never follow a redirect: it would resend the body and the key to a place New did not check.
+		CheckRedirect: func(*http.Request, []*http.Request) error { return http.ErrUseLastResponse },
+	}
 	if s.MaxRetries != nil {
 		if *s.MaxRetries < 0 || *s.MaxRetries > 10 {
 			return nil, fmt.Errorf("max-retries %d: must be 0 to 10", *s.MaxRetries)
@@ -138,6 +142,14 @@ func isLoopback(host string) bool {
 	}
 	ip := net.ParseIP(host)
 	return ip != nil && ip.IsLoopback()
+}
+
+// Ready reports whether the backend can send: the API key must be set.
+func (c *Classifier) Ready() error {
+	if c.key == "" {
+		return fmt.Errorf("the API key is not set: export %s", c.keyEnv)
+	}
+	return nil
 }
 
 // Identity names what decides an answer besides the request, for the answer cache: the endpoint
@@ -206,13 +218,29 @@ func (c *Classifier) Classify(ctx context.Context, req sdk.Request) (sdk.Respons
 	if err != nil {
 		return sdk.Response{}, err
 	}
-	raw, err := c.post(ctx, body)
+	if err := c.Ready(); err != nil {
+		return sdk.Response{}, err
+	}
+	raw, err := c.post(ctx, body, req.Retry)
 	if err != nil {
+		return sdk.Response{}, err
+	}
+	if err := uniqueAnswerKeys(raw); err != nil {
 		return sdk.Response{}, err
 	}
 	var wr wireResponse
 	if err := json.Unmarshal(raw, &wr); err != nil {
-		return sdk.Response{}, fmt.Errorf("decode response: %w", err)
+		// The decoder's message can quote the body; keep only the category.
+		return sdk.Response{}, errors.New("the response is not valid JSON of the expected shape")
+	}
+	asked := map[string]bool{}
+	for _, q := range req.Questions {
+		asked[q.ID] = true
+	}
+	for id := range wr.Answers {
+		if !asked[id] {
+			return sdk.Response{}, errors.New("the response answers a question that was not asked")
+		}
 	}
 	resp := sdk.Response{Usage: sdk.Usage{
 		InputTokens: wr.Usage.InputTokens,
@@ -225,6 +253,7 @@ func (c *Classifier) Classify(ctx context.Context, req sdk.Request) (sdk.Respons
 		}
 		a, err := convert(q, wa)
 		if err != nil {
+			// q.ID is ours; err names only the category, never a remote value.
 			return sdk.Response{}, fmt.Errorf("question %q: %w", q.ID, err)
 		}
 		resp.Answers = append(resp.Answers, a)
@@ -232,9 +261,27 @@ func (c *Classifier) Classify(ctx context.Context, req sdk.Request) (sdk.Respons
 	return resp, nil
 }
 
+// convert maps a wire answer to the SDK, refusing a wrong type or value fields of another kind
+// rather than dropping them. Errors never quote remote values.
 func convert(q sdk.Question, wa wireAnswer) (sdk.Answer, error) {
 	if wa.Type != string(q.Kind) {
-		return sdk.Answer{}, fmt.Errorf("answer of type %q to a %s question", wa.Type, q.Kind)
+		return sdk.Answer{}, fmt.Errorf("the answer's type is not %s", q.Kind)
+	}
+	switch q.Kind {
+	case sdk.Choice:
+		if wa.Noul != nil || wa.Score != nil {
+			return sdk.Answer{}, errors.New("a choice answer carries a noul or score value")
+		}
+	case sdk.Noul:
+		if wa.Choice != nil || wa.Score != nil || len(wa.Probabilities) > 0 {
+			return sdk.Answer{}, errors.New("a noul answer carries other values")
+		}
+	case sdk.Score:
+		// Score answers come with a distribution over the levels; it is metadata, not a choice.
+		if wa.Choice != nil || wa.Noul != nil {
+			return sdk.Answer{}, errors.New("a score answer carries a choice or noul value")
+		}
+		wa.Probabilities = nil
 	}
 	a := sdk.Answer{QuestionID: q.ID}
 	if wa.Confidence != nil {
@@ -254,7 +301,41 @@ func convert(q sdk.Question, wa wireAnswer) (sdk.Answer, error) {
 	return a, nil
 }
 
-// apiError is a failure the service reported. It never carries the request or response body: a
+// uniqueAnswerKeys refuses a response whose answers object names a question twice; a JSON decoder
+// would silently keep the last one.
+func uniqueAnswerKeys(raw []byte) error {
+	var top map[string]json.RawMessage
+	if err := json.Unmarshal(raw, &top); err != nil {
+		return errors.New("the response is not a JSON object")
+	}
+	ans, ok := top["answers"]
+	if !ok {
+		return errors.New("the response has no answers")
+	}
+	dec := json.NewDecoder(bytes.NewReader(ans))
+	if t, err := dec.Token(); err != nil || t != json.Delim('{') {
+		return errors.New("the response's answers are not an object")
+	}
+	seen := map[string]bool{}
+	for dec.More() {
+		t, err := dec.Token()
+		if err != nil {
+			return errors.New("the response's answers are malformed")
+		}
+		k, _ := t.(string)
+		if seen[k] {
+			return errors.New("the response answers one question twice")
+		}
+		seen[k] = true
+		var skip json.RawMessage
+		if err := dec.Decode(&skip); err != nil {
+			return errors.New("the response's answers are malformed")
+		}
+	}
+	return nil
+}
+
+// apiError is a failure the service reported, including a redirect, which is never followed. It never carries the request or response body: a
 // service may echo the input, and the input may be private.
 type apiError struct {
 	Status int
@@ -264,9 +345,16 @@ func (e apiError) Error() string {
 	return fmt.Sprintf("HTTP %d %s", e.Status, http.StatusText(e.Status))
 }
 
-func (c *Classifier) post(ctx context.Context, body []byte) ([]byte, error) {
+// post sends the body, retrying 429, 5xx and transport errors. Every attempt after the first is
+// first cleared with spend (the run's budget); a refusal stops the retries with its error.
+func (c *Classifier) post(ctx context.Context, body []byte, spend func() error) ([]byte, error) {
 	var last error
 	for attempt := 0; attempt <= c.retries; attempt++ {
+		if attempt > 0 && spend != nil {
+			if err := spend(); err != nil {
+				return nil, fmt.Errorf("%v; retry not sent: %w", last, err)
+			}
+		}
 		if err := c.limiter.wait(ctx, c.sleep); err != nil {
 			return nil, err
 		}
@@ -286,7 +374,11 @@ func (c *Classifier) post(ctx context.Context, body []byte) ([]byte, error) {
 			base := time.Duration(1<<attempt) * time.Second
 			wait = base/2 + time.Duration(rand.Int64N(int64(base)))
 		}
-		if err := c.sleep(ctx, min(wait, 60*time.Second)); err != nil {
+		// The server's delay is honoured as given; the run's context bounds the total wait.
+		if dl, ok := ctx.Deadline(); ok && time.Until(dl) < wait {
+			return nil, fmt.Errorf("%v; the requested retry delay of %s exceeds the run's remaining time", last, wait.Round(time.Second))
+		}
+		if err := c.sleep(ctx, wait); err != nil {
 			return nil, err
 		}
 	}
@@ -311,13 +403,27 @@ func (c *Classifier) once(ctx context.Context, body []byte) ([]byte, time.Durati
 		return nil, 0, err
 	}
 	if resp.StatusCode != http.StatusOK {
-		var ra time.Duration
-		if s, err := strconv.ParseFloat(resp.Header.Get("Retry-After"), 64); err == nil && s >= 0 {
-			ra = time.Duration(s * float64(time.Second))
-		}
-		return nil, ra, apiError{Status: resp.StatusCode}
+		return nil, retryAfter(resp.Header.Get("Retry-After"), time.Now()), apiError{Status: resp.StatusCode}
 	}
 	return raw, 0, nil
+}
+
+// retryAfter parses Retry-After in both forms HTTP allows (RFC 9110, 10.2.3): delay seconds or an
+// HTTP date. Zero means none was given, or the date has passed.
+func retryAfter(v string, now time.Time) time.Duration {
+	if v == "" {
+		return 0
+	}
+	if s, err := strconv.ParseFloat(v, 64); err == nil {
+		if s <= 0 || math.IsNaN(s) || math.IsInf(s, 0) {
+			return 0
+		}
+		return time.Duration(s * float64(time.Second))
+	}
+	if t, err := http.ParseTime(v); err == nil && t.After(now) {
+		return t.Sub(now)
+	}
+	return 0
 }
 
 func sleepCtx(ctx context.Context, d time.Duration) error {

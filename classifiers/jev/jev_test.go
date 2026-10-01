@@ -3,6 +3,7 @@ package jev
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"io"
 	"net/http"
 	"net/http/httptest"
@@ -163,8 +164,15 @@ func TestBadAnswers(t *testing.T) {
 }
 
 func TestSettings(t *testing.T) {
-	if _, err := New(Settings{}, env(nil)); err == nil || !strings.Contains(err.Error(), "export TYPESAFE_API_KEY") {
+	keyless, err := New(Settings{}, env(nil))
+	if err != nil {
+		t.Fatalf("a missing key must not stop construction (config verify, preview): %v", err)
+	}
+	if err := keyless.Ready(); err == nil || !strings.Contains(err.Error(), "export TYPESAFE_API_KEY") {
 		t.Errorf("missing key: %v", err)
+	}
+	if _, err := keyless.Classify(context.Background(), req); err == nil {
+		t.Error("classify without a key must fail")
 	}
 	k := env(map[string]string{"MY_KEY": "x"})
 	if _, err := New(Settings{APIKeyEnv: "MY_KEY", Endpoint: "http://api.example.com/v1"}, k); err == nil {
@@ -191,5 +199,89 @@ func TestLimiterSpacesRequests(t *testing.T) {
 	}
 	if len(waits) != 2 || waits[0] != time.Second || waits[1] != 2*time.Second {
 		t.Fatalf("waits %v", waits)
+	}
+}
+
+func TestRedirectsAreNotFollowed(t *testing.T) {
+	var second bool
+	other := httptest.NewServer(http.HandlerFunc(func(http.ResponseWriter, *http.Request) { second = true }))
+	defer other.Close()
+	for _, code := range []int{http.StatusTemporaryRedirect, http.StatusPermanentRedirect, http.StatusFound} {
+		s := newServer(t, func(_ int, _ map[string]any, w http.ResponseWriter) {
+			w.Header().Set("Location", other.URL+"/collect")
+			w.WriteHeader(code)
+		})
+		_, err := newTest(t, s.URL).Classify(context.Background(), req)
+		if err == nil || second || len(s.bodies) != 1 {
+			t.Fatalf("%d: err %v, followed %v, %d attempts", code, err, second, len(s.bodies))
+		}
+	}
+}
+
+func TestRetriesSpendBudget(t *testing.T) {
+	s := newServer(t, func(_ int, _ map[string]any, w http.ResponseWriter) { w.WriteHeader(http.StatusTooManyRequests) })
+	c := newTest(t, s.URL)
+	spent := 0
+	r := req
+	r.Retry = func() error {
+		if spent == 1 {
+			return errors.New("budget reached")
+		}
+		spent++
+		return nil
+	}
+	_, err := c.Classify(context.Background(), r)
+	if err == nil || !strings.Contains(err.Error(), "budget reached") || len(s.bodies) != 2 {
+		t.Fatalf("err %v, %d attempts; want 2 (the first plus one paid retry)", err, len(s.bodies))
+	}
+}
+
+func TestMalformedAnswersRejectedWithoutQuotingThem(t *testing.T) {
+	const marker = "PRIVATE_RESPONSE_MARKER"
+	for name, body := range map[string]string{
+		"unrequested": `{"answers":{"kind":{"type":"choice","choice":"current","probabilities":{"current":1}},"yes":{"type":"noul","noul":0.5},"lvl":{"type":"score","score":1},"alien":{"type":"noul","noul":0.1}}}`,
+		"duplicate":   `{"answers":{"kind":{"type":"choice","choice":"total"},"kind":{"type":"choice","choice":"current"},"yes":{"type":"noul","noul":0.5},"lvl":{"type":"score","score":1}}}`,
+		"mixed":       `{"answers":{"kind":{"type":"choice","choice":"current","noul":0.5},"yes":{"type":"noul","noul":0.5},"lvl":{"type":"score","score":1}}}`,
+		"wrong type":  `{"answers":{"kind":{"type":"` + marker + `"},"yes":{"type":"noul","noul":0.5},"lvl":{"type":"score","score":1}}}`,
+		"bad json":    `{"answers":{"kind":` + marker,
+	} {
+		s := newServer(t, func(int, map[string]any, http.ResponseWriter) {})
+		s.Config.Handler = http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) { io.WriteString(w, body) })
+		_, err := newTest(t, s.URL).Classify(context.Background(), req)
+		if err == nil {
+			t.Errorf("%s: want an error", name)
+			continue
+		}
+		if strings.Contains(err.Error(), marker) {
+			t.Errorf("%s: error quotes the response: %v", name, err)
+		}
+	}
+}
+
+func TestRetryAfter(t *testing.T) {
+	now := time.Date(2026, 10, 1, 12, 0, 0, 0, time.UTC)
+	for v, want := range map[string]time.Duration{
+		"120":  120 * time.Second,
+		"1.5":  1500 * time.Millisecond,
+		"0":    0,
+		"-3":   0,
+		"soon": 0,
+		now.Add(2 * time.Minute).Format(http.TimeFormat):  2 * time.Minute,
+		now.Add(-2 * time.Minute).Format(http.TimeFormat): 0,
+	} {
+		if got := retryAfter(v, now); got != want {
+			t.Errorf("retryAfter(%q) = %v, want %v", v, got, want)
+		}
+	}
+	// A delay longer than the run has left fails at once instead of retrying early.
+	s := newServer(t, func(_ int, _ map[string]any, w http.ResponseWriter) {
+		w.Header().Set("Retry-After", "120")
+		w.WriteHeader(http.StatusTooManyRequests)
+	})
+	c := newTest(t, s.URL)
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	if _, err := c.Classify(ctx, req); err == nil || !strings.Contains(err.Error(), "exceeds the run's remaining time") || len(s.bodies) != 1 {
+		t.Fatalf("err %v, %d attempts", err, len(s.bodies))
 	}
 }

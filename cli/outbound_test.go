@@ -158,3 +158,50 @@ semantic:
 		t.Fatalf("cached run under a tight budget: exit %d, %d requests\n%s", code, n, errs)
 	}
 }
+
+func TestRetriesCountAgainstBudget(t *testing.T) {
+	dir := sample(t)
+	var mu sync.Mutex
+	attempts := 0
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		mu.Lock()
+		attempts++
+		mu.Unlock()
+		w.WriteHeader(http.StatusTooManyRequests)
+	}))
+	defer srv.Close()
+	t.Setenv("LINTUITION_TEST_KEY", "k")
+	os.WriteFile(filepath.Join(dir, ".lintuition.yml"), []byte(`version: "2"
+semantic:
+  classifier: jev
+  concurrency: 1
+  budget: {max-requests: 6}
+  classifiers:
+    jev: {endpoint: `+srv.URL+`, api-key-env: LINTUITION_TEST_KEY, max-retries: 2}
+  cache: {disabled: true}
+`), 0o600)
+	code, _, errs := run("run", "--output.json.path", "stdout", "./...")
+	if code != 2 || attempts > 6 {
+		t.Fatalf("exit %d, %d HTTP attempts for a budget of 6\n%s", code, attempts, errs)
+	}
+}
+
+func TestPreviewOfflineAndCollisions(t *testing.T) {
+	dir := sample(t)
+	os.WriteFile(filepath.Join(dir, ".lintuition.yml"), []byte("version: \"2\"\nsemantic:\n  classifier: jev\n  classifiers:\n    jev: {api-key-env: LINTUITION_UNSET_KEY}\n"), 0o600)
+	code, _, errs := run("run", "--dry-run", "--preview", "req.jsonl", "./...")
+	b, _ := os.ReadFile("req.jsonl")
+	if code != 0 || !strings.Contains(string(b), `"body":{"model":"jev-latest"`) {
+		t.Fatalf("keyless preview: exit %d %s\n%s", code, errs, b)
+	}
+	if code, _, errs := run("run", "./..."); code != 2 || !strings.Contains(errs, "export LINTUITION_UNSET_KEY") {
+		t.Fatalf("a real run without the key must fail early: %d %s", code, errs)
+	}
+	os.WriteFile("keep.json", []byte("keep"), 0o600)
+	if code, _, errs := run("run", "--dry-run", "--preview", "keep.json", "--output.json.path", "./keep.json", "./..."); code != 2 || !strings.Contains(errs, "already gets the json output") {
+		t.Fatalf("collision: %d %s", code, errs)
+	}
+	if b, _ := os.ReadFile("keep.json"); string(b) != "keep" {
+		t.Fatalf("a rejected collision overwrote the file: %q", b)
+	}
+}

@@ -125,6 +125,9 @@ type Request struct {
 	Linter    string
 	State     map[string]any
 	Questions []Question
+	// Retry, when set, must be called before every transport attempt after the first one; an error
+	// means the run's budget does not allow it, and the classifier must stop and return an error.
+	Retry func() error
 }
 
 // Usage is what a request cost.

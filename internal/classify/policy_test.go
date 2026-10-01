@@ -44,16 +44,16 @@ func TestCheck(t *testing.T) {
 		t.Fatal(err)
 	}
 	bad := map[string][]sdk.Answer{
-		"has no answer":    ok[:2],
-		"not an option":    {{QuestionID: "k", Choice: "c"}, ok[1], ok[2]},
-		"unknown option":   {{QuestionID: "k", Choice: "a", Probabilities: map[string]float64{"z": 0.1}}, ok[1], ok[2]},
-		"outside [0, 1]":   {ok[0], {QuestionID: "y", Yes: f(1.5)}, ok[2]},
-		"outside [0, 4]":   {ok[0], ok[1], {QuestionID: "s", Score: f(9)}},
-		"exactly a yes":    {ok[0], {QuestionID: "y"}, ok[2]},
-		"exactly a score":  {ok[0], ok[1], {QuestionID: "s"}},
-		"carries a yes":    {{QuestionID: "k", Choice: "a", Yes: f(1)}, ok[1], ok[2]},
-		"answered twice":   append(append([]sdk.Answer{}, ok...), ok[0]),
-		"unknown question": append(append([]sdk.Answer{}, ok...), sdk.Answer{QuestionID: "x"}),
+		"has no answer":          ok[:2],
+		"not one of the options": {{QuestionID: "k", Choice: "c"}, ok[1], ok[2]},
+		"was not offered":        {{QuestionID: "k", Choice: "a", Probabilities: map[string]float64{"z": 0.1}}, ok[1], ok[2]},
+		"outside [0, 1]":         {ok[0], {QuestionID: "y", Yes: f(1.5)}, ok[2]},
+		"outside [0, 4]":         {ok[0], ok[1], {QuestionID: "s", Score: f(9)}},
+		"exactly a yes":          {ok[0], {QuestionID: "y"}, ok[2]},
+		"exactly a score":        {ok[0], ok[1], {QuestionID: "s"}},
+		"carries a yes":          {{QuestionID: "k", Choice: "a", Yes: f(1)}, ok[1], ok[2]},
+		"answered twice":         append(append([]sdk.Answer{}, ok...), ok[0]),
+		"was not asked":          append(append([]sdk.Answer{}, ok...), sdk.Answer{QuestionID: "x"}),
 	}
 	for want, answers := range bad {
 		if _, err := Check(qs, sdk.Response{Answers: answers}); err == nil || !strings.Contains(err.Error(), want) {
