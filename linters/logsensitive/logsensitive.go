@@ -3,8 +3,13 @@
 //	slog.Info("user logged in", "password", req.Password)
 //
 // Code reads the fields through go/types (field constructors, slog's key, value pairs) and keeps
-// only those whose value could hold a secret: not a literal (it is in the source already), not a
-// bool, time or duration, and not the result of a redacting call (Redact, Mask, Hash, SHA256, ...).
+// only those whose value could hold a secret: not a bool, time or duration, and not the result of a
+// call whose name starts with a redaction verb (Redact, MaskToken, HashPassword, SHA256, ...).
+//
+// A literal value is left out too, a known coverage limit: a placeholder such as "[REDACTED]" and a
+// hard-coded secret look alike to a classifier that is never told the literal's text, so asking
+// would only guess. A secret committed to the source is a matter for a secret scanner.
+//
 // The classifier is asked what role the most sensitive of the remaining values serves; the key and
 // the identifiers the value comes from are sent, never the value. A field value the analyzer cannot
 // name, a key a fact cannot carry, or fields it cannot read at all make the call unsupported. When
@@ -169,25 +174,25 @@ func mayHoldSecret(info *types.Info, f facts.LogField) bool {
 	return true
 }
 
-var redactPrefixes = []string{"redact", "mask", "hash", "hmac", "obfusc", "scrub", "sanitiz", "censor", "fingerprint", "encrypt", "digest", "anonymi", "elide"}
+// redactVerbs are the words a redacting function's name starts with: the verb that transforms its
+// argument (Redact, MaskToken, HashPassword, SHA256), or its past participle for a method that
+// returns the transformed form ((*url.URL).Redacted).
+var redactVerbs = map[string]bool{
+	"redact": true, "redacted": true, "mask": true, "masked": true, "hash": true, "hashed": true,
+	"hmac": true, "obfuscate": true, "obfuscated": true, "scrub": true, "scrubbed": true,
+	"sanitize": true, "sanitized": true, "censor": true, "censored": true, "encrypt": true,
+	"encrypted": true, "anonymize": true, "anonymized": true, "elide": true, "elided": true,
+	"md5": true, "sha": true, "sha1": true, "sha256": true, "sha512": true, "fingerprint": true, "digest": true,
+}
 
-var redactWords = map[string]bool{"md5": true, "sha1": true, "sha256": true, "sha512": true, "sha": true}
-
-// redacts reports whether a function's name says it redacts, masks or hashes its argument:
-// Redact, MaskToken, HashPassword, SHA256, (*url.URL).Redacted. It is a name heuristic over the
-// resolved callee: a redactor under another name is not recognised and its result is asked about.
+// redacts reports whether a function's name says it transforms its argument into a form that is
+// not the secret: the name must start with a redaction verb. A noun elsewhere in the name says
+// nothing about what the function does: LoadEncryptionKey, GetHMACKey and EncryptionKey return key
+// material. It is a name heuristic over the resolved callee: a redactor under another name is not
+// recognised, and its result is asked about.
 func redacts(name string) bool {
-	for _, w := range facts.Words(name) {
-		if redactWords[w] {
-			return true
-		}
-		for _, p := range redactPrefixes {
-			if strings.HasPrefix(w, p) {
-				return true
-			}
-		}
-	}
-	return false
+	ws := facts.Words(name)
+	return len(ws) > 0 && redactVerbs[ws[0]]
 }
 
 type rule struct{ threshold float64 }

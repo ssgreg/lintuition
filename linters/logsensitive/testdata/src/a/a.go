@@ -82,3 +82,9 @@ func c15(u string, attrs []slog.Attr) {
 func c16(requestID, key, password string) {
 	slog.Info("login", "request_id", requestID, slog.String(key, password)) // 16 candidate: a readable field beside a dynamic key, and the unread part
 }
+
+func LoadEncryptionKey() string { return "" }
+
+func c17() {
+	slog.Info("key loaded", "key", LoadEncryptionKey()) // 17 candidate: a key loader is not a redactor
+}
