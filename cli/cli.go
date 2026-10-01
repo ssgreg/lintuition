@@ -20,6 +20,7 @@ import (
 
 	"github.com/ssgreg/lintuition/internal/classify"
 	"github.com/ssgreg/lintuition/internal/config"
+	"github.com/ssgreg/lintuition/internal/custom"
 	"github.com/ssgreg/lintuition/internal/engine"
 	"github.com/ssgreg/lintuition/internal/report"
 	"github.com/ssgreg/lintuition/sdk"
@@ -35,6 +36,10 @@ const (
 // Version is set at build time with -ldflags "-X github.com/ssgreg/lintuition/cli.Version=v0.1.0".
 var Version = ""
 
+// Plugins lists the plugin modules compiled into a custom binary, "module version" each; the main
+// that `lintuition custom` generates fills it in.
+var Plugins []string
+
 // Main runs the CLI and returns the exit code.
 func Main(args []string, stdout, stderr io.Writer) int {
 	code := ExitClean
@@ -48,7 +53,7 @@ func Main(args []string, stdout, stderr io.Writer) int {
 	root.SetArgs(args)
 	root.SetOut(stdout)
 	root.SetErr(stderr)
-	root.AddCommand(runCmd(&code), lintersCmd(), classifiersCmd(), configCmd(), cacheCmd(), versionCmd())
+	root.AddCommand(runCmd(&code), lintersCmd(), classifiersCmd(), configCmd(), cacheCmd(), customCmd(), versionCmd())
 	if err := root.Execute(); err != nil {
 		fmt.Fprintf(stderr, "Error: %v\n", err)
 		return ExitIncomplete
@@ -385,7 +390,8 @@ func versionCmd() *cobra.Command {
 				Go          string   `json:"go"`
 				Linters     []string `json:"linters"`
 				Classifiers []string `json:"classifiers"`
-			}{Version: Version, Go: runtime.Version()}
+				Plugins     []string `json:"plugins,omitempty"`
+			}{Version: Version, Go: runtime.Version(), Plugins: Plugins}
 			if bi, ok := debug.ReadBuildInfo(); ok {
 				if v.Version == "" {
 					v.Version = bi.Main.Version
@@ -409,6 +415,9 @@ func versionCmd() *cobra.Command {
 			}
 			fmt.Fprintf(cmd.OutOrStdout(), "lintuition %s built with %s\nlinters: %s\nclassifiers: %s\n",
 				v.Version, v.Go, strings.Join(v.Linters, ", "), strings.Join(v.Classifiers, ", "))
+			if len(v.Plugins) > 0 {
+				fmt.Fprintf(cmd.OutOrStdout(), "plugins: %s\n", strings.Join(v.Plugins, ", "))
+			}
 			return nil
 		},
 	}
@@ -468,5 +477,30 @@ func cacheCmd() *cobra.Command {
 	cf.add(path)
 	cf.add(clean)
 	cmd.AddCommand(path, clean)
+	return cmd
+}
+
+func customCmd() *cobra.Command {
+	var manifest string
+	cmd := &cobra.Command{
+		Use:   "custom",
+		Short: "Build a lintuition binary with the plugin linters and classifiers in " + custom.ManifestName,
+		Long: "Build a lintuition binary with plugins compiled in, like golangci-lint custom.\n" +
+			"Plugins are trusted code: they run in-process with your rights and see every candidate.",
+		Args: cobra.NoArgs,
+		RunE: func(cmd *cobra.Command, _ []string) error {
+			m, err := custom.Load(manifest)
+			if err != nil {
+				return err
+			}
+			out, err := m.Build(cmd.Context(), cmd.ErrOrStderr())
+			if err != nil {
+				return err
+			}
+			fmt.Fprintln(cmd.OutOrStdout(), out)
+			return nil
+		},
+	}
+	cmd.Flags().StringVarP(&manifest, "manifest", "m", custom.ManifestName, "the build manifest")
 	return cmd
 }

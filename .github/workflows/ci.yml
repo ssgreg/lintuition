@@ -20,6 +20,9 @@ jobs:
         run: test -z "$(gofmt -l .)" || (gofmt -l . && exit 1)
       - run: go vet ./...
       - run: go test -race ./...
+      - name: example plugins
+        run: |
+          for d in examples/plugins/*/; do (cd "$d" && GOWORK=off go vet ./...); done
       - name: sample runs offline with the fake classifier
         run: |
           go build -o /tmp/lintuition ./cmd/lintuition
