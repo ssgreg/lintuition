@@ -121,6 +121,25 @@ semantic:
       # USD per million input tokens, for estimates and budgets; unset means unknown.
       price-per-mtok: 0
       account: ""
+    claude-code:
+      # The claude executable (default: claude on PATH).
+      command: claude
+      # Passed as --model; empty means Claude Code's default.
+      model: haiku
+      # Per run.
+      timeout: 180s
+      # Runs in flight; every run is a full agent session. Default: 2.
+      max-parallel: 2
+    codex:
+      command: codex
+      # Passed as -m; empty means the Codex default.
+      model: ""
+      # Passed as model_reasoning_effort: low, medium, high.
+      reasoning-effort: low
+      timeout: 180s
+      max-parallel: 2
+      # Codex reports tokens, not cost; set a price to estimate it.
+      price-per-mtok: 0
   # What may leave the machine: facts (structural facts only), prose (default: facts plus
   # person-written text such as comments, metric Help and log messages), source (adds Go source).
   payload: prose

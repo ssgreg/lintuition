@@ -142,6 +142,8 @@ as unsupported rather than silently dropped.
 | `fake` | deterministic scripted answers, local; for tests and offline runs |
 | `jev` | [TypeSafe](https://typesafe.ai) System One models (Jev); remote, reads the API key from `TYPESAFE_API_KEY` |
 | `openai` | OpenAI-compatible chat completions with log probabilities: OpenAI, or a local Ollama, llama.cpp, vLLM, LM Studio; local when the server is |
+| `claude-code` | Claude Code (`claude -p`) under your login, with a fixed harness and a JSON schema; self-reported probabilities |
+| `codex` | Codex CLI (`codex exec`) under your login, with a fixed harness and a JSON schema; self-reported probabilities |
 
 ```yaml
 semantic:
@@ -181,15 +183,42 @@ semantic:
 How good the answers are depends on the model, and thresholds tuned for one backend do not carry
 over. Measured on this repository's twins, 2026-10-01:
 
-| classifier | model | defects caught | false alarms | requests |
-|---|---|---|---|---|
-| `jev` | jev-latest | 6/6 in each of 3 runs | 0 | 48 |
-| `openai` (Ollama, local) | qwen2.5:7b | 1/6 | 0 | 16 |
-| `openai` (Ollama, local) | qwen2.5:3b | 0/6 | 0 | 16 |
+| classifier | model | defects caught | false alarms | requests | time | cost |
+|---|---|---|---|---|---|---|
+| `jev` | jev-latest | 6/6 in each of 3 runs | 0 | 48 (3 runs) | about 1 s a run | ~$0.0009 for 3 runs |
+| `claude-code` | haiku | 6/6 | 0 | 16 | 66 s | ~$0.13 (Claude Code's own figure) |
+| `codex` | default, reasoning-effort low | 6/6 | 0 | 16 | 39 s | subscription; ~14k input tokens a run |
+| `openai` (Ollama, local) | qwen2.5:7b | 1/6 | 0 | 16 | 4 s | local |
+| `openai` (Ollama, local) | qwen2.5:3b | 0/6 | 0 | 16 | 2 s | local |
 
 The small local models mostly answer "the text does not let you tell" or read "config saved to
 disk" as an operation that is starting; the rules then abstain or stay quiet rather than report
 noise. Run `lintuition eval` on your twins before trusting another backend.
+
+### A coding agent as the classifier
+
+`claude-code` and `codex` run the agent's command line once per question, non-interactively, with
+a fixed harness prompt (`agentcli.Harness`) and a JSON schema the answer must follow: the label of
+one option and a probability for every option. An answer that is not one of the options, whose
+probabilities do not add up to 1, or that is not its own most probable option fails the request.
+
+```yaml
+semantic:
+  classifier: claude-code   # or codex
+  classifiers:
+    claude-code:
+      model: haiku
+      max-parallel: 4
+    codex:
+      reasoning-effort: low
+```
+
+These runs leave the machine under the CLI's login. Claude Code runs with no tools, no MCP servers,
+no settings and no saved session; Codex runs in its read-only sandbox with no saved session; both
+start in an empty directory. Their probabilities are the model's own statement, not token
+probabilities: they are recorded as self-reported, and a threshold tuned on another backend does
+not carry over. Every question is a full agent run, so they are slower and dearer than a
+classifier API; they suit evaluation and small projects better than a large CI run.
 
 More backends can plug in behind the same `sdk.Classifier` interface.
 

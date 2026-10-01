@@ -3,6 +3,7 @@
 package builtin
 
 import (
+	_ "github.com/ssgreg/lintuition/classifiers/agentcli"
 	_ "github.com/ssgreg/lintuition/classifiers/fake"
 	_ "github.com/ssgreg/lintuition/classifiers/jev"
 	_ "github.com/ssgreg/lintuition/classifiers/openai"
