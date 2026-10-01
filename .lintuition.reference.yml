@@ -1,0 +1,86 @@
+# Reference configuration: every key lintuition supports, with its default. Copy what you need into
+# .lintuition.yml (or .lintuition.yaml), looked up from the working directory upwards.
+# The shape follows golangci-lint v2; unknown keys are errors.
+
+version: "2"
+
+run:
+  # Timeout for the whole run, including classifier requests. Default: none.
+  timeout: 5m
+  # Analyse *_test.go files. Default: true.
+  tests: true
+  build-tags: []
+  # Exit code when issues are found. Default: 1. 2 is reserved for an incomplete run.
+  issues-exit-code: 1
+  # Passed to the go command as -mod: readonly, vendor or mod. Default: the go command's own.
+  modules-download-mode: readonly
+  # Report paths relative to: wd (default), cfg, gomod, gitroot.
+  relative-path-mode: wd
+
+linters:
+  # Base set: standard (default), all, none, fast (linters that ask no classifier).
+  default: standard
+  enable: []
+  disable: []
+  settings:
+    metric-type-vs-help:
+      # Minimum probability of the classifier's answer for a finding. Default: 0.8.
+      threshold: 0.8
+  exclusions:
+    # Generated files: lax (default; also loose "do not edit" markers), strict (the standard header only), disable.
+    generated: lax
+    # Regular expressions of paths whose issues are dropped; such candidates are never sent.
+    paths: []
+    # An issue is dropped when it matches every set field of a rule.
+    rules:
+      - path: _test\.go$
+        path-except: ""
+        text: ""
+        source: ""
+        linters: []
+
+issues:
+  # Default: 50. 0 means no limit.
+  max-issues-per-linter: 50
+  # Default: 3. 0 means no limit.
+  max-same-issues: 3
+  # Report at most one issue per line. Default: true.
+  uniq-by-line: true
+
+severity:
+  # Severity of issues no rule matches. Default: empty.
+  default: ""
+  rules:
+    - severity: error
+      linters: [metric-type-vs-help]
+
+output:
+  formats:
+    # Default when no format is set: text to stdout.
+    text:
+      path: stdout
+      print-linter-name: true
+      print-issued-lines: true
+    json:
+      path: lintuition-report.json
+
+# lintuition's extension: the classifier and what may be sent to it.
+semantic:
+  # The backend to use; see `lintuition classifiers`. Required when a linter asks a classifier.
+  classifier: fake
+  # Settings per backend. Every listed backend is validated, not only the selected one.
+  classifiers:
+    fake:
+      unmatched: unclear
+      rules: []
+  # What may leave the machine: facts (structural facts only), prose (default: facts plus
+  # person-written text such as comments, metric Help and log messages), source (adds Go source).
+  payload: prose
+  # Refuse any backend that sends requests off the machine. Default: false.
+  local-only: false
+  # Requests in flight. Default: 8.
+  concurrency: 8
+  # Caps for one run; reaching one makes the run incomplete. 0 means no cap.
+  budget:
+    max-requests: 0
+    max-cost-usd: 0

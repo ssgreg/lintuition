@@ -1,2 +1,100 @@
 # lintuition
-System One for your Go code.
+
+**System One for your Go code.**
+Checks whether comments, logs and test descriptions match what your code does.
+
+```text
+metrics.go:10:30: counter Help describes a current value, not a running total: "Disk I/O utilization." (metric-type-vs-help)
+	ioSeconds = prom.NewCounter(prom.CounterOpts{Name: "io_seconds_total", Help: ioHelp})
+	                            ^
+```
+
+> Status: early development (pre-v0.1). The interfaces and the config may change.
+
+## How it works
+
+A classifier reads the words; Go code checks the logic.
+
+1. Each linter's `go/analysis` analyzer finds candidates in typed Go code and extracts facts: the
+   metric's type, the Help text, the function a log line runs before.
+2. The linter asks a classifier narrow typed questions about the person-written text: a *choice*, a
+   *yes/no* or a *score*. "What kind of value does this Help describe: a running total, a current
+   value or a distribution?"
+3. Go code compares the answer with the extracted facts and decides. The classifier never decides
+   whether something is a finding, and never sees the syntax tree.
+
+Findings are review hints with their evidence, not proofs.
+
+## Quick start
+
+```sh
+go install github.com/ssgreg/lintuition/cmd/lintuition@latest
+cd examples/sample && lintuition run ./...   # runs offline with the scripted fake classifier
+```
+
+The command line, config and output follow golangci-lint v2 where lintuition supports the same thing:
+
+```sh
+lintuition run ./...                  # text: file:line:col: message (linter)
+lintuition run --output.json.path stdout ./...
+lintuition run --dry-run ./...        # plan the requests, send none
+lintuition linters                    # what the config enables
+lintuition classifiers                # available backends
+lintuition config verify              # strict: unknown keys, linters and settings are errors
+```
+
+Exit codes: `0` clean, `1` issues found (`run.issues-exit-code`), `2` the run is incomplete or failed:
+a package did not load, a request failed, or a budget was reached. An incomplete run never exits 0.
+
+## Configuration
+
+`.lintuition.yml`, looked up from the working directory upwards. Every supported key with its default
+is in [.lintuition.reference.yml](.lintuition.reference.yml).
+
+```yaml
+version: "2"
+linters:
+  default: standard
+semantic:
+  classifier: fake
+  payload: prose      # facts | prose | source
+```
+
+### What leaves the machine
+
+`semantic.payload` decides what a request may carry:
+
+| policy | sends |
+|---|---|
+| `facts` | structural facts computed by code: types, kinds, counts |
+| `prose` (default) | facts plus person-written text: comments, metric Help, log messages, test names |
+| `source` | also Go source text |
+
+A candidate that needs more than the policy allows is skipped whole and counted, never sent stripped.
+`semantic.local-only: true` refuses any backend that sends requests off the machine. Under `prose`,
+person-written text does leave the machine when the backend is remote.
+
+## Linters
+
+| linter | checks |
+|---|---|
+| `metric-type-vs-help` | Prometheus metric Help that describes a different kind of value than the metric type records |
+
+## Classifiers
+
+| classifier | |
+|---|---|
+| `fake` | deterministic scripted answers, local; for tests and offline runs |
+
+More backends are planned behind the same interface, for example [TypeSafe](https://typesafe.ai)
+System One models (Jev), a hosted LLM API or a local model.
+
+## Plugins
+
+Linters and classifiers implement the small contracts in [`sdk`](sdk) and register from `init`.
+A custom binary imports `github.com/ssgreg/lintuition/builtin` plus the plugin packages and calls
+`cli.Main`. A builder command is planned.
+
+## License
+
+MIT

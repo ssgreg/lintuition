@@ -1,0 +1,27 @@
+version: "2"
+
+linters:
+  default: standard
+
+semantic:
+  classifier: fake
+  classifiers:
+    fake:
+      # The answers a real classifier gave for these Help texts, scripted so the sample runs offline.
+      rules:
+        - question: kind
+          when: "utilization"
+          choice: current
+          probability: 0.9
+        - question: kind
+          when: "Total seconds"
+          choice: total
+          probability: 0.95
+        - question: kind
+          when: "being served now"
+          choice: current
+          probability: 0.97
+        - question: kind
+          when: "latency"
+          choice: distribution
+          probability: 0.93
