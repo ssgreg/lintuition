@@ -57,7 +57,7 @@ func TestPlanCountsCallsPerQuestion(t *testing.T) {
 		r := newRunner(cl, dry, config.Budget{MaxRequests: 3}, 2)
 		j := newJob()
 		r.do(context.Background(), []*job{j})
-		if j.err == nil || j.planned || cl.calls != 0 {
+		if !j.notAsked || j.planned || cl.calls != 0 {
 			t.Errorf("dry=%v: a plan or run over the cap must not start: err %v planned %v calls %d", dry, j.err, j.planned, cl.calls)
 		}
 	}

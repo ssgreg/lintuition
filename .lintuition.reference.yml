@@ -160,7 +160,11 @@ semantic:
     # Default: 168h. A moving model alias such as jev-latest needs a bound. Expired records are
     # misses; lintuition cache clean --expired removes them. The cache size is not bounded yet.
     ttl: 168h
-  # Caps for one run; reaching one makes the run incomplete. 0 means no cap.
+  # Caps for one run. 0 means no cap. Reaching one stops new questions: requests in flight finish,
+  # every finding made so far is reported, the run counts as incomplete (exit 2), and the summary
+  # says how many candidates were not asked. Answers received are cached, so a rerun with a higher
+  # cap pays only for the rest. A remote backend that cannot price its calls (codex, openai without
+  # price-per-mtok) refuses max-cost-usd rather than ignore it; a local one needs no cap.
   budget:
     max-requests: 0
     max-cost-usd: 0

@@ -228,3 +228,42 @@ func TestYAMLOnlyFormat(t *testing.T) {
 		t.Fatalf("only sarif on stdout: exit %d\n%s\n%s", code, out, errs)
 	}
 }
+
+// TestBudgetKeepsFindings: when the cap stops a run, what was found before it stays in the report,
+// the run says how many candidates were left out, and a rerun with a higher cap pays only for them.
+func TestBudgetKeepsFindings(t *testing.T) {
+	dir := sample(t)
+	s := newJevStub(t, func(help, _ string) (int, string) {
+		if strings.Contains(help, "utilization") {
+			return 200, "current"
+		}
+		return 200, "total"
+	})
+	t.Setenv("LINTUITION_TEST_KEY", "k")
+	// $100 a call; the cap allows one. The utilization counter is the first candidate in the file.
+	jevConfig(t, dir, s.URL, "  concurrency: 1\n  budget: {max-cost-usd: 100}\n")
+	code, out, errs := run("run", "./...")
+	if code != 2 || !strings.Contains(out, "metrics.go:10:30: counter Help describes a current value") {
+		t.Fatalf("the finding made before the cap must be reported: exit %d\n%s\n%s", code, out, errs)
+	}
+	if !strings.Contains(errs, "3 not asked (budget)") || !strings.Contains(errs, "a run with a higher cap pays only for the rest") {
+		t.Fatalf("the summary must say what was left out: %s", errs)
+	}
+	calls := s.calls
+	jevConfig(t, dir, s.URL, "  concurrency: 1\n  budget: {max-cost-usd: 1000}\n")
+	if code, out, _ := run("run", "./..."); code != 1 || s.calls != calls+3 || !strings.Contains(out, "metrics.go:10:30") {
+		t.Fatalf("the rerun must reuse the cached answer and ask only the 3 left: exit %d, %d new calls", code, s.calls-calls)
+	}
+}
+
+func TestCostCapNeedsAKnownCost(t *testing.T) {
+	dir := sample(t)
+	os.WriteFile(filepath.Join(dir, ".lintuition.yml"), []byte("version: \"2\"\nsemantic:\n  classifier: codex\n  budget: {max-cost-usd: 1}\n"), 0o600)
+	if code, _, errs := run("run", "./..."); code != 2 || !strings.Contains(errs, "does not know what its calls cost") {
+		t.Fatalf("a cap that cannot be enforced must be an error: %d %s", code, errs)
+	}
+	os.WriteFile(filepath.Join(dir, ".lintuition.yml"), []byte("version: \"2\"\nsemantic:\n  classifier: codex\n  classifiers:\n    codex: {price-per-mtok: 1.25}\n  budget: {max-cost-usd: 1}\n"), 0o600)
+	if code, _, errs := run("run", "--dry-run", "./..."); code != 0 {
+		t.Fatalf("with a price the cap is enforceable: %d %s", code, errs)
+	}
+}

@@ -166,6 +166,9 @@ type Capabilities struct {
 	// CallsPerQuestion is true when the backend makes one call per question rather than one per
 	// request; the run's budget reserves calls accordingly.
 	CallsPerQuestion bool
+	// CostKnown is true when the backend reports what its calls cost, or has a price to estimate it.
+	// A remote backend without it cannot be held to semantic.budget.max-cost-usd.
+	CostKnown bool
 }
 
 // Supports reports whether the backend answers questions of kind k.

@@ -157,7 +157,7 @@ func (c *Classifier) Model() string { return c.model }
 
 // Capabilities implements sdk.Classifier.
 func (c *Classifier) Capabilities() sdk.Capabilities {
-	return sdk.Capabilities{Kinds: []sdk.Kind{sdk.Choice, sdk.Noul, sdk.Score}, Probabilities: true, Local: c.hc.Local(), CallsPerQuestion: true}
+	return sdk.Capabilities{Kinds: []sdk.Kind{sdk.Choice, sdk.Noul, sdk.Score}, Probabilities: true, Local: c.hc.Local(), CallsPerQuestion: true, CostKnown: c.price > 0}
 }
 
 // system was chosen among three wordings on nine labelled cases with qwen2.5:7b; it is not tuned

@@ -128,7 +128,7 @@ func (c *Classifier) Model() string { return c.model }
 
 // Capabilities implements sdk.Classifier.
 func (c *Classifier) Capabilities() sdk.Capabilities {
-	return sdk.Capabilities{Kinds: []sdk.Kind{sdk.Choice, sdk.Noul, sdk.Score}, Probabilities: true}
+	return sdk.Capabilities{Kinds: []sdk.Kind{sdk.Choice, sdk.Noul, sdk.Score}, Probabilities: true, CostKnown: c.price > 0}
 }
 
 // wire types: https://typesafe.ai, POST /v1/systemone.

@@ -36,6 +36,8 @@ type LinterStatus struct {
 	// Planned counts the requests a dry run would have sent.
 	Planned int `json:"Planned"`
 	Failed  int `json:"Failed"`
+	// NotAsked counts candidates left out because the budget ran out.
+	NotAsked int `json:"NotAsked"`
 }
 
 // Stats are the run totals.

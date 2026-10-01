@@ -60,6 +60,18 @@ func Run(ctx context.Context, o Options) (*Result, error) {
 	if cl == nil && len(enabled) > 0 && !o.DryRun {
 		return nil, errors.New("semantic.classifier is not set; every enabled linter asks a classifier (see `lintuition classifiers`)")
 	}
+	if cl != nil && !cl.Capabilities().Local {
+		caps := cl.Capabilities()
+		switch {
+		case c.Semantic.Budget.MaxCostUSD > 0 && !caps.CostKnown:
+			// A cap the run cannot see the spending against would pass for protection.
+			return nil, fmt.Errorf("semantic.budget.max-cost-usd is set, but classifier %s does not know what its calls cost: set its price-per-mtok", clName)
+		case c.Semantic.Budget.MaxCostUSD == 0 && caps.CostKnown && o.Log != nil:
+			fmt.Fprintf(o.Log, "lintuition: classifier %s is paid and semantic.budget.max-cost-usd is not set: spending is not capped\n", clName)
+		case c.Semantic.Budget.MaxCostUSD == 0 && o.Log != nil:
+			fmt.Fprintf(o.Log, "lintuition: classifier %s sends requests off the machine and its cost is unknown: set price-per-mtok and semantic.budget.max-cost-usd to cap it\n", clName)
+		}
+	}
 	if rd, ok := cl.(interface{ Ready() error }); ok && !o.DryRun {
 		if err := rd.Ready(); err != nil {
 			return nil, fmt.Errorf("classifier %s: %w", clName, err)
@@ -114,6 +126,7 @@ func Run(ctx context.Context, o Options) (*Result, error) {
 		res.Run.Problems = append(res.Run.Problems, fmt.Sprintf("package %s not analysed: %s", p.Package, p.Err))
 	}
 	generated := map[string]bool{}
+	notAsked := 0
 	nolint := report.NewNolint()
 	for _, e := range enabled {
 		st := report.LinterStatus{Name: e.Linter.Name, Enabled: true}
@@ -151,6 +164,9 @@ func Run(ctx context.Context, o Options) (*Result, error) {
 			occurrence := seenFP[fpKey]
 			seenFP[fpKey]++
 			switch {
+			case j.notAsked:
+				st.NotAsked++
+				notAsked++
 			case j.planned:
 				st.Planned++
 			case j.skipped != "":
@@ -183,6 +199,13 @@ func Run(ctx context.Context, o Options) (*Result, error) {
 		}
 	}
 	sort.Slice(res.Run.Linters, func(i, j int) bool { return res.Run.Linters[i].Name < res.Run.Linters[j].Name })
+	if notAsked > 0 {
+		hint := ""
+		if cache != nil {
+			hint = "; the answers already received are cached, so a run with a higher cap pays only for the rest"
+		}
+		res.Run.Problems = append(res.Run.Problems, fmt.Sprintf("%d candidate(s) not asked: %s; the findings above are from the candidates that were%s", notAsked, r.cappedReason(), hint))
+	}
 	res.Run.Problems = append(res.Run.Problems, r.problems()...)
 	res.Run.Incomplete = len(res.Run.Problems) > 0 || ctx.Err() != nil
 	if ctx.Err() != nil {
@@ -205,6 +228,7 @@ type job struct {
 
 	asked     bool
 	planned   bool
+	notAsked  bool // the budget ran out before this candidate
 	replayed  bool
 	samples   int
 	agreement map[string]string
@@ -286,7 +310,7 @@ func (r *runner) do(ctx context.Context, jobs []*job) {
 			}
 		}
 		if !r.reserve(r.votes * r.callsPer(qs)) {
-			j.err = errors.New("not asked: " + r.capped)
+			j.notAsked = true
 			continue
 		}
 		if r.dryRun {
@@ -454,7 +478,7 @@ func (r *runner) ask(ctx context.Context, j *job, req sdk.Request) {
 		// budget while this one waited for a worker.
 		if r.spent() {
 			if i == 0 {
-				j.err = errors.New("not asked: " + r.capped)
+				j.notAsked = true
 			} else {
 				j.err = errors.New("not all samples sent: " + r.capped)
 			}
@@ -510,6 +534,12 @@ func (r *runner) decide(j *job, req sdk.Request, samples [][]sdk.Answer) {
 	}
 	j.answers = answers
 	j.decision = j.rule.Decide(j.cand, answers)
+}
+
+func (r *runner) cappedReason() string {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	return r.capped
 }
 
 func (r *runner) problems() []string {

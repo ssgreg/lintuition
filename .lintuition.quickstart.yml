@@ -16,5 +16,8 @@ semantic:
       model: jev-latest
   # Person-written text (comments, Help, log messages, test names) is sent; Go source is not.
   payload: prose
+  # A paid backend always gets a money cap. Reaching it stops new questions; what was found is
+  # still reported, answers already received are cached, and a rerun pays only for the rest.
   budget:
     max-requests: 2000
+    max-cost-usd: 1

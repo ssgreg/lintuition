@@ -174,7 +174,9 @@ func (c *Classifier) Model() string {
 
 // Capabilities implements sdk.Classifier.
 func (c *Classifier) Capabilities() sdk.Capabilities {
-	return sdk.Capabilities{Kinds: []sdk.Kind{sdk.Choice, sdk.Noul, sdk.Score}, Probabilities: true, CallsPerQuestion: true}
+	// Claude Code reports its own cost figure; Codex reports tokens, priced only with price-per-mtok.
+	return sdk.Capabilities{Kinds: []sdk.Kind{sdk.Choice, sdk.Noul, sdk.Score}, Probabilities: true, CallsPerQuestion: true,
+		CostKnown: c.kind == claudeCode || c.price > 0}
 }
 
 // options returns a question's answer keys, labels and descriptions.

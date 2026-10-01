@@ -237,7 +237,7 @@ func runCmd(code *int) *cobra.Command {
 }
 
 func summary(w io.Writer, res *engine.Result, dryRun, stats bool) {
-	var cand, asked, abst, skip, fail, planned, unsup int
+	var cand, asked, abst, skip, fail, planned, unsup, notAsked int
 	for _, l := range res.Run.Linters {
 		cand += l.Candidates
 		asked += l.Asked
@@ -246,6 +246,7 @@ func summary(w io.Writer, res *engine.Result, dryRun, stats bool) {
 		fail += l.Failed
 		planned += l.Planned
 		unsup += l.Unsupported
+		notAsked += l.NotAsked
 	}
 	switch {
 	case !stats && !dryRun:
@@ -254,8 +255,11 @@ func summary(w io.Writer, res *engine.Result, dryRun, stats bool) {
 			res.Run.Stats.Packages, cand, planned, res.Run.Stats.Requests, res.Run.Stats.Votes, res.Run.Stats.CacheHits, skip, unsup, fail)
 		fmt.Fprintln(w)
 	default:
-		fmt.Fprintf(w, "%d issue(s). %d packages, %d candidates: %d asked, %d abstained, %d skipped, %d unsupported, %d failed. %d requests",
-			len(res.Issues), res.Run.Stats.Packages, cand, asked, abst, skip, unsup, fail, res.Run.Stats.Requests)
+		fmt.Fprintf(w, "%d issue(s). %d packages, %d candidates: %d asked, %d abstained, %d skipped, %d unsupported, %d failed", len(res.Issues), res.Run.Stats.Packages, cand, asked, abst, skip, unsup, fail)
+		if notAsked > 0 {
+			fmt.Fprintf(w, ", %d not asked (budget)", notAsked)
+		}
+		fmt.Fprintf(w, ". %d requests", res.Run.Stats.Requests)
 		if res.Run.Stats.CacheHits > 0 {
 			fmt.Fprintf(w, ", %d from cache", res.Run.Stats.CacheHits)
 		}
@@ -513,6 +517,7 @@ func evalCmd() *cobra.Command {
 		cfgPath  string
 		runs     int
 		jsonPath string
+		maxCost  float64
 	)
 	cmd := &cobra.Command{
 		Use:   "eval DIR [packages]",
@@ -557,6 +562,17 @@ func evalCmd() *cobra.Command {
 				}
 				// Fresh samples every run: a replay is not a new observation.
 				c.Semantic.Cache.Disabled = true
+				if maxCost > 0 {
+					left := maxCost - cost
+					if left <= 0 {
+						problems = append(problems, fmt.Sprintf("--max-cost-usd %.4f spent after %d of %d runs", maxCost, r, runs))
+						break
+					}
+					// The whole evaluation shares one cap: each run gets what the earlier ones left.
+					if c.Semantic.Budget.MaxCostUSD == 0 || c.Semantic.Budget.MaxCostUSD > left {
+						c.Semantic.Budget.MaxCostUSD = left
+					}
+				}
 				out, err := twins.Run(cmd.Context(), c, dir, patterns)
 				if err != nil {
 					return err
@@ -636,6 +652,7 @@ func evalCmd() *cobra.Command {
 	cmd.Flags().StringVarP(&cfgPath, "config", "c", "", "config file (default: the one found from DIR upwards)")
 	cmd.Flags().IntVar(&runs, "runs", 3, "fresh runs")
 	cmd.Flags().StringVar(&jsonPath, "json", "", "also write the scores as JSON to this file")
+	cmd.Flags().Float64Var(&maxCost, "max-cost-usd", 0, "cap on the cost of all runs together; reaching it stops the evaluation, which then counts as incomplete")
 	return cmd
 }
 

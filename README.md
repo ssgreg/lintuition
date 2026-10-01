@@ -158,6 +158,18 @@ Requests are retried on 429 (honouring `Retry-After`) and 5xx, rate-limited, and
 `semantic.budget`. Costs are estimates at the adapter's price assumption, not a bill. Errors never
 carry the request body or the key.
 
+### Money
+
+`semantic.budget.max-cost-usd` caps what one run may spend; `lintuition eval --max-cost-usd` caps
+all its runs together. When the cap is reached, no new question goes out, requests already in
+flight finish, and every finding made so far is still reported; the run counts as incomplete
+(exit 2) and the summary says how many candidates were not asked. Answers already received are
+cached, so a rerun with a higher cap pays only for the rest.
+
+Every remote backend can be capped: `jev` and `claude-code` know their cost, `codex` and remote
+`openai` need `price-per-mtok`, and refuse a cap without it instead of ignoring it. A paid backend
+without a cap gets a warning. A local model needs no cap.
+
 To see exactly what would be sent, without sending it:
 
 ```sh
