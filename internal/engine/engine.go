@@ -233,7 +233,7 @@ type job struct {
 	replayed  bool
 	samples   int
 	agreement map[string]string
-	perSample map[string][]string
+	perSample map[string][]map[string]float64
 	key       string
 	skipped   string
 	err       error
@@ -645,27 +645,29 @@ func agreement(qs []sdk.Question, samples []map[string]sdk.Answer) map[string]st
 	return out
 }
 
-// perSample is, per question, each sample's answer with its support, in sample order:
-// "current 0.9", "yes 0.82", "1.4". Nil for one sample, whose answer is the evidence itself.
-func perSample(qs []sdk.Question, samples []map[string]sdk.Answer) map[string][]string {
+// perSample is, per question, each sample's full answer in sample order, unrounded. Nil for one
+// sample, whose answer is the evidence itself.
+func perSample(qs []sdk.Question, samples []map[string]sdk.Answer) map[string][]map[string]float64 {
 	if len(samples) < 2 {
 		return nil
 	}
-	out := map[string][]string{}
+	out := map[string][]map[string]float64{}
 	for _, q := range qs {
 		for _, s := range samples {
 			a := s[q.ID]
-			v := ""
+			v := map[string]float64{}
 			switch {
 			case a.Choice != "":
-				v = a.Choice
-				if p, ok := a.Probability(a.Choice); ok {
-					v += " " + strconv.FormatFloat(p, 'g', 3, 64)
+				for k, p := range a.Probabilities {
+					v[k] = p
 				}
 			case a.Yes != nil:
-				v = "yes " + strconv.FormatFloat(*a.Yes, 'g', 3, 64)
+				v["yes"] = *a.Yes
 			case a.Score != nil:
-				v = strconv.FormatFloat(*a.Score, 'g', -1, 64)
+				v["score"] = *a.Score
+			}
+			if a.Confidence != nil {
+				v["confidence"] = *a.Confidence
 			}
 			out[q.ID] = append(out[q.ID], v)
 		}

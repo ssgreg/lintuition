@@ -213,3 +213,19 @@ func TestEvalOffline(t *testing.T) {
 		t.Fatalf("exit %d\n%s\n%s", code, out, errs)
 	}
 }
+
+func TestEvalKeepsFindingsApartAndReportsCoverage(t *testing.T) {
+	dir, _ := filepath.Abs("../testdata/harness")
+	json := filepath.Join(t.TempDir(), "eval.json")
+	_, out, errs := run("eval", "--runs", "3", "--json", json, dir, "./evalcov")
+	if !strings.Contains(out, "2 unaccounted finding(s)") || strings.Count(out, " 3/3: ") != 2 || strings.Contains(out, "6/3") {
+		t.Fatalf("two different findings on one line are two, each in 3 of 3 runs:\n%s\n%s", out, errs)
+	}
+	if !strings.Contains(out, "metric-type-vs-help") || !strings.Contains(out, "x 3 completed runs (of 3 requested)") {
+		t.Fatalf("coverage and completed runs must be reported:\n%s", out)
+	}
+	b, _ := os.ReadFile(json)
+	if !strings.Contains(string(b), `"Unsupported": 3`) || !strings.Contains(string(b), `"runs_completed": 3`) {
+		t.Fatalf("JSON must carry coverage (one unsupported candidate a run):\n%s", b)
+	}
+}

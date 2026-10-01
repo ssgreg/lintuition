@@ -15,7 +15,9 @@ builds:
     flags:
       - -trimpath
     ldflags:
-      - -s -w -X github.com/ssgreg/lintuition/cli.Version={{ .Tag }}
+      # .Version is the release version, or the snapshot's own version in a snapshot build; .Tag
+      # would stamp a snapshot with the last tag.
+      - -s -w -X github.com/ssgreg/lintuition/cli.Version=v{{ .Version }}
     goos: [linux, darwin, windows]
     goarch: [amd64, arm64]
     ignore:
@@ -31,6 +33,7 @@ archives:
       - LICENSE
       - README.md
       - .lintuition.reference.yml
+      - .lintuition.quickstart.yml
 
 checksum:
   name_template: checksums.txt

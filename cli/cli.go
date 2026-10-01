@@ -547,17 +547,26 @@ func evalCmd() *cobra.Command {
 				Key, Pattern string
 				Caught       int
 			}
+			// An unaccounted finding is told apart by where it is and what it says; Runs counts the
+			// runs it appeared in, Occurrences every time.
 			type alarm struct {
 				Key, Linter, Text string
 				Runs              int
+				Occurrences       int
+			}
+			type coverage struct {
+				Candidates, Asked, Abstained, Unsupported, Skipped, Failed, NotAsked int
+				SkippedBy                                                            map[string]int
 			}
 			var (
-				cases    []*caseStat
-				alarms   = map[string]*alarm{}
-				problems []string
-				requests int
-				cost     float64
-				abstain  int
+				cases     []*caseStat
+				alarms    = map[string]*alarm{}
+				cover     = map[string]*coverage{}
+				problems  []string
+				requests  int
+				cost      float64
+				abstain   int
+				completed int
 			)
 			for r := 0; r < runs; r++ {
 				c, err := twins.Load(dir, cfgPath)
@@ -581,6 +590,7 @@ func evalCmd() *cobra.Command {
 				if err != nil {
 					return err
 				}
+				completed++
 				if out.Result.Run.Incomplete {
 					for _, p := range out.Result.Run.Problems {
 						problems = append(problems, fmt.Sprintf("run %d: %s", r+1, p))
@@ -589,7 +599,25 @@ func evalCmd() *cobra.Command {
 				requests += out.Result.Run.Stats.Requests
 				cost += out.Result.Run.Stats.CostUSD
 				for _, l := range out.Result.Run.Linters {
+					if !l.Enabled {
+						continue
+					}
 					abstain += l.Abstained
+					cv := cover[l.Name]
+					if cv == nil {
+						cv = &coverage{SkippedBy: map[string]int{}}
+						cover[l.Name] = cv
+					}
+					cv.Candidates += l.Candidates
+					cv.Asked += l.Asked
+					cv.Abstained += l.Abstained
+					cv.Unsupported += l.Unsupported
+					cv.Skipped += l.Skipped
+					cv.Failed += l.Failed
+					cv.NotAsked += l.NotAsked
+					for k, v := range l.SkippedBy {
+						cv.SkippedBy[k] += v
+					}
 				}
 				if r == 0 {
 					for _, w := range out.Wants {
@@ -604,12 +632,17 @@ func evalCmd() *cobra.Command {
 						cases[i].Caught++
 					}
 				}
+				seen := map[string]bool{}
 				for _, is := range out.Unexpected {
-					k := fmt.Sprintf("%s:%d %s", is.Pos.Filename, is.Pos.Line, is.FromLinter)
+					k := fmt.Sprintf("%s:%d:%d %s %s", is.Pos.Filename, is.Pos.Line, is.Pos.Column, is.FromLinter, is.Text)
 					if alarms[k] == nil {
-						alarms[k] = &alarm{Key: fmt.Sprintf("%s:%d", is.Pos.Filename, is.Pos.Line), Linter: is.FromLinter, Text: is.Text}
+						alarms[k] = &alarm{Key: fmt.Sprintf("%s:%d:%d", is.Pos.Filename, is.Pos.Line, is.Pos.Column), Linter: is.FromLinter, Text: is.Text}
 					}
-					alarms[k].Runs++
+					alarms[k].Occurrences++
+					if !seen[k] {
+						seen[k] = true
+						alarms[k].Runs++
+					}
 				}
 			}
 			w := cmd.OutOrStdout()
@@ -617,9 +650,9 @@ func evalCmd() *cobra.Command {
 			fmt.Fprintf(tw, "case\tcaught\twant\n")
 			always, never := 0, 0
 			for _, c := range cases {
-				fmt.Fprintf(tw, "%s\t%d/%d\t%s\n", c.Key, c.Caught, runs, c.Pattern)
+				fmt.Fprintf(tw, "%s\t%d/%d\t%s\n", c.Key, c.Caught, completed, c.Pattern)
 				switch c.Caught {
-				case runs:
+				case completed:
 					always++
 				case 0:
 					never++
@@ -632,16 +665,30 @@ func evalCmd() *cobra.Command {
 			}
 			sort.Strings(keys)
 			if len(keys) > 0 {
-				fmt.Fprintln(w, "\nfindings no mark accounts for:")
+				fmt.Fprintln(w, "\nfindings no mark accounts for (runs it appeared in / completed runs):")
 				for _, k := range keys {
 					a := alarms[k]
-					fmt.Fprintf(w, "  %s %d/%d: %s (%s)\n", a.Key, a.Runs, runs, a.Text, a.Linter)
+					fmt.Fprintf(w, "  %s %d/%d: %s (%s)\n", a.Key, a.Runs, completed, a.Text, a.Linter)
 				}
 			}
-			fmt.Fprintf(w, "\n%d marked cases x %d runs: caught in every run %d, in some %d, in none %d; %d unaccounted finding(s); %d abstentions; %d requests, ~$%.6f\n",
-				len(cases), runs, always, len(cases)-always-never, never, len(keys), abstain, requests, cost)
+			names := make([]string, 0, len(cover))
+			for n := range cover {
+				names = append(names, n)
+			}
+			sort.Strings(names)
+			fmt.Fprintln(w, "\ncoverage, summed over completed runs:")
+			ctw := tabwriter.NewWriter(w, 0, 4, 2, ' ', 0)
+			fmt.Fprintf(ctw, "  linter\tcandidates\tasked\tabstained\tunsupported\tskipped\tfailed\tnot asked\n")
+			for _, n := range names {
+				cv := cover[n]
+				fmt.Fprintf(ctw, "  %s\t%d\t%d\t%d\t%d\t%d\t%d\t%d\n", n, cv.Candidates, cv.Asked, cv.Abstained, cv.Unsupported, cv.Skipped, cv.Failed, cv.NotAsked)
+			}
+			ctw.Flush()
+			fmt.Fprintf(w, "\n%d marked cases x %d completed runs (of %d requested): caught in every run %d, in some %d, in none %d; %d unaccounted finding(s); %d abstentions; %d requests, ~$%.6f\n",
+				len(cases), completed, runs, always, len(cases)-always-never, never, len(keys), abstain, requests, cost)
 			if jsonPath != "" {
-				b, _ := json.MarshalIndent(map[string]any{"runs": runs, "cases": cases, "unaccounted": alarms, "requests": requests, "cost_usd": cost, "abstentions": abstain, "problems": problems}, "", "  ")
+				b, _ := json.MarshalIndent(map[string]any{"runs_requested": runs, "runs_completed": completed, "cases": cases, "unaccounted": alarms,
+					"coverage": cover, "requests": requests, "cost_usd": cost, "abstentions": abstain, "problems": problems}, "", "  ")
 				if err := os.WriteFile(jsonPath, b, 0o600); err != nil {
 					return err
 				}
