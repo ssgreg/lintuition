@@ -172,6 +172,17 @@ func init() {
 	if _, err := os.Stat(filepath.Join(m.abs(m.Destination), m.Name)); !os.IsNotExist(err) {
 		t.Fatal("a binary that cannot start must not be left at the target")
 	}
+	// A directory named like an old staging path survives a build.
+	mk, _ := buildManifest(t, root, "", "  - {module: example.com/lintuition-keywords, path: "+filepath.Join(root, "examples/plugins/keywords")+"}")
+	keep := filepath.Join(mk.abs(mk.Destination), mk.Name+".new")
+	os.MkdirAll(keep, 0o755)
+	os.WriteFile(filepath.Join(keep, "sentinel"), []byte("keep"), 0o600)
+	if _, err := mk.Build(context.Background(), &log); err != nil {
+		t.Fatalf("%v\n%s", err, log.String())
+	}
+	if _, err := os.Stat(filepath.Join(keep, "sentinel")); err != nil {
+		t.Fatal("the build removed a directory it did not create")
+	}
 	// A directory where the binary should go.
 	m, _ = buildManifest(t, root, "name: output\n", "  - {module: example.com/lintuition-keywords, path: "+filepath.Join(root, "examples/plugins/keywords")+"}")
 	os.MkdirAll(filepath.Join(m.abs(m.Destination), "output"), 0o755)

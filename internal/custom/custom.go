@@ -319,23 +319,27 @@ func (m *Manifest) Build(ctx context.Context, log io.Writer) (string, error) {
 	}
 	// Build next to the target and move it in only after it starts: a duplicate linter or classifier
 	// name panics at registration, which compiling cannot show.
-	staged := out + ".new"
+	// The staging directory is created by this call and only it is removed: nothing that existed
+	// before is touched.
+	stageDir, err := os.MkdirTemp(filepath.Dir(out), ".lintuition-custom-")
+	if err != nil {
+		return "", err
+	}
+	defer os.RemoveAll(stageDir)
+	staged := filepath.Join(stageDir, m.Name)
 	if err := run("build", "-trimpath", "-o", staged, "."); err != nil {
 		return "", err
 	}
 	if st, err := os.Stat(staged); err != nil || !st.Mode().IsRegular() {
-		os.RemoveAll(staged)
 		return "", fmt.Errorf("go build did not produce %s", staged)
 	}
 	var startErr bytes.Buffer
 	probe := exec.CommandContext(ctx, staged, "version")
 	probe.Stdout, probe.Stderr = io.Discard, &startErr
 	if err := probe.Run(); err != nil {
-		os.Remove(staged)
 		return "", fmt.Errorf("the built binary does not start (%v): %s", err, strings.TrimSpace(firstLine(startErr.String())))
 	}
 	if err := os.Rename(staged, out); err != nil {
-		os.Remove(staged)
 		return "", err
 	}
 	return out, nil
