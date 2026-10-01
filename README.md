@@ -104,6 +104,19 @@ person-written text does leave the machine when the backend is remote.
 Each linter has defect / fixed twins in [testdata/twins](testdata/twins), checked by
 [`linttest`](linttest) with `// want` comments, like `analysistest`.
 
+`lintuition eval` runs the same twins against a real classifier, several fresh times with the cache
+off, and reports how often each marked case was caught and every finding no mark accounts for:
+
+```text
+$ lintuition eval -c jev.yml --runs 3 testdata/twins
+6 marked cases x 3 runs: caught in every run 6, in some 0, in none 0; 0 unaccounted finding(s);
+7 abstentions; 48 requests, ~$0.000857
+```
+
+That is the twins of this repository with `jev-latest` on 2026-10-01. Twins are small and written to
+exercise the rules; they check that the pieces work together, not how precise a linter is on real
+code.
+
 Facts are read through `go/types`: an error result is found by its type, not by the variable's
 name; a log call is a level-named call of a logger package that returns nothing (so `zap.Error(err)`
 is a field, not a log line); a table row is bound to the function called in the loop over that

@@ -35,7 +35,6 @@ var Analyzer = &analysis.Analyzer{
 	},
 }
 
-
 type rule struct{}
 
 func (rule) Questions(*sdk.Candidate) []sdk.Question {

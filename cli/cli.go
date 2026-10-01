@@ -10,8 +10,10 @@ import (
 	"io"
 	"os"
 	"os/signal"
+	"path/filepath"
 	"runtime"
 	"runtime/debug"
+	"sort"
 	"strings"
 	"text/tabwriter"
 	"time"
@@ -23,6 +25,7 @@ import (
 	"github.com/ssgreg/lintuition/internal/custom"
 	"github.com/ssgreg/lintuition/internal/engine"
 	"github.com/ssgreg/lintuition/internal/report"
+	"github.com/ssgreg/lintuition/internal/twins"
 	"github.com/ssgreg/lintuition/sdk"
 )
 
@@ -53,7 +56,7 @@ func Main(args []string, stdout, stderr io.Writer) int {
 	root.SetArgs(args)
 	root.SetOut(stdout)
 	root.SetErr(stderr)
-	root.AddCommand(runCmd(&code), lintersCmd(), classifiersCmd(), configCmd(), cacheCmd(), customCmd(), versionCmd())
+	root.AddCommand(runCmd(&code), lintersCmd(), classifiersCmd(), configCmd(), cacheCmd(), customCmd(), evalCmd(), versionCmd())
 	if err := root.Execute(); err != nil {
 		fmt.Fprintf(stderr, "Error: %v\n", err)
 		return ExitIncomplete
@@ -504,3 +507,136 @@ func customCmd() *cobra.Command {
 	cmd.Flags().StringVarP(&manifest, "manifest", "m", custom.ManifestName, "the build manifest")
 	return cmd
 }
+
+func evalCmd() *cobra.Command {
+	var (
+		cfgPath  string
+		runs     int
+		jsonPath string
+	)
+	cmd := &cobra.Command{
+		Use:   "eval DIR [packages]",
+		Short: "Run the linters over marked twins several times and score them",
+		Long: "Run the linters over defect / fixed twins marked with // want comments, with the configured\n" +
+			"classifier, several fresh times (the answer cache is off), and report per marked case how often\n" +
+			"it was caught, and every finding no mark accounts for. Cases and runs are counted apart.\n" +
+			"This spends classifier requests; set semantic.budget.",
+		Args: cobra.MinimumNArgs(1),
+		RunE: func(cmd *cobra.Command, args []string) error {
+			if runs < 1 || runs > 20 {
+				return errors.New("--runs must be 1 to 20")
+			}
+			dir, err := filepath.Abs(args[0])
+			if err != nil {
+				return err
+			}
+			patterns := args[1:]
+			if len(patterns) == 0 {
+				patterns = []string{"./..."}
+			}
+			type caseStat struct {
+				Key, Pattern string
+				Caught       int
+			}
+			type alarm struct {
+				Key, Linter, Text string
+				Runs              int
+			}
+			var (
+				cases    []*caseStat
+				alarms   = map[string]*alarm{}
+				problems []string
+				requests int
+				cost     float64
+				abstain  int
+			)
+			for r := 0; r < runs; r++ {
+				c, err := twins.Load(dir, cfgPath)
+				if err != nil {
+					return err
+				}
+				// Fresh samples every run: a replay is not a new observation.
+				c.Semantic.Cache.Disabled = true
+				out, err := twins.Run(cmd.Context(), c, dir, patterns)
+				if err != nil {
+					return err
+				}
+				if out.Result.Run.Incomplete {
+					for _, p := range out.Result.Run.Problems {
+						problems = append(problems, fmt.Sprintf("run %d: %s", r+1, p))
+					}
+				}
+				requests += out.Result.Run.Stats.Requests
+				cost += out.Result.Run.Stats.CostUSD
+				for _, l := range out.Result.Run.Linters {
+					abstain += l.Abstained
+				}
+				if r == 0 {
+					for _, w := range out.Wants {
+						cases = append(cases, &caseStat{Key: w.Key, Pattern: w.Pattern.String()})
+					}
+				}
+				if len(out.Wants) != len(cases) {
+					return fmt.Errorf("run %d saw %d marked cases, the first run %d", r+1, len(out.Wants), len(cases))
+				}
+				for i := range out.Wants {
+					if out.Caught[i] {
+						cases[i].Caught++
+					}
+				}
+				for _, is := range out.Unexpected {
+					k := fmt.Sprintf("%s:%d %s", is.Pos.Filename, is.Pos.Line, is.FromLinter)
+					if alarms[k] == nil {
+						alarms[k] = &alarm{Key: fmt.Sprintf("%s:%d", is.Pos.Filename, is.Pos.Line), Linter: is.FromLinter, Text: is.Text}
+					}
+					alarms[k].Runs++
+				}
+			}
+			w := cmd.OutOrStdout()
+			tw := tabwriter.NewWriter(w, 0, 4, 2, ' ', 0)
+			fmt.Fprintf(tw, "case\tcaught\twant\n")
+			always, never := 0, 0
+			for _, c := range cases {
+				fmt.Fprintf(tw, "%s\t%d/%d\t%s\n", c.Key, c.Caught, runs, c.Pattern)
+				switch c.Caught {
+				case runs:
+					always++
+				case 0:
+					never++
+				}
+			}
+			tw.Flush()
+			keys := make([]string, 0, len(alarms))
+			for k := range alarms {
+				keys = append(keys, k)
+			}
+			sort.Strings(keys)
+			if len(keys) > 0 {
+				fmt.Fprintln(w, "\nfindings no mark accounts for:")
+				for _, k := range keys {
+					a := alarms[k]
+					fmt.Fprintf(w, "  %s %d/%d: %s (%s)\n", a.Key, a.Runs, runs, a.Text, a.Linter)
+				}
+			}
+			fmt.Fprintf(w, "\n%d marked cases x %d runs: caught in every run %d, in some %d, in none %d; %d unaccounted finding(s); %d abstentions; %d requests, ~$%.6f\n",
+				len(cases), runs, always, len(cases)-always-never, never, len(keys), abstain, requests, cost)
+			if jsonPath != "" {
+				b, _ := json.MarshalIndent(map[string]any{"runs": runs, "cases": cases, "unaccounted": alarms, "requests": requests, "cost_usd": cost, "abstentions": abstain, "problems": problems}, "", "  ")
+				if err := os.WriteFile(jsonPath, b, 0o600); err != nil {
+					return err
+				}
+			}
+			if len(problems) > 0 {
+				fmt.Fprintf(cmd.ErrOrStderr(), "INCOMPLETE eval:\n  %s\n", strings.Join(problems, "\n  "))
+				return errIncomplete
+			}
+			return nil
+		},
+	}
+	cmd.Flags().StringVarP(&cfgPath, "config", "c", "", "config file (default: the one found from DIR upwards)")
+	cmd.Flags().IntVar(&runs, "runs", 3, "fresh runs")
+	cmd.Flags().StringVar(&jsonPath, "json", "", "also write the scores as JSON to this file")
+	return cmd
+}
+
+var errIncomplete = errors.New("the evaluation is incomplete")

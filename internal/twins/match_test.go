@@ -1,4 +1,4 @@
-package linttest
+package twins
 
 import (
 	"regexp"
@@ -11,7 +11,7 @@ func TestMatchIsOrderIndependent(t *testing.T) {
 	issues := []report.Issue{{Text: "counter Help describes a current value"}, {Text: "gauge Help describes a running total"}}
 	broad, specific := regexp.MustCompile(`Help describes`), regexp.MustCompile(`^counter`)
 	for _, pats := range [][]*regexp.Regexp{{broad, specific}, {specific, broad}} {
-		for p, i := range match(pats, issues) {
+		for p, i := range Match(pats, issues) {
 			if i < 0 {
 				t.Errorf("pattern %q unmatched with order %v", pats[p], pats)
 			}

@@ -205,3 +205,11 @@ func TestPreviewOfflineAndCollisions(t *testing.T) {
 		t.Fatalf("a rejected collision overwrote the file: %q", b)
 	}
 }
+
+func TestEvalOffline(t *testing.T) {
+	twinsDir, _ := filepath.Abs("../testdata/twins")
+	code, out, errs := run("eval", "--runs", "2", twinsDir)
+	if code != 0 || !strings.Contains(out, "caught in every run 6, in some 0, in none 0; 0 unaccounted") {
+		t.Fatalf("exit %d\n%s\n%s", code, out, errs)
+	}
+}
