@@ -46,6 +46,8 @@ func g(l *slog.Logger, password, user string, n int) {
 	slog.Info("value", slog.StringValue(user))
 	slog.Info("grouped", slog.Group("auth", slog.String("password", password)))
 	slog.With("user", user).Info("chained")
+	slog.With("before", user).WithGroup("credentials").With("password", password).Info("scoped", "n", n)
+	slog.Info("inline", slog.Group("", slog.String("password", password)))
 }`)
 	var got []string
 	ast.Inspect(f, func(n ast.Node) bool {
@@ -67,6 +69,8 @@ func g(l *slog.Logger, password, user string, n int) {
 		"value:  (partial)", // a slog.Value is not a field
 		"grouped: auth.password=password",
 		"chained: user=user",
+		"scoped: before=user,credentials.password=password,credentials.n=n",
+		"inline: password=password",
 	}
 	if strings.Join(got, "\n") != strings.Join(want, "\n") {
 		t.Fatalf("got:\n%s\nwant:\n%s", strings.Join(got, "\n"), strings.Join(want, "\n"))

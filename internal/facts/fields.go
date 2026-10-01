@@ -30,15 +30,10 @@ type LogField struct {
 //
 // The arguments of Print, Println, logrus.Info(args ...) and printf formats are not fields.
 func Fields(info *types.Info, lc LogCall) (fields []LogField, partial bool) {
-	args := lc.Call.Args
-	if lc.MessageArg >= 0 && !strings.HasSuffix(lc.Func.Name(), "f") && structured(lc.Func) {
-		rest := args[lc.MessageArg+1:]
-		f, p := readArgs(info, rest, alternates(lc.Func))
-		fields, partial = append(fields, f...), p
-	}
-	// Fields along the chain the call is made on.
-	x := lc.Call.Fun
-	for {
+	// The calls the logging call is made on, innermost first: slog.With(...).WithGroup("g").Info(...)
+	// gives With, WithGroup. Groups apply to what is added after them, as at run time.
+	var chain []*ast.CallExpr
+	for x := lc.Call.Fun; ; {
 		sel, ok := ast.Unparen(x).(*ast.SelectorExpr)
 		if !ok {
 			break
@@ -47,20 +42,40 @@ func Fields(info *types.Info, lc LogCall) (fields []LogField, partial bool) {
 		if !ok {
 			break
 		}
-		if fn := Callee(info, inner); fn != nil && isLogPackage(fn.Pkg()) {
-			switch {
-			case fn.Name() == "With" || fn.Name() == "WithGroup":
-				if fn.Name() == "With" {
-					f, p := readArgs(info, inner.Args, alternates(fn))
-					fields, partial = append(fields, f...), partial || p
-				}
-			case len(inner.Args) == 2:
-				if k, ok := ConstString(info, inner.Args[0]); ok {
-					fields = append(fields, field(info, k, inner.Args[1]))
-				}
+		chain = append([]*ast.CallExpr{inner}, chain...)
+		x = inner.Fun
+	}
+	prefix := ""
+	for _, inner := range chain {
+		fn := Callee(info, inner)
+		if fn == nil || !isLogPackage(fn.Pkg()) {
+			continue
+		}
+		switch {
+		case fn.Name() == "WithGroup":
+			g, ok := "", len(inner.Args) == 1
+			if ok {
+				g, ok = ConstString(info, inner.Args[0])
+			}
+			if !ok {
+				partial = true // a group whose name is not known: the keys cannot be told
+				continue
+			}
+			if g != "" {
+				prefix += g + "."
+			}
+		case fn.Name() == "With":
+			f, p := readArgs(info, inner.Args, alternates(fn), prefix)
+			fields, partial = append(fields, f...), partial || p
+		case len(inner.Args) == 2:
+			if k, ok := ConstString(info, inner.Args[0]); ok {
+				fields = append(fields, field(info, prefix+k, inner.Args[1]))
 			}
 		}
-		x = inner.Fun
+	}
+	if lc.MessageArg >= 0 && !strings.HasSuffix(lc.Func.Name(), "f") && structured(lc.Func) {
+		f, p := readArgs(info, lc.Call.Args[lc.MessageArg+1:], alternates(lc.Func), prefix)
+		fields, partial = append(fields, f...), partial || p
 	}
 	return fields, partial
 }
@@ -95,16 +110,16 @@ func alternates(fn *types.Func) bool {
 	return false
 }
 
-func readArgs(info *types.Info, args []ast.Expr, alternating bool) (out []LogField, partial bool) {
+func readArgs(info *types.Info, args []ast.Expr, alternating bool, prefix string) (out []LogField, partial bool) {
 	for i := 0; i < len(args); i++ {
 		a := ast.Unparen(args[i])
-		if fs, ok := fieldCall(info, a, ""); ok {
+		if fs, ok := fieldCall(info, a, prefix); ok {
 			out = append(out, fs...)
 			continue
 		}
 		if alternating {
 			if k, ok := ConstString(info, a); ok && i+1 < len(args) {
-				out = append(out, field(info, k, args[i+1]))
+				out = append(out, field(info, prefix+k, args[i+1]))
 				i++
 				continue
 			}
@@ -140,9 +155,14 @@ func fieldCall(info *types.Info, e ast.Expr, prefix string) ([]LogField, bool) {
 		if !ok {
 			return nil, false
 		}
+		// An empty group name inlines its fields, as slog does.
+		inner := prefix
+		if g != "" {
+			inner = prefix + g + "."
+		}
 		var out []LogField
 		for _, a := range call.Args[1:] {
-			fs, ok := fieldCall(info, ast.Unparen(a), prefix+g+".")
+			fs, ok := fieldCall(info, ast.Unparen(a), inner)
 			if !ok {
 				return nil, false
 			}
