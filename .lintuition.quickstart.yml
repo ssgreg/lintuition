@@ -1,0 +1,20 @@
+# A short working config. Copy it to .lintuition.yml and export TYPESAFE_API_KEY.
+# Every key with its default: .lintuition.reference.yml.
+version: "2"
+
+run:
+  # Findings are review hints: report them, do not fail the build on them.
+  issues-exit-code: 0
+
+linters:
+  default: standard
+
+semantic:
+  classifier: jev
+  classifiers:
+    jev:
+      model: jev-latest
+  # Person-written text (comments, Help, log messages, test names) is sent; Go source is not.
+  payload: prose
+  budget:
+    max-requests: 2000

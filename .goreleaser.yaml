@@ -1,0 +1,40 @@
+# GoReleaser v2: builds, archives and checksums for a tagged release.
+version: 2
+
+before:
+  hooks:
+    - go mod tidy
+    - go test ./...
+
+builds:
+  - id: lintuition
+    main: ./cmd/lintuition
+    binary: lintuition
+    env:
+      - CGO_ENABLED=0
+    flags:
+      - -trimpath
+    ldflags:
+      - -s -w -X github.com/ssgreg/lintuition/cli.Version={{ .Tag }}
+    goos: [linux, darwin, windows]
+    goarch: [amd64, arm64]
+    ignore:
+      - goos: windows
+        goarch: arm64
+
+archives:
+  - formats: [tar.gz]
+    format_overrides:
+      - goos: windows
+        formats: [zip]
+    files:
+      - LICENSE
+      - README.md
+      - .lintuition.reference.yml
+
+checksum:
+  name_template: checksums.txt
+
+changelog:
+  use: git
+  sort: asc

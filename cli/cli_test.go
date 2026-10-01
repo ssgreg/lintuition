@@ -143,3 +143,10 @@ func TestReferenceConfigVerifies(t *testing.T) {
 		t.Fatalf("reference config: exit %d %s %s", code, out, errs)
 	}
 }
+
+func TestQuickstartConfigVerifies(t *testing.T) {
+	p, _ := filepath.Abs("../.lintuition.quickstart.yml")
+	if code, out, errs := run("config", "verify", "-c", p); code != 0 {
+		t.Fatalf("quickstart config: exit %d %s %s", code, out, errs)
+	}
+}

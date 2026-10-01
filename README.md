@@ -35,6 +35,18 @@ go install github.com/ssgreg/lintuition/cmd/lintuition@latest
 cd examples/sample && lintuition run ./...   # runs offline with the scripted fake classifier
 ```
 
+On your code, with Jev:
+
+```sh
+cp .lintuition.quickstart.yml your/project/.lintuition.yml
+export TYPESAFE_API_KEY=...
+lintuition run --dry-run --preview requests.jsonl ./...   # what would be sent, and how much
+lintuition run ./...
+```
+
+Release binaries for Linux, macOS and Windows are on the
+[releases page](https://github.com/ssgreg/lintuition/releases).
+
 The command line, config and output follow golangci-lint v2 where lintuition supports the same thing:
 
 ```sh
