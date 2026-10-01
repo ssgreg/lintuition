@@ -6,12 +6,13 @@
 // Code finds the shape and knows the unit: a call of a printf-style function (its name ends in f,
 // its last two parameters are a format string and ...any, such as fmt.Printf, log.Printf, a
 // logger's Infof or fmt.Errorf) whose argument for a verb is a call of time.Duration's Seconds,
-// Milliseconds, Microseconds, Nanoseconds, Minutes or Hours, possibly under a numeric conversion or
-// math.Round, Floor, Ceil or Trunc. Each verb is bound to its argument by position. The classifier
-// reads only the format and the verb, and says which unit the wording gives that number; Go code
-// compares it with the method called. A Duration printed with %v or %s prints its own unit and is
-// not asked. A format built at run time, an explicit argument index or a verb that cannot be bound
-// is unsupported.
+// Milliseconds, Microseconds, Nanoseconds, Minutes or Hours, possibly under a conversion to a basic
+// numeric type or math.Round, Floor, Ceil or Trunc. A conversion to a named type is not followed: its
+// String or Format method may print another number. Each verb is bound to its argument by position,
+// as fmt binds it. The classifier reads only the format and the verb, and says which unit the
+// wording gives that number; Go code compares it with the method called. A Duration printed with %v
+// or %s prints its own unit and is not asked. A format built at run time, an explicit argument
+// index or a verb that cannot be bound is unsupported.
 package humanunit
 
 import (
@@ -19,6 +20,7 @@ import (
 	"go/ast"
 	"go/types"
 	"strings"
+	"unicode/utf8"
 
 	"golang.org/x/tools/go/analysis"
 	"golang.org/x/tools/go/analysis/passes/inspect"
@@ -52,7 +54,7 @@ func init() {
 		Name:        Name,
 		Doc:         "a printf message names a different unit than the duration value it prints",
 		Standard:    true,
-		Version:     "1",
+		Version:     "2",
 		Analyzer:    Analyzer,
 		NewSettings: func() any { return &Settings{} },
 		New: func(s any) (sdk.Rule, error) {
@@ -213,8 +215,14 @@ func unitOf(info *types.Info, e ast.Expr) (string, bool) {
 		if !ok {
 			return "", false
 		}
-		if tv, ok := info.Types[call.Fun]; ok && tv.IsType() && len(call.Args) == 1 {
-			e = call.Args[0] // float64(d.Seconds())
+		if tv, ok := info.Types[call.Fun]; ok && tv.IsType() {
+			// Only a conversion to a basic numeric type prints the same number: float64(d.Seconds()).
+			// A named type may have its own String or Format method, and string(n) is not a number.
+			b, basic := types.Unalias(tv.Type).(*types.Basic)
+			if !basic || b.Info()&types.IsNumeric == 0 || len(call.Args) != 1 {
+				return "", false
+			}
+			e = call.Args[0]
 			continue
 		}
 		fn := facts.Callee(info, call)
@@ -245,51 +253,64 @@ type verb struct {
 	arg  int
 }
 
-// parseVerbs returns the verbs of a printf format in order, each with the argument it consumes; a
-// * width or precision consumes an argument too. An explicit argument index makes the binding
-// something this parser does not follow, and returns a reason instead.
+// parseVerbs returns the verbs of a printf format in order, each with the argument it consumes,
+// following fmt's own scanning (doPrintf): flags, then a width (* consumes an argument), then a
+// precision when a '.' is not the last byte, then the verb rune. A percent verb, decorated or not
+// (%5%), prints '%' and consumes no argument. A format that ends inside a verb prints %!(NOVERB)
+// and consumes nothing, so the verbs before it stay bound. An explicit argument index makes the
+// binding something this parser does not follow, and returns a reason instead.
 func parseVerbs(format string) ([]verb, string) {
+	const index = "the format uses an explicit argument index"
 	var out []verb
 	arg := 0
-	for i := 0; i < len(format); i++ {
+	end := len(format)
+	for i := 0; i < end; {
 		if format[i] != '%' {
+			i++
 			continue
 		}
 		start := i
 		i++
-		if i < len(format) && format[i] == '%' {
-			continue
-		}
-		for i < len(format) && strings.IndexByte("+-# 0", format[i]) >= 0 {
+		for i < end && strings.IndexByte("#0+- ", format[i]) >= 0 {
 			i++
 		}
-		for part := 0; part < 2; part++ { // width, then precision
-			if i < len(format) && format[i] == '[' {
-				return nil, "the format uses an explicit argument index"
+		if i < end && format[i] == '[' {
+			return nil, index
+		}
+		if i < end && format[i] == '*' {
+			arg++
+			i++
+		} else {
+			for i < end && format[i] >= '0' && format[i] <= '9' {
+				i++
 			}
-			if i < len(format) && format[i] == '*' {
+		}
+		if i+1 < end && format[i] == '.' {
+			i++
+			if format[i] == '[' {
+				return nil, index
+			}
+			if format[i] == '*' {
 				arg++
 				i++
 			} else {
-				for i < len(format) && format[i] >= '0' && format[i] <= '9' {
+				for i < end && format[i] >= '0' && format[i] <= '9' {
 					i++
 				}
 			}
-			if part == 0 {
-				if i < len(format) && format[i] == '.' {
-					i++
-				} else {
-					break
-				}
-			}
 		}
-		if i < len(format) && format[i] == '[' {
-			return nil, "the format uses an explicit argument index"
+		if i < end && format[i] == '[' {
+			return nil, index
 		}
-		if i >= len(format) {
-			return nil, "the format ends inside a verb"
+		if i >= end {
+			break // %!(NOVERB)
 		}
-		out = append(out, verb{text: format[start : i+1], arg: arg})
+		r, size := utf8.DecodeRuneInString(format[i:])
+		i += size
+		if r == '%' {
+			continue
+		}
+		out = append(out, verb{text: format[start:i], arg: arg})
 		arg++
 	}
 	return out, ""

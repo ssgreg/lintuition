@@ -90,13 +90,16 @@ func TestDecide(t *testing.T) {
 		{condition("insufficient", map[string]float64{"insufficient": 0.8}), false, false},                // too vague: no finding
 		{condition("unclear", map[string]float64{"unclear": 0.9}), false, true},                           // unclear
 		{map[string]sdk.Answer{"condition": {QuestionID: "condition", Choice: "different"}}, false, true}, // no probability
+		// A sparse answer near the threshold: the missing same is not zero, so the margin cannot pass.
+		{condition("different", map[string]float64{"different": 0.56}), false, true},
+		{condition("different", map[string]float64{"different": 0.9}), false, true},
 	} {
 		d := r.Decide(c, tc.answers)
 		if d.Report != tc.report || (d.Abstained != "") != tc.abstain {
 			t.Errorf("%+v: got %+v", tc.answers, d)
 		}
 	}
-	d := r.Decide(c, condition("different", map[string]float64{"different": 0.8}))
+	d := r.Decide(c, condition("different", map[string]float64{"different": 0.8, "same": 0.1}))
 	if d.Message != `sentinel error name and message describe different conditions: ErrNotFound "permission denied"` {
 		t.Errorf("message: %s", d.Message)
 	}

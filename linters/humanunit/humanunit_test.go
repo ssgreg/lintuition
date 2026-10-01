@@ -64,6 +64,9 @@ func TestExtraction(t *testing.T) {
 		`11 unsupported: no verb of the format is bound to this argument`,
 		`16 cases/Printf/verb1 seconds "took %.1f s and %d ms" "%.1f (verb 1 of 2)"`,
 		`16 cases/Printf/verb2 milliseconds "took %.1f s and %d ms" "%d (verb 2 of 2)"`,
+		`17 cases/Sprintf/verb1 seconds "%5% seconds; one %f seconds; two %d ms" "%f (verb 1 of 2)"`,
+		`17 cases/Sprintf/verb2 milliseconds "%5% seconds; one %f seconds; two %d ms" "%d (verb 2 of 2)"`,
+		`20 cases/Sprintf/verb1 seconds "elapsed %d s" "%d"`,
 	}
 	if strings.Join(got, "\n") != strings.Join(want, "\n") {
 		t.Fatalf("candidates:\n%s\n\nwant:\n%s", strings.Join(got, "\n"), strings.Join(want, "\n"))
@@ -80,7 +83,15 @@ func TestParseVerbs(t *testing.T) {
 		{"100%% %x", "%x@0"},
 		{"%[2]d", "error"},
 		{"%.[1]d", "error"},
-		{"trailing %", "error"},
+		{"trailing %", ""},
+		{"%d then %-", "%d@0"},            // %!(NOVERB) consumes nothing
+		{"%5% s %f s %d ms", "%f@0 %d@1"}, // a decorated percent consumes nothing
+		{"%*% %d", "%d@1"},                // but its * width does
+		{"%-08.3% %x", "%x@0"},
+		{"%5. %d", "%5. @0 %d@1"}, // a '.' that is not the last byte starts a precision; here ' ' is the verb
+		{"%5.", "%5.@0"},          // a last '.' is the verb
+		{"%é %d", "%é@0 %d@1"},    // the verb is a rune
+		{"%!d %d", "%!@0 %d@1"},
 	} {
 		vs, perr := parseVerbs(tc.format)
 		var parts []string
@@ -93,6 +104,38 @@ func TestParseVerbs(t *testing.T) {
 		}
 		if got != tc.want {
 			t.Errorf("parseVerbs(%q) = %s", tc.format, got)
+		}
+	}
+}
+
+// TestParseVerbsMatchesFmt checks the argument count against fmt itself: with exactly as many
+// arguments as the parser binds, fmt reports neither a missing nor an extra one.
+func TestParseVerbsMatchesFmt(t *testing.T) {
+	for _, f := range []string{
+		"a %d b %s", "%-8.3f|%+v", "%*.*f %d", "100%% %x", "%5% s %f s %d ms", "%*% %d",
+		"%-08.3% %x", "%5. %d", "%é %d", "%!d %d", "%d then %-", "%.*d %d",
+	} {
+		vs, perr := parseVerbs(f)
+		if perr != "" {
+			t.Fatalf("%q: %s", f, perr)
+		}
+		n := 0
+		if len(vs) > 0 {
+			n = vs[len(vs)-1].arg + 1
+		}
+		// A * width or precision after the last verb consumes too; none of these formats has one.
+		args := make([]any, n)
+		for i := range args {
+			args[i] = 7
+		}
+		out := fmt.Sprintf(f, args...)
+		if strings.Contains(out, "%!(EXTRA") || strings.Contains(out, "(MISSING)") {
+			t.Errorf("%q with %d args: %s", f, n, out)
+		}
+		if n > 0 {
+			if out := fmt.Sprintf(f, args[:n-1]...); !strings.Contains(out, "MISSING") && !strings.Contains(out, "BADWIDTH") && !strings.Contains(out, "BADPREC") {
+				t.Errorf("%q: one argument fewer than %d is not missing: %s", f, n, out)
+			}
 		}
 	}
 }
