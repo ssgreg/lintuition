@@ -52,12 +52,19 @@ func TestExtraction(t *testing.T) {
 		`1 "rejects an expired token" about="the result of IsExpired" want=true`,
 		`2 "fresh token" about="the result of IsExpired" want=false`,
 		`3 "named constant" about="the result of IsExpired" want=true`,
+		`4 unsupported`,
+		`5 "error flag only" about="the result of IsExpired" want=false`,
 		`7 "keeps the port in use while attached" about="whether in use" wantInUse=false`,
 		`8 unsupported`,
 		`9 "external package test" about="the result of IsExpired" want=true`,
 		`10 unsupported`,
 		`11 "ranged literal" about="the result of IsExpired" want=true`,
 		`12 "through t.Run" about="the result of IsExpired" want=false`,
+		`13 unsupported`,
+		`14 "allowed input" about="the result of Allowed" want=true`,
+		`15 "not expired and valid" about="whether expired" wantExpired=false`,
+		`15 "not expired and valid" about="whether valid" wantValid=false`,
+		`16 unsupported`,
 	}
 	if strings.Join(got, "\n") != strings.Join(want, "\n") {
 		t.Fatalf("candidates:\n%s\n\nwant:\n%s", strings.Join(got, "\n"), strings.Join(want, "\n"))

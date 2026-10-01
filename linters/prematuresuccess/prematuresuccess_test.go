@@ -56,6 +56,7 @@ func TestExtraction(t *testing.T) {
 		`10 SaveConfigCopy "config saved to disk"`,
 		`13 SaveConfig "config saved to disk"`,
 		`14 unsupported`,
+		`16 unsupported`,
 		`15 SaveConfig "config saved to disk"`,
 	}
 	if strings.Join(got, "\n") != strings.Join(want, "\n") {

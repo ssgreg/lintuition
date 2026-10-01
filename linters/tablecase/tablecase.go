@@ -6,14 +6,20 @@
 // A person wrote both the name and the want, so the table is evidence nobody had to derive. The
 // classifier reads only the case name and what the boolean is about; Go code compares its answer
 // with the constant in the table.
+//
+// A row is checked only when the loop over its table compares the expectation, as is, with a
+// result: `got := F(tt.in); got != tt.want`, `F(tt.in) != tt.want`, or an Equal assertion. A
+// generic want must be compared with a call's bool result, which names what it is about. A
+// negated or otherwise transformed comparison, or comparisons with different calls, make the row
+// unsupported rather than guessed.
 package tablecase
 
 import (
 	"fmt"
 	"go/ast"
+	"go/token"
 	"go/types"
 	"regexp"
-	"sort"
 	"strings"
 
 	"golang.org/x/tools/go/analysis"
@@ -81,10 +87,11 @@ func run(pass *analysis.Pass) (any, error) {
 			if !ok {
 				return true
 			}
-			elem, isMap := rowType(pass.TypesInfo.TypeOf(lit))
-			if elem == nil {
+			st, isMap := rowType(pass.TypesInfo.TypeOf(lit))
+			if st == nil {
 				return true
 			}
+			b := bindings(pass, fd.Body, lit, vars[lit])
 			for _, el := range lit.Elts {
 				var key ast.Expr
 				row := el
@@ -94,11 +101,9 @@ func run(pass *analysis.Pass) (any, error) {
 				if u, ok := row.(*ast.UnaryExpr); ok {
 					row = u.X
 				}
-				rl, ok := row.(*ast.CompositeLit)
-				if !ok {
-					continue
+				if rl, ok := row.(*ast.CompositeLit); ok {
+					out = append(out, rowCandidates(pass, st, key, rl, b)...)
 				}
-				out = append(out, rowCandidates(pass, elem, key, rl, testedFunc(pass, fd, lit, vars[lit]))...)
 			}
 			return true
 		})
@@ -140,59 +145,249 @@ func rowType(t types.Type) (*types.Struct, bool) {
 	return s, isMap
 }
 
-func rowCandidates(pass *analysis.Pass, st *types.Struct, key ast.Expr, rl *ast.CompositeLit, tested *types.Func) []*sdk.Candidate {
+func isExpectation(f *types.Var) bool {
+	b, ok := f.Type().Underlying().(*types.Basic)
+	// wantErr says whether an error is expected, not what the result is.
+	return ok && b.Kind() == types.Bool && wantRE.MatchString(f.Name()) && !strings.Contains(f.Name(), "Err")
+}
+
+// binding is how the loop over a table uses one expectation field: compared, as is, with the
+// result of a call (got := F(tt.in); got != tt.want) or, for a field named after what it is about
+// (wantInUse), with anything.
+type binding struct {
+	callee *types.Func // the call whose result the field is compared with; nil if not a call
+	// conflict is set when the field is compared with different things, or in a transformed form.
+	conflict string
+}
+
+// bindings finds, in the loops over the table, every direct comparison of an expectation field of
+// the loop variable: `x == tt.f`, `x != tt.f`, or an Equal-style assertion with both.
+func bindings(pass *analysis.Pass, body *ast.BlockStmt, lit *ast.CompositeLit, table types.Object) map[string]*binding {
+	info := pass.TypesInfo
+	out := map[string]*binding{}
+	for _, rs := range ranges(info, body, lit, table) {
+		row, ok := rs.Value.(*ast.Ident)
+		if !ok {
+			continue
+		}
+		rowObj := info.ObjectOf(row)
+		if rowObj == nil {
+			continue
+		}
+		defs := callDefs(info, rs.Body)
+		bind := func(fieldSide, other ast.Expr) {
+			f, ok := fieldOf(info, fieldSide, rowObj)
+			if !ok {
+				return
+			}
+			b := out[f.Name()]
+			if b == nil {
+				b = &binding{}
+				out[f.Name()] = b
+			}
+			callee, transformed := resultOf(info, other, defs)
+			switch {
+			case transformed:
+				b.conflict = "the expectation is compared in a transformed form"
+			case b.callee != nil && callee != nil && b.callee != callee:
+				b.conflict = "the expectation is compared with results of different calls"
+			case callee != nil:
+				b.callee = callee
+			}
+		}
+		ast.Inspect(rs.Body, func(n ast.Node) bool {
+			switch n := n.(type) {
+			case *ast.BinaryExpr:
+				if n.Op == token.EQL || n.Op == token.NEQ {
+					bind(n.X, n.Y)
+					bind(n.Y, n.X)
+				}
+			case *ast.CallExpr:
+				if fn := facts.Callee(info, n); fn != nil && (fn.Name() == "Equal" || fn.Name() == "EqualValues") && len(n.Args) >= 3 {
+					bind(n.Args[1], n.Args[2])
+					bind(n.Args[2], n.Args[1])
+				}
+			}
+			return true
+		})
+	}
+	return out
+}
+
+// ranges returns the loops over the table: over its variable or over the literal itself.
+func ranges(info *types.Info, body *ast.BlockStmt, lit *ast.CompositeLit, table types.Object) []*ast.RangeStmt {
+	var out []*ast.RangeStmt
+	ast.Inspect(body, func(n ast.Node) bool {
+		rs, ok := n.(*ast.RangeStmt)
+		if !ok {
+			return true
+		}
+		if ast.Unparen(rs.X) == lit {
+			out = append(out, rs)
+		} else if id, ok := ast.Unparen(rs.X).(*ast.Ident); ok && table != nil && info.ObjectOf(id) == table {
+			out = append(out, rs)
+		}
+		return true
+	})
+	return out
+}
+
+// fieldOf returns the expectation field e reads from the loop variable: exactly `tt.want`.
+func fieldOf(info *types.Info, e ast.Expr, row types.Object) (*types.Var, bool) {
+	sel, ok := ast.Unparen(e).(*ast.SelectorExpr)
+	if !ok {
+		return nil, false
+	}
+	x, ok := ast.Unparen(sel.X).(*ast.Ident)
+	if !ok || info.ObjectOf(x) != row {
+		return nil, false
+	}
+	f, ok := info.ObjectOf(sel.Sel).(*types.Var)
+	if !ok || !f.IsField() || !isExpectation(f) {
+		return nil, false
+	}
+	return f, true
+}
+
+// callDefs maps a variable to the bool-returning call it was defined from in the loop body:
+// got := F(tt.in), or got, err := F(tt.in) at F's bool result.
+func callDefs(info *types.Info, body *ast.BlockStmt) map[types.Object]*types.Func {
+	out := map[types.Object]*types.Func{}
+	ast.Inspect(body, func(n ast.Node) bool {
+		as, ok := n.(*ast.AssignStmt)
+		if !ok || len(as.Rhs) != 1 {
+			return true
+		}
+		call, ok := ast.Unparen(as.Rhs[0]).(*ast.CallExpr)
+		if !ok {
+			return true
+		}
+		fn := facts.Callee(info, call)
+		if fn == nil {
+			return true
+		}
+		res := fn.Type().(*types.Signature).Results()
+		for i, l := range as.Lhs {
+			id, ok := l.(*ast.Ident)
+			if !ok || i >= res.Len() || !isBool(res.At(i).Type()) {
+				continue
+			}
+			if obj := info.ObjectOf(id); obj != nil {
+				out[obj] = fn
+			}
+		}
+		return true
+	})
+	return out
+}
+
+// resultOf says which call's bool result an expression is, directly or through a variable defined
+// from it; transformed is true for a negation, which flips what the expectation means.
+func resultOf(info *types.Info, e ast.Expr, defs map[types.Object]*types.Func) (*types.Func, bool) {
+	e = ast.Unparen(e)
+	if u, ok := e.(*ast.UnaryExpr); ok && u.Op == token.NOT {
+		return nil, true
+	}
+	switch e := e.(type) {
+	case *ast.CallExpr:
+		fn := facts.Callee(info, e)
+		if fn == nil {
+			return nil, false
+		}
+		res := fn.Type().(*types.Signature).Results()
+		if res.Len() == 1 && isBool(res.At(0).Type()) {
+			return fn, false
+		}
+	case *ast.Ident:
+		return defs[info.ObjectOf(e)], false
+	}
+	return nil, false
+}
+
+func isBool(t types.Type) bool {
+	b, ok := t.Underlying().(*types.Basic)
+	return ok && b.Kind() == types.Bool
+}
+
+func rowCandidates(pass *analysis.Pass, st *types.Struct, key ast.Expr, rl *ast.CompositeLit, binds map[string]*binding) []*sdk.Candidate {
 	info := pass.TypesInfo
 	caseName := ""
 	if key != nil {
 		caseName, _ = facts.ConstString(info, key)
 	}
-	type want struct {
-		field string
-		value bool
+	// values holds each field's expression in this row, keyed or positional.
+	values := map[string]ast.Expr{}
+	keyed := false
+	for i, e := range rl.Elts {
+		if kv, ok := e.(*ast.KeyValueExpr); ok {
+			keyed = true
+			if id, ok := kv.Key.(*ast.Ident); ok {
+				values[id.Name] = kv.Value
+			}
+		} else if i < st.NumFields() {
+			values[st.Field(i).Name()] = e
+		}
 	}
-	var wants []want
-	for _, e := range rl.Elts {
-		kv, ok := e.(*ast.KeyValueExpr)
-		if !ok {
-			continue
-		}
-		id, ok := kv.Key.(*ast.Ident)
-		if !ok {
-			continue
-		}
-		f := field(st, id.Name)
-		if f == nil {
-			continue
-		}
-		if nameFields[strings.ToLower(id.Name)] && caseName == "" {
-			caseName, _ = facts.ConstString(info, kv.Value)
-			continue
-		}
-		b, isBool := f.Type().Underlying().(*types.Basic)
-		// wantErr says whether an error is expected, not what the result is.
-		if !isBool || b.Kind() != types.Bool || !wantRE.MatchString(id.Name) || strings.Contains(id.Name, "Err") {
-			continue
-		}
-		if v, ok := facts.ConstBool(info, kv.Value); ok {
-			wants = append(wants, want{id.Name, v})
+	if caseName == "" {
+		for i := 0; i < st.NumFields(); i++ {
+			if f := st.Field(i); nameFields[strings.ToLower(f.Name())] && values[f.Name()] != nil {
+				caseName, _ = facts.ConstString(info, values[f.Name()])
+				break
+			}
 		}
 	}
 	if strings.TrimSpace(caseName) == "" {
 		return nil
 	}
 	var out []*sdk.Candidate
-	for _, w := range wants {
-		c := &sdk.Candidate{
-			Pos:     pass.Fset.Position(rl.Pos()),
-			Subject: caseName,
-			Local:   map[string]string{"case_name": caseName, "field": w.field, "value": fmt.Sprint(w.value)},
+	for i := 0; i < st.NumFields(); i++ {
+		f := st.Field(i)
+		if !isExpectation(f) {
+			continue
 		}
-		about, ok := aboutField(w.field, tested)
-		if !ok {
-			c.Unsupported = "the expectation is the tested function's result, and no tested function returning bool was found"
+		expr := values[f.Name()]
+		pos := rl.Pos()
+		if expr != nil {
+			pos = expr.Pos()
+		}
+		c := &sdk.Candidate{
+			Pos: pass.Fset.Position(pos),
+			// The field is part of the identity: two expectations of one row are two questions.
+			Subject: caseName + "#" + f.Name(),
+			Local:   map[string]string{"case_name": caseName, "field": f.Name()},
+		}
+		b := binds[f.Name()]
+		var value bool
+		switch {
+		case b == nil:
+			if expr == nil {
+				continue // an unused, unset field says nothing
+			}
+			c.Unsupported = "the expectation is not compared, as is, in a loop over the table"
+		case b.conflict != "":
+			c.Unsupported = b.conflict
+		case generic[f.Name()] && b.callee == nil:
+			c.Unsupported = "the expectation is not compared with the result of a call"
+		case expr == nil && keyed:
+			value = false // omitted in a keyed literal: Go's zero value
+		case expr == nil:
+			c.Unsupported = "the row does not set the expectation"
+		default:
+			v, ok := facts.ConstBool(info, expr)
+			if !ok {
+				c.Unsupported = "the expectation is not a constant"
+			}
+			value = v
+		}
+		if c.Unsupported != "" {
 			out = append(out, c)
 			continue
 		}
+		about := "the result of " + calleeName(b)
+		if !generic[f.Name()] {
+			about = aboutName(f.Name())
+		}
+		c.Local["value"] = fmt.Sprint(value)
 		c.Payload.AddProse("case_name", caseName)
 		c.Payload.Fact("about", about)
 		out = append(out, c)
@@ -200,37 +395,20 @@ func rowCandidates(pass *analysis.Pass, st *types.Struct, key ast.Expr, rl *ast.
 	return out
 }
 
-func field(st *types.Struct, name string) *types.Var {
-	for i := 0; i < st.NumFields(); i++ {
-		if st.Field(i).Name() == name {
-			return st.Field(i)
-		}
+func calleeName(b *binding) string {
+	if b == nil || b.callee == nil {
+		return ""
 	}
-	return nil
+	return b.callee.Name()
 }
 
-// aboutField says what an expectation field is about: wantInUse -> "whether in use"; want -> "the
-// result of IsExpired" when the test is named after a bool-returning function.
-func aboutField(name string, tested *types.Func) (string, bool) {
-	if !generic[name] {
-		words := facts.Words(name)
-		for len(words) > 0 && (words[0] == "want" || words[0] == "expect" || words[0] == "expected") {
-			words = words[1:]
-		}
-		if len(words) > 0 {
-			return "whether " + strings.Join(words, " "), true
-		}
+// aboutName says what a named expectation is about: wantInUse -> "whether in use".
+func aboutName(name string) string {
+	words := facts.Words(name)
+	for len(words) > 0 && (words[0] == "want" || words[0] == "expect" || words[0] == "expected") {
+		words = words[1:]
 	}
-	if tested == nil {
-		return "", false
-	}
-	res := tested.Type().(*types.Signature).Results()
-	for i := 0; i < res.Len(); i++ {
-		if b, ok := res.At(i).Type().Underlying().(*types.Basic); ok && b.Kind() == types.Bool {
-			return "the result of " + tested.Name(), true
-		}
-	}
-	return "", false
+	return "whether " + strings.Join(words, " ")
 }
 
 // tableVars maps each composite literal assigned to a local variable (tests := []struct{...}{...})
@@ -266,60 +444,6 @@ func tableVars(info *types.Info, body *ast.BlockStmt) map[*ast.CompositeLit]type
 		return true
 	})
 	return out
-}
-
-// rangeBodies returns the bodies of the loops that range over the table: over its variable, or
-// over the literal itself.
-func rangeBodies(info *types.Info, body *ast.BlockStmt, lit *ast.CompositeLit, table types.Object) []*ast.BlockStmt {
-	var out []*ast.BlockStmt
-	ast.Inspect(body, func(n ast.Node) bool {
-		rs, ok := n.(*ast.RangeStmt)
-		if !ok {
-			return true
-		}
-		if ast.Unparen(rs.X) == lit {
-			out = append(out, rs.Body)
-		} else if id, ok := ast.Unparen(rs.X).(*ast.Ident); ok && table != nil && info.ObjectOf(id) == table {
-			out = append(out, rs.Body)
-		}
-		return true
-	})
-	return out
-}
-
-// testedFunc is the function a table's rows are run through: a function or method called inside a
-// loop over the table (subtest closures included), defined in the package under test, whose name the
-// test name contains. A helper the loop also calls (New, Equal) is not it unless the test is named
-// after it; a table nobody ranges over binds to nothing. The longest such name wins.
-func testedFunc(pass *analysis.Pass, fd *ast.FuncDecl, lit *ast.CompositeLit, table types.Object) *types.Func {
-	testName := strings.ToLower(fd.Name.Name)
-	under := strings.TrimSuffix(pass.Pkg.Path(), "_test")
-	var found []*types.Func
-	for _, rb := range rangeBodies(pass.TypesInfo, fd.Body, lit, table) {
-		collectCalls(pass, rb, testName, under, &found)
-	}
-	if len(found) == 0 {
-		return nil
-	}
-	sort.SliceStable(found, func(i, j int) bool { return len(found[i].Name()) > len(found[j].Name()) })
-	return found[0]
-}
-
-func collectCalls(pass *analysis.Pass, body *ast.BlockStmt, testName, under string, found *[]*types.Func) {
-	ast.Inspect(body, func(n ast.Node) bool {
-		call, ok := n.(*ast.CallExpr)
-		if !ok {
-			return true
-		}
-		fn := facts.Callee(pass.TypesInfo, call)
-		if fn == nil || fn.Pkg() == nil || fn.Pkg().Path() != under || len(fn.Name()) < 3 {
-			return true
-		}
-		if strings.Contains(testName, strings.ToLower(fn.Name())) {
-			*found = append(*found, fn)
-		}
-		return true
-	})
 }
 
 type rule struct{ threshold float64 }

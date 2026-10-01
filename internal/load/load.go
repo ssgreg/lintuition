@@ -35,6 +35,8 @@ type Result struct {
 	Candidates map[*analysis.Analyzer][]*sdk.Candidate
 	Packages   int
 	Problems   []Problem
+	// Files are the Go files of the analysed packages, absolute.
+	Files []string
 }
 
 const mode = packages.NeedName | packages.NeedFiles | packages.NeedCompiledGoFiles | packages.NeedImports |
@@ -77,6 +79,16 @@ func Run(ctx context.Context, opts Options, analyzers []*analysis.Analyzer) (*Re
 		good = append(good, p)
 	}
 	res.Packages = len(good)
+	seenFile := map[string]bool{}
+	for _, p := range good {
+		for _, f := range p.CompiledGoFiles {
+			if !seenFile[f] {
+				seenFile[f] = true
+				res.Files = append(res.Files, f)
+			}
+		}
+	}
+	sort.Strings(res.Files)
 	if len(good) == 0 || len(analyzers) == 0 {
 		return res, nil
 	}

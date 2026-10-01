@@ -43,3 +43,18 @@ func progress(a Store) error {
 	slog.Info("upload 3 of 5")
 	return a.Upload("x")
 }
+
+// Negative: the log reports a's reset, done, before b's starts; it is not premature.
+func resetTwo(a, b Store) error {
+	if err := a.SaveConfig(true); err != nil {
+		return err
+	}
+	slog.Info("config saved to disk", "store", "a")
+	return b.SaveConfig(true)
+}
+
+// Negative: go starts the work; there is no error to wait for.
+func resetAsync(a Store) {
+	slog.Info("config saved to disk")
+	go a.SaveConfig(true)
+}

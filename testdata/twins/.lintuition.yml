@@ -25,3 +25,5 @@ semantic:
         - {question: outcome, when: "expired when the deadline", choice: "true", probability: 0.95}
         - {question: outcome, when: "not expired before the deadline", choice: "false", probability: 0.95}
         - {question: outcome, when: "passed=false", choice: unstated, probability: 0.9}
+        - {question: outcome, when: "whether expired", choice: "false", probability: 0.95}
+        - {question: outcome, when: "whether valid", choice: "true", probability: 0.95}

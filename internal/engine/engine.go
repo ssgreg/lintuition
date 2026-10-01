@@ -39,6 +39,8 @@ type Options struct {
 type Result struct {
 	Issues []report.Issue
 	Run    report.Run
+	// Files are the analysed Go files, absolute.
+	Files []string
 }
 
 // Run executes one lint.
@@ -89,6 +91,7 @@ func Run(ctx context.Context, o Options) (*Result, error) {
 	}
 	res := &Result{}
 	res.Run.Stats.Packages = loaded.Packages
+	res.Files = loaded.Files
 	for _, p := range loaded.Problems {
 		res.Run.Problems = append(res.Run.Problems, fmt.Sprintf("package %s not analysed: %s", p.Package, p.Err))
 	}

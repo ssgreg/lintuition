@@ -9,6 +9,8 @@
 // Code finds the shape: a log call followed, in the same block, by a statement that keeps an error
 // result (decided by the result's type, not the variable's name), whose callee shares a word with
 // the message. The classifier is asked only whether the message claims that call already completed.
+// When the statement before the log is a fallible call the message also matches, the log may
+// report that one; such a candidate is unsupported.
 package prematuresuccess
 
 import (
@@ -76,7 +78,11 @@ func run(pass *analysis.Pass) (any, error) {
 			list = n.Body
 		}
 		for i := 0; i+1 < len(list); i++ {
-			if c := candidate(pass, list[i], list[i+1]); c != nil {
+			var prev ast.Stmt
+			if i > 0 {
+				prev = list[i-1]
+			}
+			if c := candidate(pass, prev, list[i], list[i+1]); c != nil {
 				out = append(out, c)
 			}
 		}
@@ -84,7 +90,7 @@ func run(pass *analysis.Pass) (any, error) {
 	return out, nil
 }
 
-func candidate(pass *analysis.Pass, s, next ast.Stmt) *sdk.Candidate {
+func candidate(pass *analysis.Pass, prev, s, next ast.Stmt) *sdk.Candidate {
 	es, ok := s.(*ast.ExprStmt)
 	if !ok {
 		return nil
@@ -117,6 +123,14 @@ func candidate(pass *analysis.Pass, s, next ast.Stmt) *sdk.Candidate {
 	if !sharesWord(lc.Message, fb.Callee.Name()) {
 		// The message is about something else; asking would only invite a guess.
 		return nil
+	}
+	// A log line right after a fallible call it also matches may report that call, done, before
+	// moving on (reset a, log, reset b). Which one it means is not in the code; do not guess.
+	if prev != nil {
+		if pf, ok := facts.FallibleStmt(pass.TypesInfo, prev); ok && sharesWord(lc.Message, pf.Callee.Name()) {
+			c.Unsupported = "the message may report the call before it"
+			return c
+		}
 	}
 	c.Local["message"] = lc.Message
 	c.Payload.AddProse("message", lc.Message)

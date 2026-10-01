@@ -49,6 +49,9 @@ func Run(t testing.TB, dir string, patterns ...string) *Result {
 		t.Fatal(err)
 	}
 	c.Run.RelativePathMode = "wd"
+	// Presentation limits would hide the unexpected findings the twins exist to catch.
+	zero, no := 0, false
+	c.Issues.MaxIssuesPerLinter, c.Issues.MaxSameIssues, c.Issues.UniqByLine = &zero, &zero, &no
 	res, err := engine.Run(context.Background(), engine.Options{Config: c, Dir: abs, Patterns: patterns})
 	if err != nil {
 		t.Fatal(err)
@@ -56,7 +59,7 @@ func Run(t testing.TB, dir string, patterns ...string) *Result {
 	if res.Run.Incomplete {
 		t.Fatalf("linttest: incomplete run:\n  %s", strings.Join(res.Run.Problems, "\n  "))
 	}
-	wants, err := readWants(abs)
+	wants, err := readWants(abs, res.Files)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -96,36 +99,40 @@ func Run(t testing.TB, dir string, patterns ...string) *Result {
 	return &Result{Issues: res.Issues, Run: res.Run}
 }
 
-// readWants collects the want comments of every .go file under dir, keyed by relative file:line.
-func readWants(dir string) (map[string]*regexp.Regexp, error) {
+// readWants collects the want comments of the analysed files, the same set the patterns, build tags
+// and test selection gave the engine, keyed by file:line relative to dir.
+func readWants(dir string, files []string) (map[string]*regexp.Regexp, error) {
 	out := map[string]*regexp.Regexp{}
-	err := filepath.WalkDir(dir, func(p string, d os.DirEntry, err error) error {
-		if err != nil || d.IsDir() || !strings.HasSuffix(p, ".go") {
-			return err
+	for _, p := range files {
+		if err := readFileWants(dir, p, out); err != nil {
+			return nil, err
 		}
-		f, err := os.Open(p)
+	}
+	return out, nil
+}
+
+func readFileWants(dir, p string, out map[string]*regexp.Regexp) error {
+	f, err := os.Open(p)
+	if err != nil {
+		return err
+	}
+	defer f.Close()
+	rel, _ := filepath.Rel(dir, p)
+	sc := bufio.NewScanner(f)
+	for n := 1; sc.Scan(); n++ {
+		m := wantRE.FindStringSubmatch(sc.Text())
+		if m == nil {
+			continue
+		}
+		s, err := strconv.Unquote(m[1])
 		if err != nil {
-			return err
+			return fmt.Errorf("%s:%d: bad want: %v", rel, n, err)
 		}
-		defer f.Close()
-		rel, _ := filepath.Rel(dir, p)
-		sc := bufio.NewScanner(f)
-		for n := 1; sc.Scan(); n++ {
-			m := wantRE.FindStringSubmatch(sc.Text())
-			if m == nil {
-				continue
-			}
-			s, err := strconv.Unquote(m[1])
-			if err != nil {
-				return fmt.Errorf("%s:%d: bad want: %v", rel, n, err)
-			}
-			re, err := regexp.Compile(s)
-			if err != nil {
-				return fmt.Errorf("%s:%d: bad want: %v", rel, n, err)
-			}
-			out[fmt.Sprintf("%s:%d", rel, n)] = re
+		re, err := regexp.Compile(s)
+		if err != nil {
+			return fmt.Errorf("%s:%d: bad want: %v", rel, n, err)
 		}
-		return sc.Err()
-	})
-	return out, err
+		out[fmt.Sprintf("%s:%d", rel, n)] = re
+	}
+	return sc.Err()
 }

@@ -1,0 +1,12 @@
+version: "2"
+linters:
+  default: none
+  enable: [metric-type-vs-help]
+semantic:
+  classifier: fake
+  classifiers:
+    fake:
+      unmatched: error
+      rules:
+        - {question: kind, when: "Disk I/O utilization", choice: current, probability: 0.9}
+        - {question: kind, when: "Total seconds", choice: total, probability: 0.9}

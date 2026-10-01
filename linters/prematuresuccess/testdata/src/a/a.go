@@ -26,6 +26,7 @@ func cases(ctx context.Context, c Client, l *logf.Logger) error {
 	log.Print("config saved to disk") // 3 candidate: the error has another name
 	failure := c.SaveConfig()
 
+	_ = ctx
 	log.Print("config saved to disk") // 4 candidate: if init
 	if err := c.SaveConfig(); err != nil {
 		return err
@@ -49,6 +50,7 @@ func cases(ctx context.Context, c Client, l *logf.Logger) error {
 	logf.Error(err) // 9 none: a field constructor is not a log call
 	err = c.SaveConfig()
 
+	_ = ctx
 	l.Info(ctx, "config saved to disk") // 10 candidate: a typed logger
 	_, err = c.SaveConfigCopy()
 
@@ -66,6 +68,13 @@ func cases(ctx context.Context, c Client, l *logf.Logger) error {
 
 	log.Printf(msg) // 14 unsupported: the message is a variable
 	err = c.SaveConfig()
+
+	err = c.SaveConfig()
+	log.Print("config saved to disk") // 16 unsupported: may report the call before it
+	err = c.SaveConfig()
+
+	log.Print("config saved to disk") // 17 none: go starts work, the error is not kept
+	go c.SaveConfig()
 
 	_ = failure
 	log.Print("config saved to disk") // 15 candidate: return passes the error up

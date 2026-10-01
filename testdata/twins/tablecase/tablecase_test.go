@@ -22,3 +22,20 @@ func TestExpired(t *testing.T) {
 		}
 	}
 }
+
+// Two expectations in one row are two questions; the defect is found whichever field comes first.
+func TestExpiredAndValid(t *testing.T) {
+	tests := []struct {
+		name        string
+		wantExpired bool
+		wantValid   bool
+	}{
+		{name: "fresh token: not expired and valid", wantExpired: false, wantValid: false},                  // want `reads as wantValid true, but the table sets false`
+		{name: "fresh token: not expired and valid (fields swapped)", wantValid: false, wantExpired: false}, // want `reads as wantValid true, but the table sets false`
+	}
+	for _, tt := range tests {
+		if Expired(false) != tt.wantExpired || Valid(false) != tt.wantValid {
+			t.Fail()
+		}
+	}
+}
