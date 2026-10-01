@@ -15,9 +15,9 @@ import (
 //
 //	x := f() //nolint:premature-success // the call cannot fail here: f is a pure lookup
 //
-// Scope, as in golangci-lint: a directive at the end of a line covers that line; a directive on its
-// own line right before a declaration or statement covers that whole node; one above the package
-// clause covers the file. A bare //nolint, //nolint:all, or a directive without an explanation does
+// Scope, as in golangci-lint: a directive at the end of a line covers that line; a directive in a
+// comment group that ends right above a declaration or statement, starting in its column, covers
+// that whole node; one in the group attached to the package clause covers the file. A bare //nolint, //nolint:all, or a directive without an explanation does
 // not suppress. Names of linters lintuition does not have are allowed: they belong to other tools.
 type Nolint struct {
 	mu    sync.Mutex
@@ -96,11 +96,17 @@ func parseDirectives(path string) *fileDirectives {
 			}
 			pos := fset.Position(c.Pos())
 			d := directive{linters: ls, from: pos.Line, to: pos.Line}
+			end := fset.Position(cg.End()).Line
 			switch {
 			case pos.Line < pkgLine:
-				d.from, d.to = 1, fset.File(f.Pos()).LineCount()
+				// File scope only for the comment group attached to the package clause; a detached
+				// group above it covers its own line.
+				if end+1 == pkgLine {
+					d.from, d.to = 1, fset.File(f.Pos()).LineCount()
+				}
 			case ownLine(src, pos):
-				if nd, ok := starts[fset.Position(cg.End()).Line+1]; ok {
+				// As golangci-lint: the group must end right above the node and start in its column.
+				if nd, ok := starts[end+1]; ok && fset.Position(nd.Pos()).Column == fset.Position(cg.Pos()).Column {
 					d.from = pos.Line
 					d.to = fset.Position(nd.End()).Line
 				}

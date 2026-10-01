@@ -41,6 +41,8 @@ type Evidence struct {
 	// Agreement is, per question, how the samples split ("current 2, total 1"). Agreement of
 	// correlated samples is not a probability of being right.
 	Agreement map[string]string `json:"agreement,omitempty"`
+	// PerSample is, per question, every sample's answer and support, in order.
+	PerSample map[string][]string `json:"per_sample,omitempty"`
 }
 
 // Processor applies exclusions, severity and limits from the config.

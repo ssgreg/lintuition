@@ -165,3 +165,66 @@ func TestCacheCleanKeepsForeignFiles(t *testing.T) {
 		t.Fatal("cache clean removed a file it did not write")
 	}
 }
+
+func TestCostAtCapStopsTheNextSample(t *testing.T) {
+	dir := sample(t)
+	onlyUtilization(t, dir)
+	s := newJevStub(t, func(string, string) (int, string) { return 200, "current" })
+	t.Setenv("LINTUITION_TEST_KEY", "k")
+	// One reply costs exactly the cap ($100 at 1M tokens and price 100).
+	jevConfig(t, dir, s.URL, "  votes: 3\n  budget: {max-cost-usd: 100}\n")
+	if code, _, errs := run("run", "./..."); code != 2 || s.calls != 1 {
+		t.Fatalf("exit %d, %d calls; a budget spent exactly must stop the next sample\n%s", code, s.calls, errs)
+	}
+}
+
+func TestQueuedCandidateChecksCostFirst(t *testing.T) {
+	dir := sample(t)
+	s := newJevStub(t, func(string, string) (int, string) { return 200, "current" })
+	t.Setenv("LINTUITION_TEST_KEY", "k")
+	jevConfig(t, dir, s.URL, "  concurrency: 1\n  budget: {max-cost-usd: 1}\n")
+	if code, _, errs := run("run", "./..."); code != 2 || s.calls != 1 {
+		t.Fatalf("exit %d, %d calls; candidates queued behind the first must not be sent once it spent the budget\n%s", code, s.calls, errs)
+	}
+}
+
+func TestFingerprintsTellFunctionsApart(t *testing.T) {
+	dir := sample(t)
+	os.WriteFile(filepath.Join(dir, "metrics.go"), []byte(`package sample
+
+import prom "github.com/prometheus/client_golang/prometheus"
+
+var a = prom.CounterOpts{Help: "Disk I/O utilization."}
+var b = prom.CounterOpts{Help: "Disk I/O utilization."}
+`), 0o600)
+	fps := func() []string {
+		_, out, _ := run("run", "--output.json.path", "stdout", "./...")
+		var rep struct {
+			Issues []struct{ Fingerprint string }
+		}
+		json.Unmarshal([]byte(out), &rep)
+		var fs []string
+		for _, is := range rep.Issues {
+			fs = append(fs, is.Fingerprint)
+		}
+		return fs
+	}
+	first := fps()
+	if len(first) != 2 || first[0] == first[1] {
+		t.Fatalf("two identical-looking findings need two fingerprints: %v", first)
+	}
+	b, _ := os.ReadFile(filepath.Join(dir, "metrics.go"))
+	os.WriteFile(filepath.Join(dir, "metrics.go"), []byte(strings.Replace(string(b), "var a", "// an unrelated comment\n\nvar a", 1)), 0o600)
+	if again := fps(); strings.Join(again, ",") != strings.Join(first, ",") {
+		t.Fatalf("fingerprints must survive unrelated line moves: %v then %v", first, again)
+	}
+}
+
+func TestYAMLOnlyFormat(t *testing.T) {
+	dir := sample(t)
+	appendConfig(t, dir, "output:\n  formats:\n    sarif:\n      path: stdout\n")
+	code, out, errs := run("run", "./...")
+	if code != 1 || !strings.HasPrefix(strings.TrimSpace(out), "{") || strings.Contains(out, "metrics.go:10:30:") {
+		t.Fatalf("only sarif on stdout: exit %d\n%s\n%s", code, out, errs)
+	}
+}

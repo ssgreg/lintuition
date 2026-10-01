@@ -70,7 +70,10 @@ func run(pass *analysis.Pass) (any, error) {
 	ins := pass.ResultOf[inspect.Analyzer].(*inspector.Inspector)
 	var out []*sdk.Candidate
 	// Each function body, a closure's included, is scanned on its own: its calls, then its blocks.
-	ins.Preorder([]ast.Node{(*ast.FuncDecl)(nil), (*ast.FuncLit)(nil)}, func(n ast.Node) {
+	ins.WithStack([]ast.Node{(*ast.FuncDecl)(nil), (*ast.FuncLit)(nil)}, func(n ast.Node, push bool, stack []ast.Node) bool {
+		if !push {
+			return true
+		}
 		var body *ast.BlockStmt
 		switch n := n.(type) {
 		case *ast.FuncDecl:
@@ -79,18 +82,41 @@ func run(pass *analysis.Pass) (any, error) {
 			body = n.Body
 		}
 		if body == nil {
-			return
+			return true
 		}
+		fn := enclosing(stack)
 		calls := ownCalls(body)
 		walkOwn(body, func(list []ast.Stmt) {
 			for i := 0; i+1 < len(list); i++ {
 				if c := candidate(pass, calls, list[i], list[i+1]); c != nil {
+					// The function is part of the identity: the same message before the same call
+					// in two functions is two findings.
+					c.Subject = fn + "/" + c.Subject
 					out = append(out, c)
 				}
 			}
 		})
+		return true
 	})
 	return out, nil
+}
+
+// enclosing names the outermost function declaration on the stack ((T).M or F), with "/func" for
+// each closure inside it.
+func enclosing(stack []ast.Node) string {
+	name := ""
+	for _, n := range stack {
+		switch n := n.(type) {
+		case *ast.FuncDecl:
+			name = n.Name.Name
+			if n.Recv != nil && len(n.Recv.List) > 0 {
+				name = "(" + types.ExprString(n.Recv.List[0].Type) + ")." + name
+			}
+		case *ast.FuncLit:
+			name += "/func"
+		}
+	}
+	return name
 }
 
 // ownCalls returns the calls a function body makes: its own, and those of closures it invokes on

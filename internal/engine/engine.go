@@ -12,6 +12,7 @@ import (
 	"os"
 	"path/filepath"
 	"sort"
+	"strconv"
 	"strings"
 	"sync"
 
@@ -142,7 +143,13 @@ func Run(ctx context.Context, o Options) (*Result, error) {
 			jobs = append(jobs, &job{linter: e.Linter, rule: e.Rule, cand: cand})
 		}
 		r.do(ctx, jobs)
+		// Identical findings (same subject and text in one file) are told apart by their order in
+		// the file, which unrelated edits elsewhere do not change.
+		seenFP := map[string]int{}
 		for _, j := range jobs {
+			fpKey := j.cand.Pos.Filename + "\x00" + j.cand.Subject + "\x00" + j.decision.Message
+			occurrence := seenFP[fpKey]
+			seenFP[fpKey]++
 			switch {
 			case j.planned:
 				st.Planned++
@@ -163,7 +170,7 @@ func Run(ctx context.Context, o Options) (*Result, error) {
 					res.Issues = append(res.Issues, report.Issue{
 						FromLinter: e.Linter.Name, Text: j.decision.Message, Pos: j.cand.Pos,
 						Evidence:    evidence(clName, r.model(), e.Linter.Version, j),
-						Fingerprint: fingerprint(e.Linter.Name, j.cand.Pos.Filename, j.cand.Subject, j.decision.Message),
+						Fingerprint: fingerprint(e.Linter.Name, j.cand.Pos.Filename, j.cand.Subject, j.decision.Message, occurrence),
 					})
 				}
 			}
@@ -201,6 +208,7 @@ type job struct {
 	replayed  bool
 	samples   int
 	agreement map[string]string
+	perSample map[string][]string
 	key       string
 	skipped   string
 	err       error
@@ -348,8 +356,22 @@ func (r *runner) plan(qs []sdk.Question) error {
 	return nil
 }
 
+// spent reports, before a sample is sent, that the observed cost leaves nothing of
+// semantic.budget.max-cost-usd: at or past the cap, no further sample goes out.
+func (r *runner) spent() bool {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	if r.budget.MaxCostUSD > 0 && r.cost >= r.budget.MaxCostUSD {
+		if r.capped == "" {
+			r.capped = fmt.Sprintf("semantic.budget.max-cost-usd %.4f spent", r.budget.MaxCostUSD)
+		}
+		return true
+	}
+	return false
+}
+
 // overCost reports, and records as the reason the run is incomplete, that the observed cost has
-// passed semantic.budget.max-cost-usd.
+// passed semantic.budget.max-cost-usd. A response that lands exactly on the cap is within it.
 func (r *runner) overCost() bool {
 	r.mu.Lock()
 	defer r.mu.Unlock()
@@ -398,8 +420,14 @@ func (r *runner) ask(ctx context.Context, j *job, req sdk.Request) {
 	for i := range r.votes {
 		// The cost of the samples already back may have spent the budget; a vote with missing
 		// samples is not a vote, so the candidate fails rather than deciding on fewer.
-		if i > 0 && r.overCost() {
-			j.err = errors.New("not all samples sent: " + r.capped)
+		// Checked before every sample, the first included: another candidate may have spent the
+		// budget while this one waited for a worker.
+		if r.spent() {
+			if i == 0 {
+				j.err = errors.New("not asked: " + r.capped)
+			} else {
+				j.err = errors.New("not all samples sent: " + r.capped)
+			}
 			return
 		}
 		r.mu.Lock()
@@ -449,6 +477,7 @@ func (r *runner) decide(j *job, req sdk.Request, samples [][]sdk.Answer) {
 	}
 	j.asked, j.samples = true, len(samples)
 	j.agreement = agreement(req.Questions, checked)
+	j.perSample = perSample(req.Questions, checked)
 	if disagree != "" {
 		j.decision = sdk.Abstain(disagree)
 		return
@@ -470,7 +499,7 @@ func evidence(cl, model, version string, j *job) *report.Evidence {
 	ev := &report.Evidence{
 		Classifier: cl, Model: model, LinterVersion: version,
 		Answers: map[string]string{}, Scores: map[string]float64{},
-		Samples: j.samples, Replayed: j.replayed, Agreement: j.agreement,
+		Samples: j.samples, Replayed: j.replayed, Agreement: j.agreement, PerSample: j.perSample,
 	}
 	for id, a := range j.answers {
 		switch {
@@ -506,7 +535,7 @@ func agreement(qs []sdk.Question, samples []map[string]sdk.Answer) map[string]st
 			case a.Yes != nil:
 				count["no"]++
 			case a.Score != nil:
-				count[fmt.Sprintf("%.0f", *a.Score)]++
+				count[strconv.FormatFloat(*a.Score, 'g', -1, 64)]++
 			}
 		}
 		keys := make([]string, 0, len(count))
@@ -519,6 +548,34 @@ func agreement(qs []sdk.Question, samples []map[string]sdk.Answer) map[string]st
 			parts = append(parts, fmt.Sprintf("%s %d", k, count[k]))
 		}
 		out[q.ID] = strings.Join(parts, ", ")
+	}
+	return out
+}
+
+// perSample is, per question, each sample's answer with its support, in sample order:
+// "current 0.9", "yes 0.82", "1.4". Nil for one sample, whose answer is the evidence itself.
+func perSample(qs []sdk.Question, samples []map[string]sdk.Answer) map[string][]string {
+	if len(samples) < 2 {
+		return nil
+	}
+	out := map[string][]string{}
+	for _, q := range qs {
+		for _, s := range samples {
+			a := s[q.ID]
+			v := ""
+			switch {
+			case a.Choice != "":
+				v = a.Choice
+				if p, ok := a.Probability(a.Choice); ok {
+					v += " " + strconv.FormatFloat(p, 'g', 3, 64)
+				}
+			case a.Yes != nil:
+				v = "yes " + strconv.FormatFloat(*a.Yes, 'g', 3, 64)
+			case a.Score != nil:
+				v = strconv.FormatFloat(*a.Score, 'g', -1, 64)
+			}
+			out[q.ID] = append(out[q.ID], v)
+		}
 	}
 	return out
 }
@@ -607,7 +664,7 @@ func (r *runner) stable(linter string, qs []sdk.Question) error {
 }
 
 // fingerprint identifies a finding without its line, so it survives code moving around it.
-func fingerprint(linter, file, subject, text string) string {
-	sum := sha256.Sum256([]byte(linter + "\x00" + file + "\x00" + subject + "\x00" + text))
+func fingerprint(linter, file, subject, text string, occurrence int) string {
+	sum := sha256.Sum256([]byte(fmt.Sprintf("%s\x00%s\x00%s\x00%s\x00%d", linter, file, subject, text, occurrence)))
 	return hex.EncodeToString(sum[:8])
 }

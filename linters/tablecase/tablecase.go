@@ -103,7 +103,10 @@ func run(pass *analysis.Pass) (any, error) {
 					row = u.X
 				}
 				if rl, ok := row.(*ast.CompositeLit); ok {
-					out = append(out, rowCandidates(pass, st, key, rl, b)...)
+					for _, c := range rowCandidates(pass, st, key, rl, b) {
+						c.Subject = fd.Name.Name + "/" + c.Subject
+						out = append(out, c)
+					}
 				}
 			}
 			return true

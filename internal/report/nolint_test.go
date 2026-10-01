@@ -70,3 +70,25 @@ func TestNolintFile(t *testing.T) {
 		t.Fatal("a directive above the package clause covers the file")
 	}
 }
+
+func TestNolintAttachment(t *testing.T) {
+	p := filepath.Join(t.TempDir(), "p.go")
+	os.WriteFile(p, []byte(`//nolint:premature-success // detached from the package clause by a blank line
+
+package p
+
+func f() error { return nil }
+
+	//nolint:premature-success // indented: not in the column of the declaration below
+func g() {
+	_ = f()
+}
+`), 0o600)
+	n := NewNolint()
+	if n.Covers(p, "premature-success", 5) {
+		t.Error("a detached group above the package clause must not cover the file")
+	}
+	if n.Covers(p, "premature-success", 9) {
+		t.Error("a directive in another column must not cover the declaration below")
+	}
+}

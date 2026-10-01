@@ -24,3 +24,15 @@ func TestQuestionTextMustBeStable(t *testing.T) {
 		t.Fatal(err)
 	}
 }
+
+func TestScoreAgreementIsExact(t *testing.T) {
+	f := func(v float64) *float64 { return &v }
+	qs := []sdk.Question{{ID: "s", Kind: sdk.Score, Text: "?", Levels: []string{"a", "b"}}}
+	samples := []map[string]sdk.Answer{{"s": {Score: f(0.01)}}, {"s": {Score: f(0.24)}}, {"s": {Score: f(0.49)}}}
+	if got := agreement(qs, samples)["s"]; got != "0.01 1, 0.24 1, 0.49 1" {
+		t.Errorf("agreement %q", got)
+	}
+	if got := perSample(qs, samples)["s"]; strings.Join(got, ",") != "0.01,0.24,0.49" {
+		t.Errorf("per sample %q", got)
+	}
+}

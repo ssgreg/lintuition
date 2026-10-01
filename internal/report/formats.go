@@ -5,8 +5,11 @@ import (
 	"encoding/xml"
 	"fmt"
 	"io"
+	"net/url"
+	"path/filepath"
 	"sort"
 	"strings"
+	"unicode/utf16"
 )
 
 // severity maps a configured severity to a format's levels; unset means warning.
@@ -50,9 +53,9 @@ func writeSARIF(w io.Writer, issues []Issue, run Run) error {
 	}
 	for _, is := range issues {
 		var loc location
-		loc.PhysicalLocation.ArtifactLocation.URI = strings.ReplaceAll(is.Pos.Filename, "\\", "/")
+		loc.PhysicalLocation.ArtifactLocation.URI = sarifURI(is.Pos.Filename)
 		loc.PhysicalLocation.Region.StartLine = is.Pos.Line
-		loc.PhysicalLocation.Region.StartColumn = is.Pos.Column
+		loc.PhysicalLocation.Region.StartColumn = utf16Column(is)
 		r := result{RuleID: is.FromLinter, Level: severity(is.Severity, levels, "warning"),
 			Message: map[string]string{"text": is.Text}, Locations: []location{loc}}
 		if is.Fingerprint != "" {
@@ -61,7 +64,7 @@ func writeSARIF(w io.Writer, issues []Issue, run Run) error {
 		results = append(results, r)
 		ruleSet[is.FromLinter] = true
 	}
-	var rules []rule
+	rules := []rule{}
 	for id := range ruleSet {
 		rules = append(rules, rule{ID: id})
 	}
@@ -76,7 +79,8 @@ func writeSARIF(w io.Writer, issues []Issue, run Run) error {
 			"tool": map[string]any{"driver": map[string]any{
 				"name": "lintuition", "informationUri": "https://github.com/ssgreg/lintuition", "rules": rules,
 			}},
-			"results": results,
+			"results":    results,
+			"columnKind": "utf16CodeUnits",
 			// An incomplete run did not look at everything; say so where SARIF can.
 			"invocations": []any{map[string]any{"executionSuccessful": !run.Incomplete}},
 		}},
@@ -231,4 +235,31 @@ func ghData(s string) string {
 
 func ghProp(s string) string {
 	return strings.NewReplacer("%", "%25", "\r", "%0D", "\n", "%0A", ":", "%3A", ",", "%2C").Replace(s)
+}
+
+// sarifURI makes a file name a URI reference: a relative path with its segments escaped, or a file
+// URI for an absolute one, Windows drive paths included.
+func sarifURI(name string) string {
+	p := filepath.ToSlash(name)
+	if vol := filepath.VolumeName(name); vol != "" || strings.HasPrefix(p, "/") {
+		if !strings.HasPrefix(p, "/") {
+			p = "/" + p
+		}
+		return (&url.URL{Scheme: "file", Path: p}).String()
+	}
+	return (&url.URL{Path: p}).EscapedPath()
+}
+
+// utf16Column converts Go's byte column to the UTF-16 code unit column SARIF declares, using the
+// issue's source line; without the line it keeps the byte column.
+func utf16Column(is Issue) int {
+	if is.Pos.Column <= 1 || len(is.SourceLines) == 0 {
+		return is.Pos.Column
+	}
+	line := is.SourceLines[0]
+	end := is.Pos.Column - 1
+	if end > len(line) {
+		return is.Pos.Column
+	}
+	return len(utf16.Encode([]rune(line[:end]))) + 1
 }

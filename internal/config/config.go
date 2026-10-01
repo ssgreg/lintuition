@@ -299,7 +299,7 @@ func (c *Config) applyDefaults() {
 	if c.Run.RelativePathMode == "" {
 		c.Run.RelativePathMode = "wd"
 	}
-	if c.Output.Formats.Text == nil && c.Output.Formats.JSON == nil {
+	if len(c.Output.Formats.Dests()) == 0 {
 		c.Output.Formats.Text = &TextFormat{Path: "stdout"}
 	}
 	if c.Semantic.Concurrency == 0 {
