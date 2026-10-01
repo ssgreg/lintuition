@@ -336,9 +336,11 @@ func isFailure(info *types.Info, call *ast.CallExpr) bool {
 // by statements that are known to fall through: t.Log, t.Logf, t.Helper, and assignments or
 // declarations that call nothing. Any other call may end the test or the goroutine first (t.Skip,
 // runtime.Goexit, panic, os.Exit, a helper that does one of those), and a branch, return or loop
-// may skip the failure, so the failure is not established. some reports a failure call anywhere in
+// may skip the failure, so the failure is not established. The failure and the log calls before it
+// must themselves be plain (see plain): skipT(t).Fatal(err) or t.Fatal(skipMessage(t)) evaluate a
+// call that may skip the test before the failure runs. some reports a failure call anywhere in
 // the block, outside closures, established or not.
-func fails(info *types.Info, b *ast.BlockStmt) (always, some bool) {
+func fails(info *types.Info, b *ast.BlockStmt, e errExpr) (always, some bool) {
 	ast.Inspect(b, func(n ast.Node) bool {
 		switch n := n.(type) {
 		case *ast.FuncLit:
@@ -355,9 +357,9 @@ func fails(info *types.Info, b *ast.BlockStmt) (always, some bool) {
 		case *ast.ExprStmt:
 			call, ok := ast.Unparen(s.X).(*ast.CallExpr)
 			switch {
-			case ok && isFailure(info, call):
+			case ok && isFailure(info, call) && plain(info, call, e):
 				return true, some
-			case ok && isLog(info, call) && !argsCall(info, call):
+			case ok && isLog(info, call) && plain(info, call, e):
 			default:
 				return false, some // may stop the test before the failure: t.Skip, panic, os.Exit
 			}
@@ -373,13 +375,64 @@ func fails(info *types.Info, b *ast.BlockStmt) (always, some bool) {
 	return false, some
 }
 
-func argsCall(info *types.Info, call *ast.CallExpr) bool {
+// plain reports whether a testing method call evaluates nothing that could stop the test before it
+// runs: its receiver is a *testing.T variable itself (t, not skipT(t)) and its arguments make no
+// call other than type conversions and err.Error() on the asserted error variable itself.
+func plain(info *types.Info, call *ast.CallExpr, e errExpr) bool {
+	sel, ok := ast.Unparen(call.Fun).(*ast.SelectorExpr)
+	if !ok {
+		return false
+	}
+	id, ok := ast.Unparen(sel.X).(*ast.Ident)
+	if !ok {
+		return false
+	}
+	v, ok := info.ObjectOf(id).(*types.Var)
+	if !ok || !isTestingT(v.Type()) {
+		return false
+	}
 	for _, a := range call.Args {
-		if callsAny(info, a) {
-			return true
+		if callsAny(info, a) && !e.errorText(info, a) {
+			return false
 		}
 	}
-	return false
+	return true
+}
+
+// errorText reports whether x is exactly err.Error() on the asserted error variable: an
+// identifier bound to the same object, calling the method Error() string with no arguments.
+func (e errExpr) errorText(info *types.Info, x ast.Expr) bool {
+	call, ok := ast.Unparen(x).(*ast.CallExpr)
+	if !ok || len(call.Args) != 0 || e.obj == nil {
+		return false
+	}
+	sel, ok := ast.Unparen(call.Fun).(*ast.SelectorExpr)
+	if !ok {
+		return false
+	}
+	id, ok := ast.Unparen(sel.X).(*ast.Ident)
+	if !ok || info.ObjectOf(id) != e.obj {
+		return false
+	}
+	s := info.Selections[sel]
+	if s == nil || s.Kind() != types.MethodVal || s.Obj().Name() != "Error" {
+		return false
+	}
+	sig := s.Obj().Type().(*types.Signature)
+	if sig.Params().Len() != 0 || sig.Results().Len() != 1 {
+		return false
+	}
+	b, ok := sig.Results().At(0).Type().(*types.Basic)
+	return ok && b.Kind() == types.String
+}
+
+func isTestingT(t types.Type) bool {
+	p, ok := t.(*types.Pointer)
+	if !ok {
+		return false
+	}
+	named, ok := p.Elem().(*types.Named)
+	return ok && named.Obj().Pkg() != nil && named.Obj().Pkg().Path() == "testing" && named.Obj().Name() == "T"
 }
 
 // fallThrough are the testing methods known to return to the caller.
@@ -461,7 +514,7 @@ func expectation(info *types.Info, body *ast.BlockStmt, e errExpr) (string, stri
 				return false
 			}
 		case *ast.IfStmt:
-			always, some := fails(info, n.Body)
+			always, some := fails(info, n.Body, e)
 			if !some || !mentions(n.Cond) {
 				return true
 			}
