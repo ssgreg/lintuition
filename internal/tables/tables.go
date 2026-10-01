@@ -140,6 +140,10 @@ type binding struct {
 // the loop variable: `x == tt.f`, `x != tt.f`, or an Equal-style assertion with both.
 func bindings(info *types.Info, body *ast.BlockStmt, lit *ast.CompositeLit, table types.Object) map[string]*binding {
 	out := map[string]*binding{}
+	// Writes are collected over every loop over the table, then applied: with pointer rows a
+	// write in an earlier loop (for _, tt := range tests { tt.want = true }) changes what a later
+	// loop compares, and for value rows a write is still a sign the literal is not what is checked.
+	writeAll, writeFields := false, map[string]bool{}
 	for _, rs := range ranges(info, body, lit, table) {
 		row, ok := rs.Value.(*ast.Ident)
 		if !ok {
@@ -189,12 +193,16 @@ func bindings(info *types.Info, body *ast.BlockStmt, lit *ast.CompositeLit, tabl
 			}
 			return true
 		})
-		// The row's literal want is the value compared only if nothing in the loop writes it.
 		all, fields := rowWrites(info, rs.Body, rowObj)
-		for name, b := range out {
-			if all || fields[name] {
-				b.conflict = "the row's expectation is written in the loop over the table"
-			}
+		writeAll = writeAll || all
+		for f := range fields {
+			writeFields[f] = true
+		}
+	}
+	// The row's literal want is the value compared only if no loop over the table writes it.
+	for name, b := range out {
+		if writeAll || writeFields[name] {
+			b.conflict = "the row's expectation is written in a loop over the table"
 		}
 	}
 	if table != nil && tableWritten(info, body, table) {

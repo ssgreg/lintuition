@@ -333,8 +333,11 @@ func isFailure(info *types.Info, call *ast.CallExpr) bool {
 }
 
 // fails reports whether a block fails the test whenever it runs: a failure statement preceded only
-// by plain statements (t.Log, assignments, declarations), with no branch, return or loop that could
-// skip it. some reports a failure call anywhere in the block, outside closures, established or not.
+// by statements that are known to fall through: t.Log, t.Logf, t.Helper, and assignments or
+// declarations that call nothing. Any other call may end the test or the goroutine first (t.Skip,
+// runtime.Goexit, panic, os.Exit, a helper that does one of those), and a branch, return or loop
+// may skip the failure, so the failure is not established. some reports a failure call anywhere in
+// the block, outside closures, established or not.
 func fails(info *types.Info, b *ast.BlockStmt) (always, some bool) {
 	ast.Inspect(b, func(n ast.Node) bool {
 		switch n := n.(type) {
@@ -350,15 +353,57 @@ func fails(info *types.Info, b *ast.BlockStmt) (always, some bool) {
 	for _, s := range b.List {
 		switch s := s.(type) {
 		case *ast.ExprStmt:
-			if call, ok := ast.Unparen(s.X).(*ast.CallExpr); ok && isFailure(info, call) {
+			call, ok := ast.Unparen(s.X).(*ast.CallExpr)
+			switch {
+			case ok && isFailure(info, call):
 				return true, some
+			case ok && isLog(info, call) && !argsCall(info, call):
+			default:
+				return false, some // may stop the test before the failure: t.Skip, panic, os.Exit
 			}
-		case *ast.AssignStmt, *ast.DeclStmt, *ast.EmptyStmt:
+		case *ast.AssignStmt, *ast.DeclStmt:
+			if callsAny(info, s) {
+				return false, some
+			}
+		case *ast.EmptyStmt:
 		default:
 			return false, some // a statement that may branch or leave before the failure
 		}
 	}
 	return false, some
+}
+
+func argsCall(info *types.Info, call *ast.CallExpr) bool {
+	for _, a := range call.Args {
+		if callsAny(info, a) {
+			return true
+		}
+	}
+	return false
+}
+
+// fallThrough are the testing methods known to return to the caller.
+var fallThrough = map[string]bool{"Log": true, "Logf": true, "Helper": true}
+
+func isLog(info *types.Info, call *ast.CallExpr) bool {
+	fn := facts.Callee(info, call)
+	return fn != nil && fn.Pkg() != nil && fn.Pkg().Path() == "testing" && fn.Type().(*types.Signature).Recv() != nil && fallThrough[fn.Name()]
+}
+
+// callsAny reports whether any of the nodes makes a call other than a type conversion.
+func callsAny(info *types.Info, ns ...ast.Node) bool {
+	found := false
+	for _, n := range ns {
+		ast.Inspect(n, func(x ast.Node) bool {
+			if c, ok := x.(*ast.CallExpr); ok {
+				if tv, ok := info.Types[c.Fun]; !ok || !tv.IsType() {
+					found = true
+				}
+			}
+			return !found
+		})
+	}
+	return found
 }
 
 // activeClosures returns the function literals a test body is known to run: called on the spot
