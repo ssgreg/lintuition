@@ -23,6 +23,18 @@ linters:
   enable: []
   disable: []
   settings:
+    doc-vs-table:
+      # Minimum probability of the answer about the doc's condition for a finding. Default: 0.8.
+      threshold: 0.8
+    enum-comment-shift:
+      # Minimum probability of the picked constant for a decision either way. Default: 0.8.
+      threshold: 0.8
+    error-needs-type:
+      # Minimum probability of yes for a finding, and of no for a clean answer. Default: 0.8.
+      threshold: 0.8
+    human-unit-contradiction:
+      # Minimum probability of the stated unit for a decision either way. Default: 0.85.
+      threshold: 0.85
     metric-type-vs-help:
       # Minimum probability of the classifier's answer for a finding. Default: 0.8.
       threshold: 0.8
@@ -41,6 +53,17 @@ linters:
     destructive-remediation:
       # Minimum probability that a text advises a destructive step. Default: 0.85.
       threshold: 0.85
+    sentinel-name-vs-text:
+      # Minimum probability of the answer either way. Default: 0.55.
+      threshold: 0.55
+      # How much more probable "different" must be than "same" for a finding. Default: 0.2.
+      margin: 0.2
+    suppression-rationale:
+      # Minimum probability of "the reason is about something else" for a finding. Default: 0.8.
+      threshold: 0.8
+    test-name-vs-assertion:
+      # Minimum probability of what the test name says about the call's error. Default: 0.9.
+      threshold: 0.9
   exclusions:
     # Generated files: lax (default; also loose "do not edit" markers), strict (the standard header only), disable.
     generated: lax

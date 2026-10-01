@@ -2,7 +2,7 @@ version: "2"
 
 linters:
   default: none
-  enable: [metric-type-vs-help, premature-success, table-case-vs-expectation, log-sensitive-field, log-key-value-role, normal-event-at-error, severe-event-understated, destructive-remediation]
+  enable: [metric-type-vs-help, premature-success, table-case-vs-expectation, sentinel-name-vs-text, error-needs-type, human-unit-contradiction, enum-comment-shift, test-name-vs-assertion, doc-vs-table, suppression-rationale, log-sensitive-field, log-key-value-role, normal-event-at-error, severe-event-understated, destructive-remediation]
 
 semantic:
   classifier: fake
@@ -81,3 +81,54 @@ semantic:
         - {linter: destructive-remediation, question: states_loss, when: "\"text\":\"deleted expired sessions as requested\"", yes: 0.5}
         - {linter: destructive-remediation, question: advice, when: "\"text\":\"debug event dropped by the sampler as configured\"", choice: no_advice, probability: 0.95}
         - {linter: destructive-remediation, question: states_loss, when: "\"text\":\"debug event dropped by the sampler as configured\"", yes: 0.5}
+        # sentinel-name-vs-text
+        - {linter: sentinel-name-vs-text, question: condition, when: "tenant record not found", choice: different, probability: 0.8}
+        - {linter: sentinel-name-vs-text, question: condition, when: "tenant storage quota exceeded", choice: same, probability: 0.9}
+        - {linter: sentinel-name-vs-text, question: condition, when: "backend hiccup", choice: insufficient, probability: 0.8}
+        - {linter: sentinel-name-vs-text, question: condition, when: "cached lease is outdated", choice: different, probability: 0.5}
+        # (the sentinel of error-needs-type's fixed twin)
+        - {linter: sentinel-name-vs-text, question: condition, when: "invoice does not exist", choice: same, probability: 0.9}
+        # error-needs-type
+        - {linter: error-needs-type, question: branchable, when: "invoice not found", yes: 0.9}
+        - {linter: error-needs-type, question: branchable, when: "invoice ledger invariant broken", yes: 0.1}
+        - {linter: error-needs-type, question: branchable, when: "invoice payload rejected", yes: 0.6}
+        # human-unit-contradiction
+        - {linter: human-unit-contradiction, question: unit, when: "compaction took %.0f ms", choice: milliseconds, probability: 0.9}
+        - {linter: human-unit-contradiction, question: unit, when: "compaction took %d ms", choice: milliseconds, probability: 0.95}
+        - {linter: human-unit-contradiction, question: unit, when: "compaction retry, backoff factor", choice: unspecified, probability: 0.9}
+        - {linter: human-unit-contradiction, question: unit, when: "compaction window %.0f", choice: minutes, probability: 0.6}
+        # enum-comment-shift
+        - {linter: enum-comment-shift, question: describes, when: "a replication job waiting for a free worker", choice: PhaseQueued, probability: 0.95}
+        - {linter: enum-comment-shift, question: describes, when: "every block has been copied and verified", choice: PhaseVerified, probability: 0.9}
+        - {linter: enum-comment-shift, question: describes, when: "replica without letting writes through", choice: ModeReadOnly, probability: 0.95}
+        - {linter: enum-comment-shift, question: describes, when: "replica for writes too", choice: ModeReadWrite, probability: 0.95}
+        - {linter: enum-comment-shift, question: describes, when: "Replica storage tiers, fastest first", choice: none, probability: 0.9}
+        - {linter: enum-comment-shift, question: describes, when: "replica tier kept for a while", choice: TierWarm, probability: 0.5}
+        # (the twin's own want comment is a line comment on a constant too: a note, no constant)
+        - {linter: enum-comment-shift, question: describes, when: "want `comment describes PhaseVerified", choice: none, probability: 0.9}
+        # (the sentinel of test-name-vs-assertion's twin package: name and text agree)
+        - {linter: sentinel-name-vs-text, question: condition, when: "unbalanced quote", choice: same, probability: 0.9}
+        # test-name-vs-assertion
+        - {linter: test-name-vs-assertion, question: name_says, when: "unquote rejects unbalanced quote", choice: error, probability: 0.95}
+        - {linter: test-name-vs-assertion, question: name_says, when: "unquote accepts quoted word", choice: no_error, probability: 0.95}
+        - {linter: test-name-vs-assertion, question: name_says, when: "unquote empty string", choice: input_only, probability: 0.95}
+        # doc-vs-table
+        - {linter: doc-vs-table, question: condition, when: '"situation":"three days late', choice: met, probability: 0.95}
+        - {linter: doc-vs-table, question: condition, when: '"situation":"a week before the date', choice: not_met, probability: 0.95}
+        - {linter: doc-vs-table, question: condition, when: '"situation":"invoice in another currency"', choice: not_covered, probability: 0.9}
+        # table-case-vs-expectation's rows are doc-vs-table candidates too: Expired has a doc
+        - {linter: doc-vs-table, question: condition, when: 'passed.","situation":"expired when the deadline', choice: met, probability: 0.95}
+        - {linter: doc-vs-table, question: condition, when: 'passed.","situation":"not expired before the deadline', choice: not_met, probability: 0.95}
+        - {linter: doc-vs-table, question: condition, when: 'passed.","situation":"passed=false"', choice: not_met, probability: 0.9}
+        # doc-vs-table's rows, for table-case-vs-expectation: their names say nothing about the result
+        - {linter: table-case-vs-expectation, question: outcome, when: '"about":"the result of Due"', choice: unstated, probability: 0.9}
+        # suppression-rationale
+        - {linter: suppression-rationale, question: about, when: "the file is small, so reading it whole", choice: other, probability: 0.9}
+        - {linter: suppression-rationale, question: about, when: "a close error on a file opened read-only", choice: that_risk, probability: 0.9}
+        - {linter: suppression-rationale, question: about, when: "only the tests call this function", choice: other, probability: 0.9}
+        - {linter: suppression-rationale, question: about, when: "one flat switch over every opcode", choice: that_risk, probability: 0.9}
+        - {linter: suppression-rationale, question: about, when: "a URL in a string cannot be wrapped", choice: that_risk, probability: 0.95}
+        # (destructive-remediation's twins are plain string errors, for error-needs-type: none is branchable)
+        - {linter: error-needs-type, question: branchable, when: "backup index mismatch", yes: 0.1}
+        - {linter: error-needs-type, question: branchable, when: "remove the --dry-run flag to apply the plan", yes: 0.1}
+        - {linter: error-needs-type, question: branchable, when: "lock file was removed by another process", yes: 0.2}

@@ -118,13 +118,20 @@ person-written text does leave the machine when the backend is remote.
 | linter | checks |
 |---|---|
 | `destructive-remediation` | an error or log message that advises deleting, wiping, resetting or reinstalling without saying what is lost |
+| `doc-vs-table` | a table test case whose boolean want contradicts what the tested function's doc says for that case |
+| `enum-comment-shift` | a comment in a const block that describes a neighbouring constant, not its own |
+| `error-needs-type` | policy: a branchable condition (not found, already exists) returned as a plain string error |
+| `human-unit-contradiction` | a printf message names a different unit than the duration value it prints (`%.0f ms` of `d.Seconds()`) |
 | `log-key-value-role` | a structured log key that names a different quantity or role than the variable logged under it |
 | `log-sensitive-field` | a structured log field that logs a secret (token, password, key material) as is |
 | `metric-type-vs-help` | Prometheus metric Help that describes a different kind of value than the metric type records |
 | `normal-event-at-error` | an expected routine event (cache miss, retry scheduled, client went away) logged at error level |
 | `premature-success` | a log line reports success before the call that can still fail |
+| `sentinel-name-vs-text` | a sentinel error whose name and message describe different conditions |
 | `severe-event-understated` | an unintended loss of data or work, or an outage, logged at debug or info level |
+| `suppression-rationale` | a `//nolint` reason that explains something other than what the suppressed linter reports |
 | `table-case-vs-expectation` | a table test case whose name says the opposite of its boolean expectation |
+| `test-name-vs-assertion` | a test whose name says the call under test should fail while the test asserts it returns no error, or the reverse |
 
 Each linter has defect / fixed twins in [testdata/twins](testdata/twins), checked by
 [`linttest`](linttest) with `// want` comments, like `analysistest`.

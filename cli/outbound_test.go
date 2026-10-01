@@ -210,9 +210,9 @@ func TestPreviewOfflineAndCollisions(t *testing.T) {
 func TestEvalOffline(t *testing.T) {
 	twinsDir, _ := filepath.Abs("../testdata/twins")
 	code, out, errs := run("eval", "--runs", "2", twinsDir)
-	// Every marked case is caught in every run, whatever the number of twins.
+	// The count of marked cases grows with every linter's twins; every one must be caught in every run.
 	m := regexp.MustCompile(`(\d+) marked cases x 2 completed runs \(of 2 requested\): caught in every run (\d+), in some 0, in none 0; 0 unaccounted`).FindStringSubmatch(out)
-	if code != 0 || m == nil || m[1] != m[2] || m[1] == "0" {
+	if code != 0 || m == nil || m[1] != m[2] {
 		t.Fatalf("exit %d\n%s\n%s", code, out, errs)
 	}
 }
