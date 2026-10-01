@@ -7,7 +7,9 @@
 // bool, time or duration, and not the result of a redacting call (Redact, Mask, Hash, SHA256, ...).
 // The classifier is asked what role the most sensitive of the remaining values serves; the key and
 // the identifiers the value comes from are sent, never the value. A field value the analyzer cannot
-// name, a key a fact cannot carry, or fields it cannot read at all make the call unsupported.
+// name, a key a fact cannot carry, or fields it cannot read at all make the call unsupported. When
+// only some arguments are readable, the readable fields are asked about and the unread part is
+// counted as a separate unsupported candidate, so a clean answer does not cover it.
 package logsensitive
 
 import (
@@ -68,7 +70,7 @@ func run(pass *analysis.Pass) (any, error) {
 		if !push {
 			return true
 		}
-		if c := candidate(pass, n.(*ast.CallExpr)); c != nil {
+		for _, c := range candidates(pass, n.(*ast.CallExpr)) {
 			c.Subject = facts.EnclosingFunc(stack) + "/" + c.Subject
 			out = append(out, c)
 		}
@@ -77,12 +79,31 @@ func run(pass *analysis.Pass) (any, error) {
 	return out, nil
 }
 
-func candidate(pass *analysis.Pass, call *ast.CallExpr) *sdk.Candidate {
+// candidates returns the candidate of a log call and, when some of its arguments could not be read
+// as fields while others were asked about, an unsupported one for the unread part: a clean answer
+// about the readable fields says nothing about the rest.
+func candidates(pass *analysis.Pass, call *ast.CallExpr) []*sdk.Candidate {
 	lc, ok := facts.AsLogCall(pass.TypesInfo, call)
 	if !ok {
 		return nil
 	}
 	fields, partial := facts.Fields(pass.TypesInfo, lc)
+	c := candidate(pass, call, lc, fields, partial)
+	if c == nil {
+		return nil
+	}
+	out := []*sdk.Candidate{c}
+	if partial && c.Unsupported == "" {
+		out = append(out, &sdk.Candidate{
+			Pos:         c.Pos,
+			Subject:     "unread fields",
+			Unsupported: "some log fields are not readable; only the readable ones are asked about",
+		})
+	}
+	return out
+}
+
+func candidate(pass *analysis.Pass, call *ast.CallExpr, lc facts.LogCall, fields []facts.LogField, partial bool) *sdk.Candidate {
 	c := &sdk.Candidate{Pos: pass.Fset.Position(call.Pos()), Local: map[string]string{}}
 	var keys, descs []string
 	unnamed := false
