@@ -85,7 +85,17 @@ func Run(ctx context.Context, o Options) (*Result, error) {
 		return nil, err
 	}
 
-	r := &runner{
+	var cache *classify.Cache
+	if _, ok := cl.(classify.Identifier); ok && !c.Semantic.Cache.Disabled {
+		dir := c.Semantic.Cache.Dir
+		if dir == "" {
+			if dir, err = classify.DefaultCacheDir(); err != nil {
+				return nil, err
+			}
+		}
+		cache = &classify.Cache{Dir: dir, TTL: timeDuration(c.Semantic.Cache.TTL)}
+	}
+	r := &runner{cache: cache, votes: c.Semantic.Votes,
 		cl: cl, clName: clName, policy: c.Semantic.Payload, budget: c.Semantic.Budget,
 		sem: make(chan struct{}, c.Semantic.Concurrency), dryRun: o.DryRun, previewW: o.Preview, log: o.Log,
 	}
@@ -136,7 +146,7 @@ func Run(ctx context.Context, o Options) (*Result, error) {
 				if j.decision.Report {
 					res.Issues = append(res.Issues, report.Issue{
 						FromLinter: e.Linter.Name, Text: j.decision.Message, Pos: j.cand.Pos,
-						Evidence: evidence(clName, j.answers),
+						Evidence: evidence(clName, j.answers, j.samples, j.replayed),
 					})
 				}
 			}
@@ -155,6 +165,7 @@ func Run(ctx context.Context, o Options) (*Result, error) {
 		res.Run.Problems = append(res.Run.Problems, "run stopped: "+ctx.Err().Error())
 	}
 	res.Run.Stats.Requests, res.Run.Stats.InputTokens, res.Run.Stats.CostUSD = r.requests, r.tokens, r.cost
+	res.Run.Stats.CacheHits, res.Run.Stats.Votes = r.hits, r.votes
 	proc.Base = base
 	res.Issues = proc.Process(res.Issues)
 	return res, nil
@@ -167,6 +178,9 @@ type job struct {
 
 	asked    bool
 	planned  bool
+	replayed bool
+	samples  int
+	key      string
 	skipped  string
 	err      error
 	answers  map[string]sdk.Answer
@@ -176,6 +190,8 @@ type job struct {
 type runner struct {
 	cl       sdk.Classifier
 	clName   string
+	cache    *classify.Cache
+	votes    int
 	policy   string
 	budget   config.Budget
 	sem      chan struct{}
@@ -185,6 +201,7 @@ type runner struct {
 
 	mu       sync.Mutex
 	requests int
+	hits     int
 	tokens   int
 	cost     float64
 	capped   string
@@ -216,20 +233,41 @@ func (r *runner) do(ctx context.Context, jobs []*job) {
 			j.err = err
 			continue
 		}
-		if !r.reserve() {
+		req := sdk.Request{Linter: j.linter.Name, State: state, Questions: qs}
+		if r.cache != nil {
+			key, err := classify.Key(r.cl.(classify.Identifier).Identity(), j.linter.Name+"@"+j.linter.Version, r.votes, req)
+			if err != nil {
+				j.err = err
+				continue
+			}
+			j.key = key
+			if bd, ok := r.cache.Get(key); ok {
+				// A replay: the same samples as before, not new votes.
+				r.mu.Lock()
+				r.hits++
+				r.mu.Unlock()
+				j.replayed = true
+				if r.dryRun {
+					continue
+				}
+				r.decide(j, req, bd.Samples)
+				continue
+			}
+		}
+		if !r.reserve(r.votes) {
 			j.err = errors.New("not asked: " + r.capped)
 			continue
 		}
 		if r.dryRun {
 			j.planned = true
-			r.preview(j, sdk.Request{Linter: j.linter.Name, State: state, Questions: qs})
+			r.preview(j, req)
 			continue
 		}
 		wg.Add(1)
 		r.sem <- struct{}{}
 		go func() {
 			defer func() { <-r.sem; wg.Done() }()
-			r.ask(ctx, j, sdk.Request{Linter: j.linter.Name, State: state, Questions: qs})
+			r.ask(ctx, j, req)
 		}()
 	}
 	wg.Wait()
@@ -274,14 +312,15 @@ func (r *runner) plan(qs []sdk.Question) error {
 	return nil
 }
 
-// reserve counts a request against the budget before it is sent; false means the budget is spent.
-func (r *runner) reserve() bool {
+// reserve counts n requests against the budget before they are sent; false means the budget does
+// not cover all of them, and none is sent: a vote with missing samples is not a vote.
+func (r *runner) reserve(n int) bool {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	if r.capped != "" {
 		return false
 	}
-	if r.budget.MaxRequests > 0 && r.requests >= r.budget.MaxRequests {
+	if r.budget.MaxRequests > 0 && r.requests+n > r.budget.MaxRequests {
 		r.capped = fmt.Sprintf("semantic.budget.max-requests %d reached", r.budget.MaxRequests)
 		return false
 	}
@@ -289,26 +328,62 @@ func (r *runner) reserve() bool {
 		r.capped = fmt.Sprintf("semantic.budget.max-cost-usd %.4f reached", r.budget.MaxCostUSD)
 		return false
 	}
-	r.requests++
+	r.requests += n
 	return true
 }
 
+// ask sends the request once per vote. Any failed or invalid sample fails the candidate: an
+// operational failure is not a vote against.
 func (r *runner) ask(ctx context.Context, j *job, req sdk.Request) {
-	resp, err := r.cl.Classify(ctx, req)
+	var bd classify.Bundle
+	for range r.votes {
+		resp, err := r.cl.Classify(ctx, req)
+		if err != nil {
+			j.err = fmt.Errorf("classifier %s: %w", r.clName, err)
+			return
+		}
+		r.mu.Lock()
+		r.tokens += resp.Usage.InputTokens
+		r.cost += resp.Usage.CostUSD
+		r.mu.Unlock()
+		if _, err := classify.Check(req.Questions, resp); err != nil {
+			j.err = fmt.Errorf("classifier %s: invalid response: %w", r.clName, err)
+			return
+		}
+		bd.Samples = append(bd.Samples, resp.Answers)
+		bd.Usage.InputTokens += resp.Usage.InputTokens
+		bd.Usage.CostUSD += resp.Usage.CostUSD
+	}
+	if r.cache != nil && j.key != "" {
+		if err := r.cache.Put(j.key, bd); err != nil {
+			fmt.Fprintf(r.log, "lintuition: answer cache: %v\n", err)
+		}
+	}
+	r.decide(j, req, bd.Samples)
+}
+
+// decide votes over the samples and lets the rule decide; samples that disagree abstain.
+func (r *runner) decide(j *job, req sdk.Request, samples [][]sdk.Answer) {
+	checked := make([]map[string]sdk.Answer, 0, len(samples))
+	for _, s := range samples {
+		m, err := classify.Check(req.Questions, sdk.Response{Answers: s})
+		if err != nil {
+			j.err = fmt.Errorf("cached answers are invalid: %w", err)
+			return
+		}
+		checked = append(checked, m)
+	}
+	answers, disagree, err := classify.Vote(req.Questions, checked)
 	if err != nil {
-		j.err = fmt.Errorf("classifier %s: %w", r.clName, err)
+		j.err = err
 		return
 	}
-	r.mu.Lock()
-	r.tokens += resp.Usage.InputTokens
-	r.cost += resp.Usage.CostUSD
-	r.mu.Unlock()
-	answers, err := classify.Check(req.Questions, resp)
-	if err != nil {
-		j.err = fmt.Errorf("classifier %s: invalid response: %w", r.clName, err)
+	j.asked, j.samples = true, len(samples)
+	if disagree != "" {
+		j.decision = sdk.Abstain(disagree)
 		return
 	}
-	j.asked, j.answers = true, answers
+	j.answers = answers
 	j.decision = j.rule.Decide(j.cand, answers)
 }
 
@@ -321,8 +396,8 @@ func (r *runner) problems() []string {
 	return nil
 }
 
-func evidence(cl string, answers map[string]sdk.Answer) *report.Evidence {
-	ev := &report.Evidence{Classifier: cl, Answers: map[string]string{}, Scores: map[string]float64{}}
+func evidence(cl string, answers map[string]sdk.Answer, samples int, replayed bool) *report.Evidence {
+	ev := &report.Evidence{Classifier: cl, Answers: map[string]string{}, Scores: map[string]float64{}, Samples: samples, Replayed: replayed}
 	for id, a := range answers {
 		switch {
 		case a.Choice != "":

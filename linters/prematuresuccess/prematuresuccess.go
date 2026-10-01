@@ -52,6 +52,7 @@ func init() {
 		Name:        Name,
 		Doc:         "a log line reports success before the call that can still fail",
 		Standard:    true,
+		Version:     "1",
 		Analyzer:    Analyzer,
 		NewSettings: func() any { return &Settings{} },
 		New: func(s any) (sdk.Rule, error) {

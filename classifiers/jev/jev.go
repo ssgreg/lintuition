@@ -140,6 +140,10 @@ func isLoopback(host string) bool {
 	return ip != nil && ip.IsLoopback()
 }
 
+// Identity names what decides an answer besides the request, for the answer cache: the endpoint
+// and the model. A moving alias such as jev-latest is bounded by the cache TTL.
+func (c *Classifier) Identity() string { return "jev|" + c.endpoint + "|" + c.model }
+
 // Capabilities implements sdk.Classifier.
 func (c *Classifier) Capabilities() sdk.Capabilities {
 	return sdk.Capabilities{Kinds: []sdk.Kind{sdk.Choice, sdk.Noul, sdk.Score}, Probabilities: true}

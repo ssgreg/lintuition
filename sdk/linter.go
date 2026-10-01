@@ -100,6 +100,9 @@ type Linter struct {
 	Doc  string
 	// Standard puts the linter in the `standard` default set.
 	Standard bool
+	// Version changes when the linter's questions, extraction or decision change; it is part of the
+	// answer cache key, so a changed rule never reuses answers to its old questions.
+	Version string
 	// Analyzer extracts candidates; its ResultType must be CandidatesType.
 	Analyzer *analysis.Analyzer
 	// NewSettings returns a pointer to a zero settings struct; nil means the linter takes no settings.

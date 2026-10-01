@@ -38,8 +38,12 @@ type LinterStatus struct {
 
 // Stats are the run totals.
 type Stats struct {
-	Packages    int     `json:"Packages"`
-	Requests    int     `json:"Requests"`
+	Packages int `json:"Packages"`
+	Requests int `json:"Requests"`
+	// CacheHits are candidates answered from the cache: replays, not new samples.
+	CacheHits int `json:"CacheHits"`
+	// Votes is the number of samples per candidate.
+	Votes       int     `json:"Votes"`
 	InputTokens int     `json:"InputTokens"`
 	CostUSD     float64 `json:"CostUSD"`
 }

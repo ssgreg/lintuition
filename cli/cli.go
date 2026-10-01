@@ -18,6 +18,7 @@ import (
 
 	"github.com/spf13/cobra"
 
+	"github.com/ssgreg/lintuition/internal/classify"
 	"github.com/ssgreg/lintuition/internal/config"
 	"github.com/ssgreg/lintuition/internal/engine"
 	"github.com/ssgreg/lintuition/internal/report"
@@ -47,7 +48,7 @@ func Main(args []string, stdout, stderr io.Writer) int {
 	root.SetArgs(args)
 	root.SetOut(stdout)
 	root.SetErr(stderr)
-	root.AddCommand(runCmd(&code), lintersCmd(), classifiersCmd(), configCmd(), versionCmd())
+	root.AddCommand(runCmd(&code), lintersCmd(), classifiersCmd(), configCmd(), cacheCmd(), versionCmd())
 	if err := root.Execute(); err != nil {
 		fmt.Fprintf(stderr, "Error: %v\n", err)
 		return ExitIncomplete
@@ -212,12 +213,15 @@ func summary(w io.Writer, res *engine.Result, dryRun, stats bool) {
 	switch {
 	case !stats && !dryRun:
 	case dryRun:
-		fmt.Fprintf(w, "dry run: %d packages, %d candidates: %d requests planned, %d skipped, %d failed",
-			res.Run.Stats.Packages, cand, planned, skip, fail)
+		fmt.Fprintf(w, "dry run: %d packages, %d candidates: %d to ask (%d requests at %d vote(s) each), %d cached, %d skipped, %d unsupported, %d failed",
+			res.Run.Stats.Packages, cand, planned, res.Run.Stats.Requests, res.Run.Stats.Votes, res.Run.Stats.CacheHits, skip, unsup, fail)
 		fmt.Fprintln(w)
 	default:
 		fmt.Fprintf(w, "%d issue(s). %d packages, %d candidates: %d asked, %d abstained, %d skipped, %d unsupported, %d failed. %d requests",
 			len(res.Issues), res.Run.Stats.Packages, cand, asked, abst, skip, unsup, fail, res.Run.Stats.Requests)
+		if res.Run.Stats.CacheHits > 0 {
+			fmt.Fprintf(w, ", %d from cache", res.Run.Stats.CacheHits)
+		}
 		if res.Run.Stats.CostUSD > 0 {
 			fmt.Fprintf(w, ", ~$%.6f at the backend's price assumption", res.Run.Stats.CostUSD)
 		}
@@ -380,5 +384,49 @@ func versionCmd() *cobra.Command {
 		},
 	}
 	cmd.Flags().BoolVar(&asJSON, "json", false, "print as JSON")
+	return cmd
+}
+
+func cacheCmd() *cobra.Command {
+	cmd := &cobra.Command{Use: "cache", Short: "Inspect or clean the answer cache"}
+	var cf configFlags
+	dir := func() (string, error) {
+		c, err := cf.load()
+		if err != nil {
+			return "", err
+		}
+		if c.Semantic.Cache.Dir != "" {
+			return c.Semantic.Cache.Dir, nil
+		}
+		return classify.DefaultCacheDir()
+	}
+	path := &cobra.Command{
+		Use:   "path",
+		Short: "Print the cache directory",
+		Args:  cobra.NoArgs,
+		RunE: func(cmd *cobra.Command, _ []string) error {
+			d, err := dir()
+			if err != nil {
+				return err
+			}
+			fmt.Fprintln(cmd.OutOrStdout(), d)
+			return nil
+		},
+	}
+	clean := &cobra.Command{
+		Use:   "clean",
+		Short: "Remove every cached answer",
+		Args:  cobra.NoArgs,
+		RunE: func(cmd *cobra.Command, _ []string) error {
+			d, err := dir()
+			if err != nil {
+				return err
+			}
+			return (&classify.Cache{Dir: d}).Clean()
+		},
+	}
+	cf.add(path)
+	cf.add(clean)
+	cmd.AddCommand(path, clean)
 	return cmd
 }

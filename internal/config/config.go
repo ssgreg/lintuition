@@ -135,6 +135,19 @@ type Semantic struct {
 	Budget    Budget `yaml:"budget"`
 	// Concurrency is the number of requests in flight.
 	Concurrency int `yaml:"concurrency"`
+	// Votes is the number of independent samples per candidate (odd, 1 to 9; default 1). A strict
+	// majority must agree, or the candidate abstains. Each sample is a request.
+	Votes int   `yaml:"votes"`
+	Cache Cache `yaml:"cache"`
+}
+
+// Cache configures the answer cache. Only backends that declare an identity are cached.
+type Cache struct {
+	Disabled bool `yaml:"disabled"`
+	// Dir defaults to the user cache directory.
+	Dir string `yaml:"dir"`
+	// TTL bounds the age of a cached answer (default 168h); a moving model alias needs one.
+	TTL Duration `yaml:"ttl"`
 }
 
 // Budget caps one run. A run that hits a cap is incomplete.
@@ -262,6 +275,12 @@ func (c *Config) applyDefaults() {
 	if c.Semantic.Concurrency == 0 {
 		c.Semantic.Concurrency = 8
 	}
+	if c.Semantic.Votes == 0 {
+		c.Semantic.Votes = 1
+	}
+	if c.Semantic.Cache.TTL == 0 {
+		c.Semantic.Cache.TTL = Duration(168 * time.Hour)
+	}
 }
 
 func (c *Config) validate() error {
@@ -304,6 +323,12 @@ func (c *Config) validate() error {
 	}
 	if err := c.Output.Formats.checkDestinations(); err != nil {
 		return err
+	}
+	if v := c.Semantic.Votes; v < 1 || v > 9 || v%2 == 0 {
+		return fmt.Errorf("semantic.votes: %d must be odd, 1 to 9", v)
+	}
+	if c.Semantic.Cache.TTL < 0 {
+		return errors.New("semantic.cache.ttl: must not be negative")
 	}
 	if c.Semantic.Concurrency < 1 {
 		return errors.New("semantic.concurrency: must be at least 1")

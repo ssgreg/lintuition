@@ -115,7 +115,7 @@ func TestRunJSONAndDryRun(t *testing.T) {
 		t.Fatalf("json: %+v", rep)
 	}
 	code, out, errs := run("run", "--dry-run", "./...")
-	if code != 0 || out != "" || !strings.Contains(errs, "4 requests planned") {
+	if code != 0 || out != "" || !strings.Contains(errs, "4 to ask (4 requests at 1 vote(s) each)") {
 		t.Fatalf("dry run: exit %d, out %q, %s", code, out, errs)
 	}
 }

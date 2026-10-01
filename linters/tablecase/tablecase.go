@@ -54,6 +54,7 @@ func init() {
 		Name:        Name,
 		Doc:         "a table test case whose name says the opposite of its boolean expectation",
 		Standard:    true,
+		Version:     "1",
 		Analyzer:    Analyzer,
 		NewSettings: func() any { return &Settings{} },
 		New: func(s any) (sdk.Rule, error) {

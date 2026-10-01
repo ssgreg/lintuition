@@ -97,6 +97,18 @@ semantic:
   local-only: false
   # Requests in flight. Default: 8.
   concurrency: 8
+  # Independent samples per candidate: odd, 1 to 9. A strict majority must agree, or the candidate
+  # abstains; the rule's threshold applies to the mean probability. Each sample is a request.
+  # Agreement of correlated samples is not calibration. Default: 1.
+  votes: 1
+  # Validated answers are cached by content hash, for backends that declare an identity (jev; not
+  # the fake). A cached bundle is a replay, never counted as new votes.
+  cache:
+    disabled: false
+    # Default: the user cache directory (lintuition cache path).
+    dir: ""
+    # Default: 168h. A moving model alias such as jev-latest needs a bound.
+    ttl: 168h
   # Caps for one run; reaching one makes the run incomplete. 0 means no cap.
   budget:
     max-requests: 0

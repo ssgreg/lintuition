@@ -30,6 +30,9 @@ type Evidence struct {
 	Classifier string             `json:"classifier"`
 	Answers    map[string]string  `json:"answers"`
 	Scores     map[string]float64 `json:"scores,omitempty"`
+	// Samples is how many answers were voted on; Replayed says they came from the cache.
+	Samples  int  `json:"samples"`
+	Replayed bool `json:"replayed,omitempty"`
 }
 
 // Processor applies exclusions, severity and limits from the config.

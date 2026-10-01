@@ -61,6 +61,7 @@ func init() {
 		Name:        Name,
 		Doc:         "Prometheus metric Help that describes a different kind of value than the metric type records",
 		Standard:    true,
+		Version:     "1",
 		Analyzer:    Analyzer,
 		NewSettings: func() any { return &Settings{} },
 		New: func(s any) (sdk.Rule, error) {
