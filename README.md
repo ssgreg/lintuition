@@ -122,6 +122,7 @@ person-written text does leave the machine when the backend is remote.
 | `metric-type-vs-help` | Prometheus metric Help that describes a different kind of value than the metric type records |
 | `normal-event-at-error` | an expected routine event (cache miss, retry scheduled, client went away) logged at error level |
 | `premature-success` | a log line reports success before the call that can still fail |
+| `severe-event-understated` | an unintended loss of data or work, or an outage, logged at debug or info level |
 | `table-case-vs-expectation` | a table test case whose name says the opposite of its boolean expectation |
 
 Each linter has defect / fixed twins in [testdata/twins](testdata/twins), checked by

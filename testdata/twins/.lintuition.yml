@@ -2,7 +2,7 @@ version: "2"
 
 linters:
   default: none
-  enable: [metric-type-vs-help, premature-success, table-case-vs-expectation, log-sensitive-field, log-key-value-role, normal-event-at-error]
+  enable: [metric-type-vs-help, premature-success, table-case-vs-expectation, log-sensitive-field, log-key-value-role, normal-event-at-error, severe-event-understated]
 
 semantic:
   classifier: fake
@@ -42,3 +42,26 @@ semantic:
         # normal-event-at-error
         - {linter: normal-event-at-error, question: event, when: "cache miss, loading from the database", choice: routine, probability: 0.95}
         - {linter: normal-event-at-error, question: event, when: "disk quota exceeded, uploads are paused", choice: degradation, probability: 0.9}
+        - {linter: normal-event-at-error, question: event, when: "queue full, event dropped and not retried", choice: failure, probability: 0.9}
+        # severe-event-understated
+        - {linter: severe-event-understated, question: consequence, when: "queue full, event dropped and not retried", choice: unintended_loss, probability: 0.95}
+        - {linter: severe-event-understated, question: on_purpose, when: "queue full, event dropped and not retried", yes: 0.1}
+        - {linter: severe-event-understated, question: consequence, when: "deleted expired sessions as requested", choice: routine, probability: 0.95}
+        - {linter: severe-event-understated, question: on_purpose, when: "deleted expired sessions as requested", yes: 0.95}
+        - {linter: severe-event-understated, question: consequence, when: "dropped by the sampler as configured", choice: unintended_loss, probability: 0.9}
+        - {linter: severe-event-understated, question: on_purpose, when: "dropped by the sampler as configured", yes: 0.9}
+        # severe-event-understated reads every info and debug message, the other linters' twins too.
+        - {linter: severe-event-understated, question: consequence, when: "\"message\":\"user signed in\"", choice: routine, probability: 0.95}
+        - {linter: severe-event-understated, question: on_purpose, when: "\"message\":\"user signed in\"", yes: 0.5}
+        - {linter: severe-event-understated, question: consequence, when: "\"message\":\"token rotated\"", choice: routine, probability: 0.95}
+        - {linter: severe-event-understated, question: on_purpose, when: "\"message\":\"token rotated\"", yes: 0.5}
+        - {linter: severe-event-understated, question: consequence, when: "\"message\":\"cache miss, loading from the database\"", choice: routine, probability: 0.95}
+        - {linter: severe-event-understated, question: on_purpose, when: "\"message\":\"cache miss, loading from the database\"", yes: 0.5}
+        - {linter: severe-event-understated, question: consequence, when: "\"message\":\"config saved to disk\"", choice: routine, probability: 0.95}
+        - {linter: severe-event-understated, question: on_purpose, when: "\"message\":\"config saved to disk\"", yes: 0.5}
+        - {linter: severe-event-understated, question: consequence, when: "\"message\":\"saving config to disk\"", choice: routine, probability: 0.95}
+        - {linter: severe-event-understated, question: on_purpose, when: "\"message\":\"saving config to disk\"", yes: 0.5}
+        - {linter: severe-event-understated, question: consequence, when: "\"message\":\"cache warmed\"", choice: routine, probability: 0.95}
+        - {linter: severe-event-understated, question: on_purpose, when: "\"message\":\"cache warmed\"", yes: 0.5}
+        - {linter: severe-event-understated, question: consequence, when: "\"message\":\"upload 3 of 5\"", choice: routine, probability: 0.95}
+        - {linter: severe-event-understated, question: on_purpose, when: "\"message\":\"upload 3 of 5\"", yes: 0.5}

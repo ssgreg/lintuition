@@ -35,6 +35,9 @@ linters:
     normal-event-at-error:
       # Minimum probability that an error-level message reports a routine event. Default: 0.9.
       threshold: 0.9
+    severe-event-understated:
+      # Minimum probability that a debug or info message states an unintended loss. Default: 0.85.
+      threshold: 0.85
   exclusions:
     # Generated files: lax (default; also loose "do not edit" markers), strict (the standard header only), disable.
     generated: lax
