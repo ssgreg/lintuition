@@ -115,6 +115,17 @@ person-written text does leave the machine when the backend is remote.
 
 ## Linters
 
+
+How each one reads your code, what it sends and how it decides: [docs/linters.md](docs/linters.md).
+Every example there is real code in [examples/showcase](examples/showcase), and a test checks that
+each is caught. To watch them with a real classifier:
+
+```sh
+cd examples/showcase
+lintuition run ./...              # offline, scripted answers
+lintuition run -c jev.yml ./...   # jev.yml: the quick-start config, classifier jev
+```
+
 | linter | checks |
 |---|---|
 | `destructive-remediation` | an error or log message that advises deleting, wiping, resetting or reinstalling without saying what is lost |

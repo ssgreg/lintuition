@@ -123,14 +123,14 @@ semantic:
         # doc-vs-table's rows, for table-case-vs-expectation: their names say nothing about the result
         - {linter: table-case-vs-expectation, question: outcome, when: '"about":"the result of Due"', choice: unstated, probability: 0.9}
         # suppression-rationale
-        - {linter: suppression-rationale, question: about, when: "the file is small, so reading it whole", choice: other, probability: 0.9}
-        - {linter: suppression-rationale, question: about, when: "a close error on a file opened read-only", choice: that_risk, probability: 0.9}
-        - {linter: suppression-rationale, question: about, when: "only the tests call this function", choice: other, probability: 0.9}
-        - {linter: suppression-rationale, question: about, when: "one flat switch over every opcode", choice: that_risk, probability: 0.9}
-        - {linter: suppression-rationale, question: about, when: "a URL in a string cannot be wrapped", choice: that_risk, probability: 0.95}
-        - {linter: suppression-rationale, question: about, when: "the buffer is small // errors from this best-effort cleanup", choice: that_risk, probability: 0.9}
+        - {linter: suppression-rationale, question: about, when: "the file is small, so reading it whole", choice: elsewhere, probability: 0.9}
+        - {linter: suppression-rationale, question: about, when: "a close error on a file opened read-only", choice: addresses, probability: 0.9}
+        - {linter: suppression-rationale, question: about, when: "only the tests call this function", choice: elsewhere, probability: 0.9}
+        - {linter: suppression-rationale, question: about, when: "one flat switch over every opcode", choice: addresses, probability: 0.9}
+        - {linter: suppression-rationale, question: about, when: "a URL in a string cannot be wrapped", choice: addresses, probability: 0.95}
+        - {linter: suppression-rationale, question: about, when: "the buffer is small // errors from this best-effort cleanup", choice: addresses, probability: 0.9}
         # a reason cut at its second // would match this rule and be reported
-        - {linter: suppression-rationale, question: about, when: '"rationale":"the buffer is small"', choice: other, probability: 0.9}
+        - {linter: suppression-rationale, question: about, when: '"rationale":"the buffer is small"', choice: elsewhere, probability: 0.9}
         # (destructive-remediation's twins are plain string errors, for error-needs-type: none is branchable)
         - {linter: error-needs-type, question: branchable, when: "backup index mismatch", yes: 0.1}
         - {linter: error-needs-type, question: branchable, when: "remove the --dry-run flag to apply the plan", yes: 0.1}

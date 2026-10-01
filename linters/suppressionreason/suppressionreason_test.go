@@ -76,10 +76,10 @@ func TestDecide(t *testing.T) {
 		answers         map[string]sdk.Answer
 		report, abstain bool
 	}{
-		{about("other", 0.9), true, false},
-		{about("other", 0.75), false, true},
-		{about("that_risk", 0.9), false, false},
-		{about("that_risk", 0.5), false, true},
+		{about("elsewhere", 0.9), true, false},
+		{about("elsewhere", 0.75), false, true},
+		{about("addresses", 0.9), false, false},
+		{about("addresses", 0.5), false, true},
 		{about("unclear", 0.9), false, true},
 	} {
 		d := r.Decide(c, tc.answers)
@@ -87,7 +87,7 @@ func TestDecide(t *testing.T) {
 			t.Errorf("%+v: got %+v", tc.answers, d)
 		}
 	}
-	if d := r.Decide(c, about("other", 0.9)); d.Message != `nolint rationale is about something other than what errcheck reports: "the file is small"` {
+	if d := r.Decide(c, about("elsewhere", 0.9)); d.Message != `nolint rationale is about something other than what errcheck reports: "the file is small"` {
 		t.Errorf("message: %s", d.Message)
 	}
 }

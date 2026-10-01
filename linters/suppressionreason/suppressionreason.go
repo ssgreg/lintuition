@@ -34,7 +34,7 @@ const Name = "suppression-rationale"
 
 // Settings configure the linter.
 type Settings struct {
-	// Threshold is the minimum probability of "other" for a finding. The default 0.8 is above the
+	// Threshold is the minimum probability of "elsewhere" for a finding. The default 0.8 is above the
 	// prototype's 0.7: the descriptions of umbrella linters (gosec, staticcheck, govet, gocritic,
 	// revive) are coarse, so a reason that addresses the one check that fired can read as
 	// "something else" to a classifier that sees only the umbrella. Not yet validated on a
@@ -55,7 +55,7 @@ func init() {
 		Name:        Name,
 		Doc:         "a nolint reason that explains something other than what the suppressed linter reports",
 		Standard:    true,
-		Version:     "1",
+		Version:     "2",
 		Analyzer:    Analyzer,
 		NewSettings: func() any { return &Settings{} },
 		New: func(s any) (sdk.Rule, error) {
@@ -177,10 +177,15 @@ func (r *rule) Questions(*sdk.Candidate) []sdk.Question {
 	return []sdk.Question{{
 		ID:   "about",
 		Kind: sdk.Choice,
-		Text: "The suppressed linter reports `suppressed`. What is `rationale` about?",
+		// Asked what the reason is about, not whether it justifies the suppression: any reason
+		// "justifies" it to a classifier. On eight labelled reasons with jev-latest, the old
+		// question called "this function is short and easy to read" an errcheck justification at
+		// 0.9; this one called every off-topic reason off-topic at 0.98 or more, and no on-topic
+		// reason off-topic.
+		Text: "Does the reason `rationale` mention or address what `suppressed` describes?",
 		Options: []sdk.Option{
-			{Key: "that_risk", Description: "Why that reported thing is acceptable here."},
-			{Key: "other", Description: "Something else: another risk, the data, the design."},
+			{Key: "addresses", Description: "Yes: it is about that very thing."},
+			{Key: "elsewhere", Description: "No: it is about a different subject."},
 		},
 	}}
 }
@@ -198,7 +203,7 @@ func (r *rule) Decide(c *sdk.Candidate, answers map[string]sdk.Answer) sdk.Decis
 	if p < r.threshold {
 		return sdk.Abstain(fmt.Sprintf("%s at %.2f is below the threshold %.2f", a.Choice, p, r.threshold))
 	}
-	if a.Choice != "other" {
+	if a.Choice != "elsewhere" {
 		return sdk.Clean()
 	}
 	return sdk.Report("nolint rationale is about something other than what %s reports: %q", c.Local["linter"], c.Local["rationale"])

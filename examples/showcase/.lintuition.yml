@@ -1,0 +1,44 @@
+version: "2"
+
+# Every linter, the policy one included, so each example in docs/linters.md shows.
+linters:
+  default: all
+
+# Offline: scripted answers, the ones a real classifier gives for these texts. Anything not
+# scripted is answered "unclear", so the rule abstains. To run against a real classifier, copy
+# .lintuition.quickstart.yml from the repository root to jev.yml here, set `linters: default: all`
+# and run `lintuition run -c jev.yml ./...`.
+semantic:
+  classifier: fake
+  classifiers:
+    fake:
+      unmatched: unclear
+      rules:
+        - {linter: metric-type-vs-help, when: "Disk I/O utilization", choice: current, probability: 0.9}
+        - {linter: premature-success, when: "config saved to disk", choice: completed, probability: 0.8}
+        - {linter: log-sensitive-field, when: "cfg.Password", choice: secret, probability: 0.95}
+        - {linter: log-sensitive-field, choice: public, probability: 0.9}
+        - {linter: log-key-value-role, when: "remaining_attempts", choice: conflict, probability: 0.9}
+        - {linter: normal-event-at-error, when: "cache miss", choice: routine, probability: 0.95}
+        - {linter: severe-event-understated, question: consequence, when: "are lost", choice: unintended_loss, probability: 0.9}
+        - {linter: severe-event-understated, question: on_purpose, when: "are lost", yes: 0.1}
+        - {linter: destructive-remediation, question: advice, when: "delete the data directory", choice: destructive_advice, probability: 0.95}
+        - {linter: destructive-remediation, question: states_loss, when: "delete the data directory", yes: 0.1}
+        - {linter: destructive-remediation, question: advice, choice: no_advice, probability: 0.9}
+        - {linter: destructive-remediation, question: states_loss, yes: 0.5}
+        - {linter: sentinel-name-vs-text, when: "tenant record not found", choice: different, probability: 0.9}
+        - {linter: sentinel-name-vs-text, when: "unbalanced quote", choice: same, probability: 0.95}
+        - {linter: error-needs-type, when: "invoice not found", yes: 0.95}
+        - {linter: error-needs-type, yes: 0.2}
+        - {linter: human-unit-contradiction, when: "compaction took", choice: milliseconds, probability: 0.95}
+        - {linter: enum-comment-shift, when: "copied and verified", choice: PhaseVerified, probability: 0.9}
+        - {linter: enum-comment-shift, when: "free worker", choice: PhaseQueued, probability: 0.9}
+        - {linter: enum-comment-shift, choice: none, probability: 0.9}
+        - {linter: table-case-vs-expectation, when: "not expired before the deadline", choice: "false", probability: 0.95}
+        - {linter: table-case-vs-expectation, when: "expired when the deadline", choice: "true", probability: 0.95}
+        - {linter: table-case-vs-expectation, when: "three days late", choice: unstated, probability: 0.9}
+        - {linter: doc-vs-table, when: "three days late", choice: met, probability: 0.95}
+        - {linter: doc-vs-table, when: "not expired before the deadline", choice: not_met, probability: 0.95}
+        - {linter: doc-vs-table, when: "expired when the deadline", choice: met, probability: 0.95}
+        - {linter: test-name-vs-assertion, when: "rejects unbalanced quote", choice: error, probability: 0.95}
+        - {linter: suppression-rationale, when: "the file is small", choice: elsewhere, probability: 0.9}
