@@ -23,6 +23,9 @@ linters:
   enable: []
   disable: []
   settings:
+    doc-vs-table:
+      # Minimum probability of the answer about the doc's condition for a finding. Default: 0.8.
+      threshold: 0.8
     metric-type-vs-help:
       # Minimum probability of the classifier's answer for a finding. Default: 0.8.
       threshold: 0.8

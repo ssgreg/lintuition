@@ -117,6 +117,7 @@ person-written text does leave the machine when the backend is remote.
 
 | linter | checks |
 |---|---|
+| `doc-vs-table` | a table test case whose boolean want contradicts what the tested function's doc says for that case |
 | `metric-type-vs-help` | Prometheus metric Help that describes a different kind of value than the metric type records |
 | `premature-success` | a log line reports success before the call that can still fail |
 | `table-case-vs-expectation` | a table test case whose name says the opposite of its boolean expectation |

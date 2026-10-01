@@ -2,7 +2,7 @@ version: "2"
 
 linters:
   default: none
-  enable: [metric-type-vs-help, premature-success, table-case-vs-expectation, test-name-vs-assertion]
+  enable: [metric-type-vs-help, premature-success, table-case-vs-expectation, test-name-vs-assertion, doc-vs-table]
 
 semantic:
   classifier: fake
@@ -31,3 +31,13 @@ semantic:
         - {linter: test-name-vs-assertion, question: name_says, when: "unquote rejects unbalanced quote", choice: error, probability: 0.95}
         - {linter: test-name-vs-assertion, question: name_says, when: "unquote accepts quoted word", choice: no_error, probability: 0.95}
         - {linter: test-name-vs-assertion, question: name_says, when: "unquote empty string", choice: input_only, probability: 0.95}
+        # doc-vs-table
+        - {linter: doc-vs-table, question: condition, when: '"situation":"three days late', choice: met, probability: 0.95}
+        - {linter: doc-vs-table, question: condition, when: '"situation":"a week before the date', choice: not_met, probability: 0.95}
+        - {linter: doc-vs-table, question: condition, when: '"situation":"invoice in another currency"', choice: not_covered, probability: 0.9}
+        # table-case-vs-expectation's rows are doc-vs-table candidates too: Expired has a doc
+        - {linter: doc-vs-table, question: condition, when: 'passed.","situation":"expired when the deadline', choice: met, probability: 0.95}
+        - {linter: doc-vs-table, question: condition, when: 'passed.","situation":"not expired before the deadline', choice: not_met, probability: 0.95}
+        - {linter: doc-vs-table, question: condition, when: 'passed.","situation":"passed=false"', choice: not_met, probability: 0.9}
+        # doc-vs-table's rows, for table-case-vs-expectation: their names say nothing about the result
+        - {linter: table-case-vs-expectation, question: outcome, when: '"about":"the result of Due"', choice: unstated, probability: 0.9}
