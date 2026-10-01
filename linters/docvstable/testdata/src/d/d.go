@@ -18,3 +18,6 @@ func Generic[T comparable](v T) bool {
 	var zero T
 	return v == zero
 }
+
+// IsReady reports true when the worker is ready.
+func IsReady(ready bool) bool { return ready }

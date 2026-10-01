@@ -6,7 +6,10 @@
 // `got := F(tt.in); got != tt.want`, `F(tt.in) != tt.want`, or an Equal assertion. A generic want
 // (want, expected, ok, ...) must be compared with a call's single bool result. A negated or
 // otherwise transformed comparison, comparisons with different calls, or a result variable written
-// again make the field unsupported rather than guessed.
+// again make the field unsupported rather than guessed. So does anything that may change the want
+// between the literal and the comparison: a write to the row's field or to the whole row in the
+// loop, the row escaping (&tt, f(tt), a method call), or the table variable being reassigned,
+// written through (tests[0].want = x) or passed on.
 package tables
 
 import (
@@ -186,8 +189,129 @@ func bindings(info *types.Info, body *ast.BlockStmt, lit *ast.CompositeLit, tabl
 			}
 			return true
 		})
+		// The row's literal want is the value compared only if nothing in the loop writes it.
+		all, fields := rowWrites(info, rs.Body, rowObj)
+		for name, b := range out {
+			if all || fields[name] {
+				b.conflict = "the row's expectation is written in the loop over the table"
+			}
+		}
+	}
+	if table != nil && tableWritten(info, body, table) {
+		for _, b := range out {
+			b.conflict = "the table is written after it is built"
+		}
 	}
 	return out
+}
+
+// root returns the variable an lvalue-like expression is rooted at: tt in tt.want, tt.a.b,
+// tests[i].want, *p.
+func root(info *types.Info, e ast.Expr) types.Object {
+	for {
+		switch x := ast.Unparen(e).(type) {
+		case *ast.Ident:
+			return info.ObjectOf(x)
+		case *ast.SelectorExpr:
+			e = x.X
+		case *ast.IndexExpr:
+			e = x.X
+		case *ast.StarExpr:
+			e = x.X
+		default:
+			return nil
+		}
+	}
+}
+
+// rowWrites finds what a loop body may change of the row variable. A write to one field
+// (tt.want = x, tt.want++, &tt.want) changes that field; a write to the row itself, its address,
+// a method call on it or any use other than reading a field (passing tt on, tt := tt) may change
+// any field, so all is set.
+func rowWrites(info *types.Info, body *ast.BlockStmt, row types.Object) (all bool, fields map[string]bool) {
+	fields = map[string]bool{}
+	// write records an lvalue: tt.f marks f, anything else rooted at the row marks all.
+	write := func(e ast.Expr) {
+		if root(info, e) != row {
+			return
+		}
+		if sel, ok := ast.Unparen(e).(*ast.SelectorExpr); ok {
+			if id, ok := ast.Unparen(sel.X).(*ast.Ident); ok && info.ObjectOf(id) == row {
+				if v, ok := info.ObjectOf(sel.Sel).(*types.Var); ok && v.IsField() {
+					fields[v.Name()] = true
+					return
+				}
+			}
+		}
+		all = true
+	}
+	// fieldReads are the row idents that are only the operand of a field selector.
+	fieldReads := map[*ast.Ident]bool{}
+	ast.Inspect(body, func(n ast.Node) bool {
+		switch n := n.(type) {
+		case *ast.AssignStmt:
+			for _, l := range n.Lhs {
+				write(l)
+			}
+		case *ast.IncDecStmt:
+			write(n.X)
+		case *ast.UnaryExpr:
+			if n.Op == token.AND {
+				write(n.X)
+			}
+		case *ast.SelectorExpr:
+			id, ok := ast.Unparen(n.X).(*ast.Ident)
+			if !ok || info.ObjectOf(id) != row {
+				return true
+			}
+			if sel := info.Selections[n]; sel != nil && sel.Kind() == types.FieldVal {
+				fieldReads[id] = true
+			}
+		}
+		return true
+	})
+	ast.Inspect(body, func(n ast.Node) bool {
+		if id, ok := n.(*ast.Ident); ok && info.Uses[id] == row && !fieldReads[id] {
+			all = true // the row escapes or is used whole: tt.M(), f(tt), tt := tt
+		}
+		return true
+	})
+	return all, fields
+}
+
+// tableWritten reports whether the table variable is used other than by its one definition, a
+// range over it, or len / cap: reassigned (tests = ...), its rows written (tests[0].want = ...), its
+// address taken, or passed on, any of which may change what the loop reads.
+func tableWritten(info *types.Info, body *ast.BlockStmt, table types.Object) bool {
+	allowed := map[*ast.Ident]bool{}
+	ast.Inspect(body, func(n ast.Node) bool {
+		switch n := n.(type) {
+		case *ast.RangeStmt:
+			if id, ok := ast.Unparen(n.X).(*ast.Ident); ok {
+				allowed[id] = true
+			}
+		case *ast.CallExpr:
+			if b, ok := info.Uses[identOf(n.Fun)].(*types.Builtin); ok && (b.Name() == "len" || b.Name() == "cap") && len(n.Args) == 1 {
+				if id, ok := ast.Unparen(n.Args[0]).(*ast.Ident); ok {
+					allowed[id] = true
+				}
+			}
+		}
+		return true
+	})
+	written := false
+	ast.Inspect(body, func(n ast.Node) bool {
+		if id, ok := n.(*ast.Ident); ok && info.Uses[id] == table && !allowed[id] {
+			written = true
+		}
+		return !written
+	})
+	return written
+}
+
+func identOf(e ast.Expr) *ast.Ident {
+	id, _ := ast.Unparen(e).(*ast.Ident)
+	return id
 }
 
 // ranges returns the loops over the table: over its variable or over the literal itself.
