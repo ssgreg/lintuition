@@ -2,6 +2,8 @@ package c
 
 import (
 	"errors"
+	"fmt"
+	"runtime"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
@@ -222,3 +224,53 @@ func TestValidateAcceptsLogged(t *testing.T) { // 29 candidate: a log before the
 		t.Fatal(err)
 	}
 }
+
+func TestValidateRejectsStop30(t *testing.T) { // 30 unsupported: t.Skip ends the test first
+	err := Validate("")
+	if err != nil {
+		t.Skip("unsupported by this backend")
+		t.Fatal(err)
+	}
+}
+
+func TestValidateRejectsStop31(t *testing.T) { // 31 unsupported: t.SkipNow ends the test first
+	err := Validate("")
+	if err != nil {
+		t.SkipNow()
+		t.Fatal(err)
+	}
+}
+
+func TestValidateRejectsStop32(t *testing.T) { // 32 unsupported: panic ends the test first
+	err := Validate("")
+	if err != nil {
+		panic(err)
+		t.Fatal(err)
+	}
+}
+
+func TestValidateRejectsStop33(t *testing.T) { // 33 unsupported: runtime.Goexit ends the goroutine first
+	err := Validate("")
+	if err != nil {
+		runtime.Goexit()
+		t.Fatal(err)
+	}
+}
+
+func TestValidateRejectsStop34(t *testing.T) { // 34 unsupported: a helper may end the test first
+	err := Validate("")
+	if err != nil {
+		helper(t)
+		t.Fatal(err)
+	}
+}
+
+func TestValidateRejectsStop35(t *testing.T) { // 35 unsupported: a log whose argument calls may not return
+	err := Validate("")
+	if err != nil {
+		t.Log(fmt.Sprint(err))
+		t.Fatal(err)
+	}
+}
+
+func helper(t *testing.T) { t.Skip("skip") }
