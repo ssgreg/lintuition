@@ -77,6 +77,19 @@ semantic:
     fake:
       unmatched: unclear
       rules: []
+    jev:
+      endpoint: https://api.typesafe.ai/v1/systemone
+      # Pin a version for reproducible results; jev-latest moves.
+      model: jev-latest
+      # The environment variable holding the API key.
+      api-key-env: TYPESAFE_API_KEY
+      # Per HTTP attempt.
+      timeout: 60s
+      # Retries for 429, 5xx and transport errors.
+      max-retries: 4
+      requests-per-minute: 1000
+      # USD per million input tokens, for estimates and budgets only.
+      price-per-mtok: 0.042
   # What may leave the machine: facts (structural facts only), prose (default: facts plus
   # person-written text such as comments, metric Help and log messages), source (adds Go source).
   payload: prose

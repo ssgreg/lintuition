@@ -142,7 +142,7 @@ func unclear(q sdk.Question) sdk.Answer {
 		half := 0.5
 		a.Yes = &half
 	case sdk.Score:
-		mid := (q.Min + q.Max) / 2
+		mid := float64(len(q.Levels)-1) / 2
 		a.Score = &mid
 	}
 	return a

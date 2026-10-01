@@ -99,9 +99,29 @@ as unsupported rather than silently dropped.
 | classifier | |
 |---|---|
 | `fake` | deterministic scripted answers, local; for tests and offline runs |
+| `jev` | [TypeSafe](https://typesafe.ai) System One models (Jev); remote, reads the API key from `TYPESAFE_API_KEY` |
 
-More backends are planned behind the same interface, for example [TypeSafe](https://typesafe.ai)
-System One models (Jev), a hosted LLM API or a local model.
+```yaml
+semantic:
+  classifier: jev
+  classifiers:
+    jev:
+      model: jev-1.13.0      # pin a version; jev-latest moves
+```
+
+Every candidate is its own request: neighbours in one request were measured to change answers.
+Requests are retried on 429 (honouring `Retry-After`) and 5xx, rate-limited, and capped by
+`semantic.budget`. Costs are estimates at the adapter's price assumption, not a bill. Errors never
+carry the request body or the key.
+
+To see exactly what would be sent, without sending it:
+
+```sh
+lintuition run --dry-run --preview requests.jsonl ./...
+```
+
+More backends (a hosted LLM API, a local model) can plug in behind the same `sdk.Classifier`
+interface.
 
 ## Plugins
 

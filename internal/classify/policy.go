@@ -131,8 +131,8 @@ func checkAnswer(q sdk.Question, a sdk.Answer) error {
 		if a.Score == nil || a.Choice != "" || a.Yes != nil || len(a.Probabilities) > 0 {
 			return fmt.Errorf("a score answer needs exactly a score")
 		}
-		if v := *a.Score; math.IsNaN(v) || v < q.Min || v > q.Max {
-			return fmt.Errorf("score %v is outside [%v, %v]", v, q.Min, q.Max)
+		if top := float64(len(q.Levels) - 1); math.IsNaN(*a.Score) || *a.Score < 0 || *a.Score > top {
+			return fmt.Errorf("score %v is outside [0, %v]", *a.Score, top)
 		}
 	}
 	return nil

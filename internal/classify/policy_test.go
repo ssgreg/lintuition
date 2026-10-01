@@ -36,7 +36,7 @@ func TestCheck(t *testing.T) {
 	qs := []sdk.Question{
 		{ID: "k", Kind: sdk.Choice, Text: "?", Options: []sdk.Option{{Key: "a"}, {Key: "b"}}},
 		{ID: "y", Kind: sdk.Noul, Text: "?"},
-		{ID: "s", Kind: sdk.Score, Text: "?", Min: 1, Max: 5},
+		{ID: "s", Kind: sdk.Score, Text: "?", Levels: []string{"a", "b", "c", "d", "e"}},
 	}
 	f := func(v float64) *float64 { return &v }
 	ok := []sdk.Answer{{QuestionID: "k", Choice: "unclear"}, {QuestionID: "y", Yes: f(0.3)}, {QuestionID: "s", Score: f(2)}}
@@ -48,7 +48,7 @@ func TestCheck(t *testing.T) {
 		"not an option":    {{QuestionID: "k", Choice: "c"}, ok[1], ok[2]},
 		"unknown option":   {{QuestionID: "k", Choice: "a", Probabilities: map[string]float64{"z": 0.1}}, ok[1], ok[2]},
 		"outside [0, 1]":   {ok[0], {QuestionID: "y", Yes: f(1.5)}, ok[2]},
-		"outside [1, 5]":   {ok[0], ok[1], {QuestionID: "s", Score: f(9)}},
+		"outside [0, 4]":   {ok[0], ok[1], {QuestionID: "s", Score: f(9)}},
 		"exactly a yes":    {ok[0], {QuestionID: "y"}, ok[2]},
 		"exactly a score":  {ok[0], ok[1], {QuestionID: "s"}},
 		"carries a yes":    {{QuestionID: "k", Choice: "a", Yes: f(1)}, ok[1], ok[2]},

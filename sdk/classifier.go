@@ -16,7 +16,7 @@ const (
 	Choice Kind = "choice"
 	// Noul answers a yes/no question with the probability of yes.
 	Noul Kind = "noul"
-	// Score rates the state on a declared numeric range.
+	// Score places the state on ordered levels and returns a position from 0 to len(Levels)-1.
 	Score Kind = "score"
 )
 
@@ -38,8 +38,8 @@ type Question struct {
 	Text string
 	// Options are the answers of a Choice question; an Unclear option is added if absent.
 	Options []Option
-	// Min and Max are the range of a Score question.
-	Min, Max float64
+	// Levels are the ordered level descriptions of a Score question, lowest first (2 to 10).
+	Levels []string
 }
 
 // Validate reports a malformed question.
@@ -61,8 +61,8 @@ func (q Question) Validate() error {
 		}
 	case Noul:
 	case Score:
-		if q.Min >= q.Max {
-			return fmt.Errorf("question %q: score range [%v, %v] is empty", q.ID, q.Min, q.Max)
+		if len(q.Levels) < 2 || len(q.Levels) > 10 {
+			return fmt.Errorf("question %q: a score needs 2 to 10 levels", q.ID)
 		}
 	default:
 		return fmt.Errorf("question %q: unknown kind %q", q.ID, q.Kind)
@@ -90,7 +90,8 @@ type Answer struct {
 	// Yes is the probability of yes for a Noul question; nil for any other kind. A pointer, so a
 	// missing value is not read as 0.
 	Yes *float64
-	// Score is the value of a Score question; nil for any other kind.
+	// Score is the position of a Score question, from 0 to len(Levels)-1, possibly fractional;
+	// nil for any other kind.
 	Score *float64
 	// Confidence is what the backend reports as its confidence, and ConfidenceMeaning says what that
 	// number is. A threshold must name the field it reads; the two are not interchangeable.
@@ -105,6 +106,9 @@ const (
 	ConfidenceNone       ConfidenceMeaning = ""
 	ConfidenceProvider   ConfidenceMeaning = "provider-probability"
 	ConfidenceSelfReport ConfidenceMeaning = "self-reported"
+	// ConfidenceSummary is a provider's summary of its own answer distribution; it is not the
+	// probability of the picked option and not a measure of correctness.
+	ConfidenceSummary ConfidenceMeaning = "provider-summary"
 )
 
 // Probability returns the probability of the given option, and false if the backend gave none.

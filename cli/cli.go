@@ -90,6 +90,7 @@ func runCmd(code *int) *cobra.Command {
 		buildTags   []string
 		exitCode    int
 		dryRun      bool
+		preview     string
 		textPath    string
 		jsonPath    string
 		payload     string
@@ -149,7 +150,19 @@ func runCmd(code *int) *cobra.Command {
 			}
 			ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt)
 			defer stop()
-			res, err := engine.Run(ctx, engine.Options{Config: c, Patterns: args, DryRun: dryRun, Log: cmd.ErrOrStderr()})
+			opts := engine.Options{Config: c, Patterns: args, DryRun: dryRun, Log: cmd.ErrOrStderr()}
+			if preview != "" {
+				if !dryRun {
+					return errors.New("--preview needs --dry-run")
+				}
+				f, err := os.OpenFile(preview, os.O_CREATE|os.O_TRUNC|os.O_WRONLY, 0o600)
+				if err != nil {
+					return err
+				}
+				defer f.Close()
+				opts.Preview = f
+			}
+			res, err := engine.Run(ctx, opts)
 			if err != nil {
 				return err
 			}
@@ -176,6 +189,7 @@ func runCmd(code *int) *cobra.Command {
 	f.StringSliceVar(&buildTags, "build-tags", nil, "build tags")
 	f.IntVar(&exitCode, "issues-exit-code", 1, "exit code when issues are found")
 	f.BoolVar(&dryRun, "dry-run", false, "extract and plan requests, send none")
+	f.StringVar(&preview, "preview", "", "with --dry-run: write every planned request, as it would be sent, to this file (JSON lines)")
 	f.StringVar(&textPath, "output.text.path", "", "text output: stdout, stderr or a file path")
 	f.StringVar(&jsonPath, "output.json.path", "", "JSON output: stdout, stderr or a file path")
 	f.StringVar(&payload, "payload", "", "what may leave the machine: facts, prose, source")
@@ -205,7 +219,7 @@ func summary(w io.Writer, res *engine.Result, dryRun, stats bool) {
 		fmt.Fprintf(w, "%d issue(s). %d packages, %d candidates: %d asked, %d abstained, %d skipped, %d unsupported, %d failed. %d requests",
 			len(res.Issues), res.Run.Stats.Packages, cand, asked, abst, skip, unsup, fail, res.Run.Stats.Requests)
 		if res.Run.Stats.CostUSD > 0 {
-			fmt.Fprintf(w, ", $%.4f", res.Run.Stats.CostUSD)
+			fmt.Fprintf(w, ", ~$%.6f at the backend's price assumption", res.Run.Stats.CostUSD)
 		}
 		fmt.Fprintln(w)
 	}

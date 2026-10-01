@@ -27,6 +27,8 @@ type LinterStatus struct {
 	Asked      int    `json:"Asked"`
 	Abstained  int    `json:"Abstained"`
 	Skipped    int    `json:"Skipped"`
+	// SkippedBy breaks Skipped down by reason: excluded, generated, payload-policy, no-questions.
+	SkippedBy map[string]int `json:"SkippedBy,omitempty"`
 	// Unsupported counts shapes the analyzer saw but could not extract facts for.
 	Unsupported int `json:"Unsupported"`
 	// Planned counts the requests a dry run would have sent.
@@ -150,4 +152,13 @@ func writeJSON(w io.Writer, issues []Issue, run Run) error {
 	out.Report.Lintuition = run
 	enc := json.NewEncoder(w)
 	return enc.Encode(out)
+}
+
+// Skip counts a skipped candidate under its reason.
+func (s *LinterStatus) Skip(reason string) {
+	s.Skipped++
+	if s.SkippedBy == nil {
+		s.SkippedBy = map[string]int{}
+	}
+	s.SkippedBy[reason]++
 }
