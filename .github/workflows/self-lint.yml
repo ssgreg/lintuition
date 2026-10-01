@@ -27,35 +27,47 @@ jobs:
     permissions:
       contents: read
       security-events: write
-    env:
-      TYPESAFE_API_KEY: ${{ secrets.TYPESAFE_API_KEY }}
     steps:
       - name: skip without the key
         id: key
+        env:
+          TYPESAFE_API_KEY: ${{ secrets.TYPESAFE_API_KEY }}
         run: |
           if [ -z "$TYPESAFE_API_KEY" ]; then echo "TYPESAFE_API_KEY is not set; skipping"; echo "skip=true" >> "$GITHUB_OUTPUT"; fi
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
         if: steps.key.outputs.skip != 'true'
-      - uses: actions/setup-go@v5
+      - uses: actions/setup-go@40f1582b2485089dde7abd97c1529aa768e1baff # v5.6.0
         if: steps.key.outputs.skip != 'true'
         with:
-          go-version-file: go.mod
-      - name: answer cache
+          # The newest 1.26 patch, for the standard library's security fixes; go.mod keeps 1.26.0 as
+          # the minimum users need.
+          go-version: "1.26"
+          check-latest: true
+      - name: restore the answer cache
         if: steps.key.outputs.skip != 'true'
-        uses: actions/cache@v4
+        uses: actions/cache/restore@0057852bfaa89a56745cba8c7296529d2fc39830 # v4.3.0
         with:
           path: ${{ runner.temp }}/lintuition-cache
           key: lintuition-answers-${{ github.run_id }}
           restore-keys: lintuition-answers-
       - name: lintuition
         if: steps.key.outputs.skip != 'true'
+        env:
+          TYPESAFE_API_KEY: ${{ secrets.TYPESAFE_API_KEY }}
         run: |
           go build -o "$RUNNER_TEMP/lintuition" ./cmd/lintuition
           cat .github/lintuition.yml > "$RUNNER_TEMP/self.yml"
           printf '  cache:\n    dir: %s\n' "$RUNNER_TEMP/lintuition-cache" >> "$RUNNER_TEMP/self.yml"
           "$RUNNER_TEMP/lintuition" run -c "$RUNNER_TEMP/self.yml" \
             --output.text.path stdout --output.sarif.path lintuition.sarif --output.github-actions.path stderr ./...
-      - uses: github/codeql-action/upload-sarif@v3
+      # Saved even when the run failed (a spent budget, say): those answers were paid for.
+      - name: save the answer cache
+        if: always() && steps.key.outputs.skip != 'true'
+        uses: actions/cache/save@0057852bfaa89a56745cba8c7296529d2fc39830 # v4.3.0
+        with:
+          path: ${{ runner.temp }}/lintuition-cache
+          key: lintuition-answers-${{ github.run_id }}
+      - uses: github/codeql-action/upload-sarif@1190a975f95ce23525efb6a3fc21ea29567c1b52 # v3.38.2
         if: always() && steps.key.outputs.skip != 'true' && hashFiles('lintuition.sarif') != ''
         with:
           sarif_file: lintuition.sarif

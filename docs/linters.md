@@ -62,8 +62,9 @@ IsExpired", "value cfg.Password, type string") as facts.
 
 So what leaves is the text the linter is about: a Help string, a log or error message, a printf
 format, a comment, a test or case name, a nolint reason. These are string literals in your code, and
-they are sent. What is never sent is Go source, and the value of anything your code logs or passes
-around: a logged field is described by where its value comes from, not by its value. `semantic.payload: facts` sends structural facts only and skips every
+they are sent. What the built-in linters never send is Go source, and the value of anything your code logs or
+passes around: a logged field is described by where its value comes from, not by its value. A plugin
+linter could ask to send source; only `semantic.payload: source` lets that through. `semantic.payload: facts` sends structural facts only and skips every
 linter that needs prose; `lintuition run --dry-run --preview requests.jsonl` shows exactly what would
 be sent.
 

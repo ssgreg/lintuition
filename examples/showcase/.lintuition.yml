@@ -9,9 +9,8 @@ issues:
   uniq-by-line: false
 
 # Offline: scripted answers, the ones a real classifier gives for these texts. Anything not
-# scripted is answered "unclear", so the rule abstains. To run against a real classifier, copy
-# .lintuition.quickstart.yml from the repository root to jev.yml here, set `linters: default: all`
-# and run `lintuition run -c jev.yml ./...`.
+# scripted is answered "unclear", so the rule abstains. To run against a real classifier, see the
+# README's showcase section for a jev.yml.
 semantic:
   classifier: fake
   classifiers:

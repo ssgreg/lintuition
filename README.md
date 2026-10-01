@@ -123,7 +123,19 @@ each is caught. To watch them with a real classifier:
 ```sh
 cd examples/showcase
 lintuition run ./...              # offline, scripted answers
-lintuition run -c jev.yml ./...   # jev.yml: the quick-start config, classifier jev
+
+cat > jev.yml <<'YAML'
+version: "2"
+linters:
+  default: all
+issues:
+  uniq-by-line: false
+semantic:
+  classifier: jev
+  budget:
+    max-cost-usd: 0.05
+YAML
+TYPESAFE_API_KEY=... lintuition run -c jev.yml ./...
 ```
 
 | linter | checks |
