@@ -5,6 +5,7 @@ package sdk
 
 import (
 	"context"
+	"errors"
 	"fmt"
 )
 
@@ -128,24 +129,30 @@ type Request struct {
 	Linter    string
 	State     map[string]any
 	Questions []Question
-	// Retry, when set, must be called before every retry of a transport attempt; an error means the
-	// run's budget does not allow it, and the classifier must stop and return an error.
+	// Start, when set, must be called right before every call goes out, the first included, after
+	// any waiting of the backend's own (a queue, a rate limit). An error (wrapping ErrBudget) means the
+	// budget is spent: the backend must not make the call and must return the error.
+	Start func() error
+	// Retry, when set, must be called before every retry of a call, before its Start; an error means
+	// the budget does not allow it, and the classifier must stop and return the error.
 	Retry func() error
-	// Next, when set, must be called by a backend with CallsPerQuestion before each question's call
-	// after the first. The call was reserved; an error means the budget was spent meanwhile and the
-	// backend must stop and return an error.
-	Next func() error
 	// Used, when set, should be called with each call's usage as soon as it is known, also when the
-	// answer is then rejected, so the run's cost is right and the next call can be stopped in time.
-	// When a backend calls Used, the engine ignores Response.Usage.
+	// answer is then rejected or the call failed, so the run's cost is right and the next call can be
+	// stopped in time. When a backend calls Used, the engine ignores Response.Usage.
 	Used func(Usage)
 }
+
+// ErrBudget is wrapped by the errors Start and Retry return when the run's budget is spent.
+var ErrBudget = errors.New("the budget is spent")
 
 // Usage is what a request cost.
 type Usage struct {
 	InputTokens int
 	// CostUSD is the backend's estimate under its price assumption; zero when unknown.
 	CostUSD float64
+	// Unknown says the call's cost could not be determined (the backend reported none, or nonsense).
+	// Under a money cap the run then stops spending: it cannot tell how much is left.
+	Unknown bool
 }
 
 // Response holds one answer per question, in any order.

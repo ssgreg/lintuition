@@ -8,6 +8,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"math"
 	"os"
 	"os/signal"
 	"path/filepath"
@@ -530,6 +531,9 @@ func evalCmd() *cobra.Command {
 		RunE: func(cmd *cobra.Command, args []string) error {
 			if runs < 1 || runs > 20 {
 				return errors.New("--runs must be 1 to 20")
+			}
+			if math.IsNaN(maxCost) || math.IsInf(maxCost, 0) || maxCost < 0 {
+				return fmt.Errorf("--max-cost-usd %v: must be a finite number, 0 (no cap) or more", maxCost)
 			}
 			dir, err := filepath.Abs(args[0])
 			if err != nil {

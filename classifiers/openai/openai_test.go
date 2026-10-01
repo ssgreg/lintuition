@@ -147,7 +147,13 @@ func TestExtraQuestionsSpendBudget(t *testing.T) {
 	c := newTest(t, s.URL)
 	r := req
 	r.Questions = []sdk.Question{{ID: "a", Kind: sdk.Noul, Text: "?"}, {ID: "b", Kind: sdk.Noul, Text: "?"}}
-	r.Next = func() error { return context.Canceled }
+	n := 0
+	r.Start = func() error {
+		if n++; n > 1 {
+			return context.Canceled
+		}
+		return nil
+	}
 	if _, err := c.Classify(context.Background(), r); err == nil || len(*bodies) != 1 {
 		t.Fatalf("the second question's completion must be cleared with the budget: %v, %d sent", err, len(*bodies))
 	}

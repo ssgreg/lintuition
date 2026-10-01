@@ -279,18 +279,14 @@ func (c *Classifier) Classify(ctx context.Context, req sdk.Request) (sdk.Respons
 		}
 	}
 	var resp sdk.Response
-	for i, q := range req.Questions {
-		// The caller reserved one call per question; it may have spent the budget since.
-		if i > 0 && req.Next != nil {
-			if err := req.Next(); err != nil {
-				return sdk.Response{}, err
-			}
-		}
+	for _, q := range req.Questions {
+		// The caller reserved one call per question; Start, inside Post, checks the budget again
+		// right before each goes out.
 		body, err := c.body(req.State, q)
 		if err != nil {
 			return sdk.Response{}, err
 		}
-		raw, err := c.hc.Post(ctx, body, header, req.Retry)
+		raw, err := c.hc.Post(ctx, body, header, req.Retry, req.Start)
 		if err != nil {
 			return sdk.Response{}, err
 		}

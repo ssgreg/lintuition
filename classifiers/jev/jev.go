@@ -191,7 +191,7 @@ func (c *Classifier) Classify(ctx context.Context, req sdk.Request) (sdk.Respons
 	if err := c.Ready(); err != nil {
 		return sdk.Response{}, err
 	}
-	raw, err := c.hc.Post(ctx, body, http.Header{"Authorization": {"Bearer " + c.key}}, req.Retry)
+	raw, err := c.hc.Post(ctx, body, http.Header{"Authorization": {"Bearer " + c.key}}, req.Retry, req.Start)
 	if err != nil {
 		return sdk.Response{}, err
 	}

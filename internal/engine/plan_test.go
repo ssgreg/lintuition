@@ -21,11 +21,9 @@ func (p *perQuestion) Capabilities() sdk.Capabilities {
 
 func (p *perQuestion) Classify(_ context.Context, req sdk.Request) (sdk.Response, error) {
 	var resp sdk.Response
-	for i, q := range req.Questions {
-		if i > 0 {
-			if err := req.Next(); err != nil {
-				return sdk.Response{}, err
-			}
+	for _, q := range req.Questions {
+		if err := req.Start(); err != nil {
+			return sdk.Response{}, err
 		}
 		p.calls++
 		req.Used(sdk.Usage{CostUSD: p.cost})
@@ -75,7 +73,7 @@ func TestCostStopsTheNextQuestion(t *testing.T) {
 	r := newRunner(cl, false, config.Budget{MaxCostUSD: 100}, 1)
 	j := newJob()
 	r.do(context.Background(), []*job{j})
-	if j.err == nil || cl.calls != 1 || r.cost != 100 || r.sent != 1 {
+	if (j.err == nil && !j.notAsked) || cl.calls != 1 || r.cost != 100 || r.sent != 1 {
 		t.Fatalf("the first call spent the budget; the second must not go: err %v calls %d cost %v sent %d", j.err, cl.calls, r.cost, r.sent)
 	}
 }

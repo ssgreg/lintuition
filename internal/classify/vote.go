@@ -30,7 +30,7 @@ func Vote(qs []sdk.Question, samples []map[string]sdk.Answer) (map[string]sdk.An
 	n := len(samples)
 	out := map[string]sdk.Answer{}
 	for _, q := range qs {
-		a := sdk.Answer{QuestionID: q.ID}
+		a := sdk.Answer{QuestionID: q.ID, ConfidenceMeaning: samples[0][q.ID].ConfidenceMeaning}
 		switch q.Kind {
 		case sdk.Choice:
 			count := map[string]int{}

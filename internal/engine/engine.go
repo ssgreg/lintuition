@@ -9,6 +9,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"math"
 	"os"
 	"path/filepath"
 	"sort"
@@ -106,7 +107,7 @@ func Run(ctx context.Context, o Options) (*Result, error) {
 	}
 
 	var cache *classify.Cache
-	if _, ok := cl.(classify.Identifier); ok && !c.Semantic.Cache.Disabled {
+	if id, ok := cl.(classify.Identifier); ok && !c.Semantic.Cache.Disabled && id.Identity() != "" {
 		dir := c.Semantic.Cache.Dir
 		if dir == "" {
 			if dir, err = classify.DefaultCacheDir(); err != nil {
@@ -252,14 +253,15 @@ type runner struct {
 	previewW io.Writer
 	log      io.Writer
 
-	mu       sync.Mutex
-	requests int // reserved
-	sent     int // attempted
-	hits     int
-	tokens   int
-	texts    map[string]string
-	cost     float64
-	capped   string
+	mu          sync.Mutex
+	requests    int // reserved
+	sent        int // attempted
+	hits        int
+	tokens      int
+	texts       map[string]string
+	unknownCost int
+	cost        float64
+	capped      string
 }
 
 func (r *runner) do(ctx context.Context, jobs []*job) {
@@ -402,6 +404,25 @@ func (r *runner) spent() bool {
 	return false
 }
 
+// used accounts one call's usage. Usage that is unknown or nonsense (negative, not finite) cannot be
+// counted against a money cap: under one, the run stops spending, since it cannot tell what is left.
+func (r *runner) used(u sdk.Usage) {
+	bad := u.Unknown || u.InputTokens < 0 || math.IsNaN(u.CostUSD) || math.IsInf(u.CostUSD, 0) || u.CostUSD < 0
+	r.mu.Lock()
+	if bad {
+		r.unknownCost++
+		if r.budget.MaxCostUSD > 0 && r.capped == "" {
+			r.capped = "a call's cost is unknown, so semantic.budget.max-cost-usd cannot be kept"
+		}
+		r.mu.Unlock()
+		return
+	}
+	r.tokens += u.InputTokens
+	r.cost += u.CostUSD
+	r.mu.Unlock()
+	r.overCost()
+}
+
 // overCost reports, and records as the reason the run is incomplete, that the observed cost has
 // passed semantic.budget.max-cost-usd. A response that lands exactly on the cap is within it.
 func (r *runner) overCost() bool {
@@ -445,53 +466,55 @@ func (r *runner) ask(ctx context.Context, j *job, req sdk.Request) {
 		r.sent++
 		r.mu.Unlock()
 	}
-	req.Retry = func() error {
-		if !r.reserve(1) {
-			return errors.New(r.capped)
+	calls := 0 // calls started for the current sample
+	req.Start = func() error {
+		// Right before a call goes out, after the backend's own queues: the cost may be spent by now.
+		if r.spent() {
+			return fmt.Errorf("%w: %s", sdk.ErrBudget, r.cappedReason())
 		}
+		calls++
 		count()
 		return nil
 	}
-	req.Next = func() error {
-		// Reserved with the candidate; only the cost may have run out since.
-		if r.spent() {
-			return errors.New(r.capped)
+	req.Retry = func() error {
+		if !r.reserve(1) {
+			return fmt.Errorf("%w: %s", sdk.ErrBudget, r.cappedReason())
 		}
-		count()
 		return nil
 	}
 	reported := false
 	req.Used = func(u sdk.Usage) {
 		reported = true
-		r.mu.Lock()
-		r.tokens += u.InputTokens
-		r.cost += u.CostUSD
-		r.mu.Unlock()
+		r.used(u)
 		bd.Usage.InputTokens += u.InputTokens
 		bd.Usage.CostUSD += u.CostUSD
-		r.overCost()
 	}
 	for i := range r.votes {
 		// The cost of the samples already back may have spent the budget; a vote with missing
 		// samples is not a vote, so the candidate fails rather than deciding on fewer.
-		// Checked before every sample, the first included: another candidate may have spent the
-		// budget while this one waited for a worker.
 		if r.spent() {
 			if i == 0 {
 				j.notAsked = true
 			} else {
-				j.err = errors.New("not all samples sent: " + r.capped)
+				j.err = errors.New("not all samples sent: " + r.cappedReason())
 			}
 			return
 		}
-		count()
-		reported = false
+		calls, reported = 0, false
 		resp, err := r.cl.Classify(ctx, req)
+		if calls == 0 && !(err != nil && errors.Is(err, sdk.ErrBudget)) {
+			// A backend that does not call Start: count the call it made.
+			count()
+		}
 		if !reported {
 			// A backend that does not report per call: account what it returned, even with an error.
 			req.Used(resp.Usage)
 		}
 		if err != nil {
+			if errors.Is(err, sdk.ErrBudget) && i == 0 && calls == 0 {
+				j.notAsked = true
+				return
+			}
 			j.err = fmt.Errorf("classifier %s: %w", r.clName, err)
 			return
 		}
@@ -545,10 +568,14 @@ func (r *runner) cappedReason() string {
 func (r *runner) problems() []string {
 	r.mu.Lock()
 	defer r.mu.Unlock()
+	var out []string
 	if r.capped != "" {
-		return []string{r.capped + "; some candidates were not asked"}
+		out = append(out, r.capped)
 	}
-	return nil
+	if r.unknownCost > 0 {
+		out = append(out, fmt.Sprintf("%d call(s) reported no usable cost; the run's cost is a lower bound", r.unknownCost))
+	}
+	return out
 }
 
 func evidence(cl, model, version string, j *job) *report.Evidence {
@@ -558,6 +585,15 @@ func evidence(cl, model, version string, j *job) *report.Evidence {
 		Samples: j.samples, Replayed: j.replayed, Agreement: j.agreement, PerSample: j.perSample,
 	}
 	for id, a := range j.answers {
+		if a.ConfidenceMeaning != "" {
+			if ev.Support == nil {
+				ev.Support, ev.Confidence = map[string]string{}, map[string]float64{}
+			}
+			ev.Support[id] = string(a.ConfidenceMeaning)
+			if a.Confidence != nil {
+				ev.Confidence[id] = *a.Confidence
+			}
+		}
 		switch {
 		case a.Choice != "":
 			ev.Answers[id] = a.Choice

@@ -138,8 +138,11 @@ semantic:
       reasoning-effort: low
       timeout: 180s
       max-parallel: 2
-      # Codex reports tokens, not cost; set a price to estimate it.
+      # Codex reports tokens, not cost; set a price to estimate it and to allow a money cap.
       price-per-mtok: 0
+      # Required to run codex: the Codex CLI keeps a read-only command tool that cannot be switched
+      # off, so text in the payload could make it read your files. Default: false.
+      accept-agent-tools: false
   # What may leave the machine: facts (structural facts only), prose (default: facts plus
   # person-written text such as comments, metric Help and log messages), source (adds Go source).
   payload: prose

@@ -223,11 +223,17 @@ semantic:
       max-parallel: 4
     codex:
       reasoning-effort: low
+      accept-agent-tools: true   # required, see below
+      price-per-mtok: 1.25       # needed for a money cap
 ```
 
 These runs leave the machine under the CLI's login. Claude Code runs with no tools, no MCP servers,
-no settings and no saved session; Codex runs in its read-only sandbox with no saved session; both
-start in an empty directory. Their probabilities are the model's own statement, not token
+no settings and no saved session. Codex runs with a fresh `CODEX_HOME` that holds only a link to its
+login (no user config, AGENTS.md, MCP servers, plugins or memories), with every optional tool
+feature off, in its read-only sandbox. The Codex CLI still keeps a command tool that cannot be
+switched off, so a model swayed by text in the payload could read files you can read; `codex`
+refuses to run until `accept-agent-tools: true` says you accept that. Both start in an empty
+directory. Their probabilities are the model's own statement, not token
 probabilities: they are recorded as self-reported, and a threshold tuned on another backend does
 not carry over. Every question is a full agent run, so they are slower and dearer than a
 classifier API; they suit evaluation and small projects better than a large CI run.

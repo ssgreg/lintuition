@@ -13,10 +13,13 @@
 // they are reported as self-reported, and thresholds tuned on another backend do not carry over.
 //
 // The runs leave the machine (to Anthropic or OpenAI) under the CLI's own login. Claude Code runs
-// with no tools, no MCP servers, no settings and no saved session; Codex runs in its read-only
-// sandbox, which also blocks the network for commands, without saved sessions. Both start in a
-// fresh empty directory. The state is passed as data and the harness says so, but a model can
-// still be swayed by text in it; the answer can only be one of the offered labels and numbers.
+// with no tools, no MCP servers, no settings and no saved session. Codex runs with a fresh
+// CODEX_HOME that holds only a link to its login (no user config, AGENTS.md, MCP servers, plugins
+// or memories), with every optional tool feature off and in its read-only sandbox; but the Codex
+// CLI keeps a command tool that cannot be switched off, so a model swayed by text in the payload
+// could read files the user can read. That is why codex refuses to run until accept-agent-tools is
+// set. Both start in a fresh empty directory. The answer can only be one of the offered labels and
+// numbers.
 package agentcli
 
 import (
@@ -25,6 +28,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
 	"math"
 	"os"
 	"os/exec"
@@ -34,6 +38,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/ssgreg/lintuition/internal/httpx"
 	"github.com/ssgreg/lintuition/sdk"
 )
 
@@ -61,6 +66,9 @@ type Settings struct {
 	MaxParallel int `yaml:"max-parallel"`
 	// PricePerMTok estimates cost from input tokens where the CLI reports no cost (codex).
 	PricePerMTok *float64 `yaml:"price-per-mtok"`
+	// AcceptAgentTools acknowledges that codex keeps a read-only command tool (see the package
+	// doc); codex does not run without it.
+	AcceptAgentTools bool `yaml:"accept-agent-tools"`
 }
 
 func init() {
@@ -94,8 +102,9 @@ type Classifier struct {
 	price   float64
 	slots   chan struct{}
 
-	versionOnce sync.Once
-	version     string
+	acceptTools bool
+	identOnce   sync.Once
+	identity    string
 
 	// run executes the CLI; tests replace it.
 	run func(ctx context.Context, dir string, args []string) (stdout []byte, err error)
@@ -107,7 +116,10 @@ func New(name string, s Settings) (*Classifier, error) {
 	if name == codex.name {
 		k = codex
 	}
-	c := &Classifier{kind: k, command: s.Command, model: s.Model, effort: s.ReasoningEffort, timeout: 180 * time.Second}
+	c := &Classifier{kind: k, command: s.Command, model: s.Model, effort: s.ReasoningEffort, timeout: 180 * time.Second, acceptTools: s.AcceptAgentTools}
+	if s.AcceptAgentTools && k != codex {
+		return nil, errors.New("accept-agent-tools is a codex setting")
+	}
 	if c.command == "" {
 		c.command = k.command
 	}
@@ -144,24 +156,41 @@ func New(name string, s Settings) (*Classifier, error) {
 	return c, nil
 }
 
-// Ready reports whether the CLI can be found.
+// Ready reports whether the CLI can be found, and for codex whether its command tool is accepted.
 func (c *Classifier) Ready() error {
 	if _, err := exec.LookPath(c.command); err != nil {
 		return fmt.Errorf("%s: %w", c.command, err)
+	}
+	if c.kind == codex && !c.acceptTools {
+		return errors.New("the Codex CLI keeps a read-only command tool that cannot be switched off, so text in the payload could make it read your files; set accept-agent-tools: true to run it anyway")
 	}
 	return nil
 }
 
 // Identity names what decides an answer besides the request, for the answer cache: the backend,
-// the CLI version, the model and the harness.
+// the resolved executable and its version, the model and the harness. When the version cannot be
+// read in time, it is empty: answers from an executable that cannot be named are not cached.
 func (c *Classifier) Identity() string {
-	c.versionOnce.Do(func() {
-		out, err := exec.Command(c.command, "--version").Output()
-		if err == nil {
-			c.version = strings.TrimSpace(firstLine(string(out)))
+	c.identOnce.Do(func() {
+		path, err := exec.LookPath(c.command)
+		if err != nil {
+			return
 		}
+		if real, err := filepath.EvalSymlinks(path); err == nil {
+			path = real
+		}
+		ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+		defer cancel()
+		cmd := exec.CommandContext(ctx, path, "--version")
+		cmd.WaitDelay = time.Second
+		out, err := cmd.Output()
+		v := strings.TrimSpace(firstLine(string(out)))
+		if err != nil || v == "" {
+			return
+		}
+		c.identity = fmt.Sprintf("%s/%s|%s|%s|%s|effort=%s", c.kind.name, adapterVersion, path, v, c.model, c.effort)
 	})
-	return fmt.Sprintf("%s/%s|%s|%s|effort=%s", c.kind.name, adapterVersion, c.version, c.model, c.effort)
+	return c.identity
 }
 
 // Model is the public model identity for report evidence.
@@ -244,8 +273,16 @@ func (c *Classifier) args(dir, prompt string, schemaJSON []byte) ([]string, erro
 		if err := os.WriteFile(sp, schemaJSON, 0o600); err != nil {
 			return nil, err
 		}
-		a := []string{"exec", "--skip-git-repo-check", "--ephemeral", "--sandbox", "read-only", "--ignore-rules",
-			"--output-schema", sp, "-o", filepath.Join(dir, "answer.json"), "-C", dir, "--json"}
+		work := filepath.Join(dir, "work")
+		if err := os.Mkdir(work, 0o700); err != nil {
+			return nil, err
+		}
+		a := []string{"exec", "--skip-git-repo-check", "--ephemeral", "--sandbox", "read-only", "--ignore-user-config", "--ignore-rules",
+			"-c", "project_doc_max_bytes=0", "-c", `web_search="disabled"`,
+			"--output-schema", sp, "-o", filepath.Join(dir, "answer.json"), "-C", work, "--json"}
+		for _, f := range codexOff {
+			a = append(a, "-c", "features."+f+"=false")
+		}
 		if c.model != "" {
 			a = append(a, "-m", c.model)
 		}
@@ -257,22 +294,61 @@ func (c *Classifier) args(dir, prompt string, schemaJSON []byte) ([]string, erro
 	}
 }
 
+// codexOff are the Codex features that add tools, integrations or outside context; all are turned
+// off. The command tool itself cannot be (see the package doc).
+var codexOff = []string{"shell_tool", "unified_exec", "unified_exec_tty", "shell_snapshot", "apps", "browser_use",
+	"browser_use_external", "browser_use_full_cdp_access", "computer_use", "image_generation", "multi_agent", "plugins",
+	"remote_plugin", "plugin_sharing", "hooks", "view_image", "skill_search", "skill_mcp_dependency_install", "tool_suggest",
+	"tool_call_mcp_elicitation", "sleep_tool", "goals", "in_app_browser", "in_app_local_automation", "worktrees",
+	"workspace_dependencies", "code_mode_host"}
+
+// exec runs the CLI. stdout is returned with a failure too: a run that exits non-zero may still
+// report what it cost.
 func (c *Classifier) exec(ctx context.Context, dir string, args []string) ([]byte, error) {
 	ctx, cancel := context.WithTimeout(ctx, c.timeout)
 	defer cancel()
 	cmd := exec.CommandContext(ctx, c.command, args...)
 	cmd.Dir = dir
 	cmd.Stdin = nil // /dev/null: codex otherwise waits for more prompt on stdin
+	cmd.WaitDelay = 5 * time.Second
+	if c.kind == codex {
+		home, err := codexHome(dir)
+		if err != nil {
+			return nil, err
+		}
+		cmd.Env = append(os.Environ(), "CODEX_HOME="+home)
+	}
 	var out, errb bytes.Buffer
 	cmd.Stdout, cmd.Stderr = &out, &errb
 	if err := cmd.Run(); err != nil {
 		if ctx.Err() != nil {
-			return nil, fmt.Errorf("%s did not answer within %s", c.kind.name, c.timeout)
+			return out.Bytes(), fmt.Errorf("%s did not answer within %s", c.kind.name, c.timeout)
 		}
 		// stderr can quote the prompt; keep only that the run failed.
-		return nil, fmt.Errorf("%s exited with %v", c.kind.name, err)
+		return out.Bytes(), fmt.Errorf("%s exited with %v", c.kind.name, err)
 	}
 	return out.Bytes(), nil
+}
+
+// codexHome makes a CODEX_HOME for one run that holds only a link to the user's login, so no user
+// config, AGENTS.md, MCP server, plugin or memory reaches the run. The login itself is not copied.
+func codexHome(dir string) (string, error) {
+	src := os.Getenv("CODEX_HOME")
+	if src == "" {
+		h, err := os.UserHomeDir()
+		if err != nil {
+			return "", err
+		}
+		src = filepath.Join(h, ".codex")
+	}
+	home := filepath.Join(dir, "codex-home")
+	if err := os.Mkdir(home, 0o700); err != nil {
+		return "", err
+	}
+	if err := os.Symlink(filepath.Join(src, "auth.json"), filepath.Join(home, "auth.json")); err != nil {
+		return "", err
+	}
+	return home, nil
 }
 
 // Body is the prompt and schema of every run of a request, for the preview.
@@ -292,12 +368,7 @@ func (c *Classifier) Body(req sdk.Request) ([]byte, error) {
 // Classify implements sdk.Classifier: one CLI run per question.
 func (c *Classifier) Classify(ctx context.Context, req sdk.Request) (sdk.Response, error) {
 	var resp sdk.Response
-	for i, q := range req.Questions {
-		if i > 0 && req.Next != nil {
-			if err := req.Next(); err != nil {
-				return sdk.Response{}, err
-			}
-		}
+	for _, q := range req.Questions {
 		a, err := c.one(ctx, req, q)
 		if err != nil {
 			return sdk.Response{}, fmt.Errorf("question %q: %w", q.ID, err)
@@ -314,6 +385,12 @@ func (c *Classifier) one(ctx context.Context, req sdk.Request, q sdk.Question) (
 		return sdk.Answer{}, ctx.Err()
 	}
 	defer func() { <-c.slots }()
+	// Admission after the wait for a slot: the budget may have run out meanwhile.
+	if req.Start != nil {
+		if err := req.Start(); err != nil {
+			return sdk.Answer{}, err
+		}
+	}
 	dir, err := os.MkdirTemp("", "lintuition-"+c.kind.name+"-")
 	if err != nil {
 		return sdk.Answer{}, err
@@ -331,13 +408,14 @@ func (c *Classifier) one(ctx context.Context, req sdk.Request, q sdk.Question) (
 	if err != nil {
 		return sdk.Answer{}, err
 	}
-	stdout, err := c.run(ctx, dir, args)
-	if err != nil {
-		return sdk.Answer{}, err
-	}
+	stdout, runErr := c.run(ctx, dir, args)
 	raw, usage, err := c.parse(dir, stdout)
+	// The cost is accounted whatever happened to the answer, a failed run included.
 	if req.Used != nil {
 		req.Used(usage)
+	}
+	if runErr != nil {
+		return sdk.Answer{}, runErr
 	}
 	if err != nil {
 		return sdk.Answer{}, err
@@ -345,39 +423,59 @@ func (c *Classifier) one(ctx context.Context, req sdk.Request, q sdk.Question) (
 	return answer(q, raw)
 }
 
-// parse finds the structured answer and the usage of one run.
+// parse finds the structured answer and the usage of one run. Usage that is missing or not a valid
+// number is reported as unknown, never as free.
 func (c *Classifier) parse(dir string, stdout []byte) (json.RawMessage, sdk.Usage, error) {
 	if c.kind == claudeCode {
+		if err := httpx.NoDuplicateKeys(stdout); err != nil {
+			return nil, sdk.Usage{Unknown: true}, errors.New("claude did not print the expected JSON result")
+		}
 		var r struct {
 			IsError          bool            `json:"is_error"`
 			StructuredOutput json.RawMessage `json:"structured_output"`
-			TotalCostUSD     float64         `json:"total_cost_usd"`
+			TotalCostUSD     *float64        `json:"total_cost_usd"`
 			Usage            struct {
-				InputTokens int `json:"input_tokens"`
+				InputTokens *int `json:"input_tokens"`
 			} `json:"usage"`
 		}
 		if err := json.Unmarshal(stdout, &r); err != nil {
-			return nil, sdk.Usage{}, errors.New("claude did not print the expected JSON result")
+			return nil, sdk.Usage{Unknown: true}, errors.New("claude did not print the expected JSON result")
 		}
-		u := sdk.Usage{InputTokens: r.Usage.InputTokens, CostUSD: r.TotalCostUSD}
+		u := sdk.Usage{Unknown: true}
+		if p := r.TotalCostUSD; p != nil && !math.IsNaN(*p) && !math.IsInf(*p, 0) && *p >= 0 {
+			u = sdk.Usage{CostUSD: *p}
+			if r.Usage.InputTokens != nil && *r.Usage.InputTokens >= 0 {
+				u.InputTokens = *r.Usage.InputTokens
+			}
+		}
 		if r.IsError || len(r.StructuredOutput) == 0 || string(r.StructuredOutput) == "null" {
 			return nil, u, errors.New("claude returned no structured answer")
 		}
 		return r.StructuredOutput, u, nil
 	}
-	var u sdk.Usage
+	u := sdk.Usage{Unknown: true}
+	completed := false
+	tokens := 0
 	for _, line := range bytes.Split(stdout, []byte("\n")) {
 		var e struct {
 			Type  string `json:"type"`
 			Usage struct {
-				InputTokens int `json:"input_tokens"`
+				InputTokens *int `json:"input_tokens"`
 			} `json:"usage"`
 		}
-		if json.Unmarshal(line, &e) == nil && e.Type == "turn.completed" {
-			u.InputTokens += e.Usage.InputTokens
+		if json.Unmarshal(line, &e) != nil || e.Type != "turn.completed" {
+			continue
 		}
+		if e.Usage.InputTokens == nil || *e.Usage.InputTokens < 0 {
+			completed = false
+			break
+		}
+		completed = true
+		tokens += *e.Usage.InputTokens
 	}
-	u.CostUSD = float64(u.InputTokens) * c.price / 1e6
+	if completed {
+		u = sdk.Usage{InputTokens: tokens, CostUSD: float64(tokens) * c.price / 1e6}
+	}
 	raw, err := os.ReadFile(filepath.Join(dir, "answer.json"))
 	if err != nil || len(bytes.TrimSpace(raw)) == 0 {
 		return nil, u, errors.New("codex wrote no answer")
@@ -385,40 +483,53 @@ func (c *Classifier) parse(dir string, stdout []byte) (json.RawMessage, sdk.Usag
 	return raw, u, nil
 }
 
-// answer checks a structured answer and turns it into a typed one. Errors never quote it.
+// answer checks a structured answer and turns it into a typed one: exactly one JSON object, no
+// repeated keys, a number for every option. Errors never quote it.
 func answer(q sdk.Question, raw json.RawMessage) (sdk.Answer, error) {
+	if err := httpx.NoDuplicateKeys(raw); err != nil {
+		return sdk.Answer{}, errors.New("the answer does not follow the schema")
+	}
 	var r struct {
-		Answer        string             `json:"answer"`
-		Probabilities map[string]float64 `json:"probabilities"`
+		Answer        string              `json:"answer"`
+		Probabilities map[string]*float64 `json:"probabilities"`
 	}
 	dec := json.NewDecoder(bytes.NewReader(raw))
 	dec.DisallowUnknownFields()
 	if err := dec.Decode(&r); err != nil {
 		return sdk.Answer{}, errors.New("the answer does not follow the schema")
 	}
+	if _, err := dec.Token(); err != io.EOF {
+		return sdk.Answer{}, errors.New("the answer is followed by more data")
+	}
 	keys, labels, _ := options(q)
+	if len(r.Probabilities) != len(labels) {
+		return sdk.Answer{}, errors.New("the answer gives probabilities for other options than offered")
+	}
 	idx := -1
 	probs := make([]float64, len(labels))
 	sum := 0.0
 	for i, l := range labels {
 		p, ok := r.Probabilities[l]
-		if !ok || math.IsNaN(p) || p < 0 || p > 1 {
+		if !ok || p == nil || math.IsNaN(*p) || *p < 0 || *p > 1 {
 			return sdk.Answer{}, errors.New("the answer lacks a probability for an option, or gives one outside [0, 1]")
 		}
-		probs[i] = p
-		sum += p
+		probs[i] = *p
+		sum += *p
 		if l == r.Answer {
 			idx = i
 		}
 	}
-	if idx < 0 || len(r.Probabilities) != len(labels) {
+	if idx < 0 {
 		return sdk.Answer{}, errors.New("the answer names an option that was not offered")
 	}
 	if sum < 0.9 || sum > 1.1 {
 		return sdk.Answer{}, errors.New("the answer's probabilities do not add up to 1")
 	}
+	// The whole vector is normalized before the answer is compared with the rest.
 	for i := range probs {
 		probs[i] /= sum
+	}
+	for i := range probs {
 		if probs[i] > probs[idx]+1e-9 {
 			return sdk.Answer{}, errors.New("the answer is not the option it gives the most probability")
 		}

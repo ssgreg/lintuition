@@ -43,6 +43,11 @@ type Evidence struct {
 	Agreement map[string]string `json:"agreement,omitempty"`
 	// PerSample is, per question, every sample's answer and support, in order.
 	PerSample map[string][]string `json:"per_sample,omitempty"`
+	// Support says, per question, what the scores are: token probabilities (empty), a model's own
+	// statement (self-reported), probabilities renormalized over the options' share (option-mass)
+	// with that share in Confidence, or a provider summary.
+	Support    map[string]string  `json:"support,omitempty"`
+	Confidence map[string]float64 `json:"confidence,omitempty"`
 }
 
 // Processor applies exclusions, severity and limits from the config.

@@ -267,3 +267,40 @@ func TestCostCapNeedsAKnownCost(t *testing.T) {
 		t.Fatalf("with a price the cap is enforceable: %d %s", code, errs)
 	}
 }
+
+// TestQueuedAgentRunsStopAtTheCap: with one agent slot and three candidates, the runs waiting for the
+// slot must not start once the first has spent the budget.
+func TestQueuedAgentRunsStopAtTheCap(t *testing.T) {
+	dir := sample(t)
+	log := filepath.Join(dir, "calls.log")
+	fake := filepath.Join(dir, "fake-claude")
+	os.WriteFile(fake, []byte(`#!/bin/sh
+if [ "$1" = "--version" ]; then echo "9.9 (Claude Code)"; exit 0; fi
+echo call >> `+log+`
+sleep 0.2
+echo '{"structured_output":{"answer":"B","probabilities":{"A":0,"B":1,"C":0,"D":0}},"total_cost_usd":0.1,"usage":{"input_tokens":10}}'
+`), 0o755)
+	os.WriteFile(filepath.Join(dir, ".lintuition.yml"), []byte(`version: "2"
+semantic:
+  classifier: claude-code
+  concurrency: 3
+  classifiers:
+    claude-code: {command: `+fake+`, max-parallel: 1}
+  cache: {disabled: true}
+  budget: {max-cost-usd: 0.1}
+`), 0o600)
+	code, _, errs := run("run", "./...")
+	b, _ := os.ReadFile(log)
+	if calls := strings.Count(string(b), "call"); code != 2 || calls != 1 || !strings.Contains(errs, "not asked (budget)") {
+		t.Fatalf("exit %d, %d agent runs; the queued ones must not start after the cap\n%s", code, calls, errs)
+	}
+}
+
+func TestEvalRejectsInvalidCaps(t *testing.T) {
+	twinsDir, _ := filepath.Abs("../testdata/twins")
+	for _, v := range []string{"NaN", "-1", "+Inf"} {
+		if code, _, errs := run("eval", "--max-cost-usd", v, twinsDir); code != 2 || !strings.Contains(errs, "must be a finite number") {
+			t.Errorf("--max-cost-usd %s: exit %d %s", v, code, errs)
+		}
+	}
+}

@@ -109,7 +109,10 @@ func (e APIError) Error() string {
 // Post sends the body with the headers, retrying 429, 5xx and transport errors. Every attempt after
 // the first is first cleared with spend (the run's budget); a refusal stops the retries with its
 // error.
-func (c *Client) Post(ctx context.Context, body []byte, header http.Header, spend func() error) ([]byte, error) {
+//
+// start, when set, is called right before every attempt goes out, after the rate limiter's wait;
+// an error stops the call with that error.
+func (c *Client) Post(ctx context.Context, body []byte, header http.Header, spend, start func() error) ([]byte, error) {
 	var last error
 	for attempt := 0; attempt <= c.retries; attempt++ {
 		if attempt > 0 && spend != nil {
@@ -119,6 +122,14 @@ func (c *Client) Post(ctx context.Context, body []byte, header http.Header, spen
 		}
 		if err := c.limiter.Wait(ctx, c.Sleep); err != nil {
 			return nil, err
+		}
+		if start != nil {
+			if err := start(); err != nil {
+				if last != nil {
+					return nil, fmt.Errorf("%v; retry not sent: %w", last, err)
+				}
+				return nil, err
+			}
 		}
 		raw, ra, err := c.once(ctx, body, header)
 		if err == nil {
