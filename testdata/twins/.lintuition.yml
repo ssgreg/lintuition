@@ -2,7 +2,7 @@ version: "2"
 
 linters:
   default: none
-  enable: [metric-type-vs-help, premature-success, table-case-vs-expectation, log-sensitive-field]
+  enable: [metric-type-vs-help, premature-success, table-case-vs-expectation, log-sensitive-field, log-key-value-role]
 
 semantic:
   classifier: fake
@@ -31,3 +31,8 @@ semantic:
         - {linter: log-sensitive-field, question: role, when: "value req.Password", choice: secret, probability: 0.95}
         - {linter: log-sensitive-field, question: role, when: "value req.User", choice: personal, probability: 0.9}
         - {linter: log-sensitive-field, question: role, when: "value req.TokenID", choice: public, probability: 0.9}
+        - {linter: log-sensitive-field, question: role, when: "\"message\":\"retrying upload\"", choice: public, probability: 0.95}
+        # log-key-value-role
+        - {linter: log-key-value-role, question: role, when: "key remaining_attempts, value elapsedAttempts", choice: conflict, probability: 0.9}
+        - {linter: log-key-value-role, question: role, when: "key attempts_made, value elapsedAttempts", choice: same, probability: 0.9}
+        - {linter: log-key-value-role, question: role, when: "key remaining_attempts, value v,", choice: insufficient, probability: 0.9}

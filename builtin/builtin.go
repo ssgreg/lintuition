@@ -7,6 +7,7 @@ import (
 	_ "github.com/ssgreg/lintuition/classifiers/fake"
 	_ "github.com/ssgreg/lintuition/classifiers/jev"
 	_ "github.com/ssgreg/lintuition/classifiers/openai"
+	_ "github.com/ssgreg/lintuition/linters/logkeyrole"
 	_ "github.com/ssgreg/lintuition/linters/logsensitive"
 	_ "github.com/ssgreg/lintuition/linters/metrictypevshelp"
 	_ "github.com/ssgreg/lintuition/linters/prematuresuccess"
