@@ -52,7 +52,7 @@ func init() {
 		Name:        Name,
 		Doc:         "a sentinel error whose name and message describe different conditions",
 		Standard:    true,
-		Version:     "1",
+		Version:     "2",
 		Analyzer:    Analyzer,
 		NewSettings: func() any { return &Settings{} },
 		New: func(s any) (sdk.Rule, error) {
@@ -185,7 +185,12 @@ func (r *rule) Decide(c *sdk.Candidate, answers map[string]sdk.Answer) sdk.Decis
 	if a.Choice != "different" {
 		return sdk.Clean()
 	}
-	if same, _ := a.Probability("same"); p-same < r.margin {
+	// The margin needs the competing probability: a backend that omits it has not said it is zero.
+	same, ok := a.Probability("same")
+	if !ok {
+		return sdk.Abstain("the classifier gave no probability for same, so the margin cannot be checked")
+	}
+	if p-same < r.margin {
 		return sdk.Abstain(fmt.Sprintf("different at %.2f is within %.2f of same at %.2f", p, r.margin, same))
 	}
 	return sdk.Report("sentinel error name and message describe different conditions: %s %q", c.Local["name"], clip(c.Local["text"], 80))
