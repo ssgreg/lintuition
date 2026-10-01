@@ -5,9 +5,10 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"errors"
-	"fmt"
 	"os"
 	"path/filepath"
+	"regexp"
+	"strings"
 	"time"
 
 	"github.com/ssgreg/lintuition/sdk"
@@ -59,6 +60,21 @@ func Key(identity, linterVersion string, votes int, req sdk.Request) (string, er
 
 func (c *Cache) path(key string) string { return filepath.Join(c.Dir, key[:2], key+".json") }
 
+// Lookup returns a fresh bundle that holds exactly votes valid samples for the questions, or false.
+// A corrupt, expired, short or invalid record is a miss, so the next request replaces it.
+func (c *Cache) Lookup(key string, votes int, qs []sdk.Question) (Bundle, bool) {
+	bd, ok := c.Get(key)
+	if !ok || len(bd.Samples) != votes {
+		return Bundle{}, false
+	}
+	for _, s := range bd.Samples {
+		if _, err := Check(qs, sdk.Response{Answers: s}); err != nil {
+			return Bundle{}, false
+		}
+	}
+	return bd, true
+}
+
 // Get returns a fresh bundle, or false. A corrupt or expired record is a miss.
 func (c *Cache) Get(key string) (Bundle, bool) {
 	b, err := os.ReadFile(c.path(key))
@@ -90,7 +106,7 @@ func (c *Cache) Put(key string, bd Bundle) error {
 	if err := os.MkdirAll(dir, 0o700); err != nil {
 		return err
 	}
-	f, err := os.CreateTemp(dir, ".tmp-*")
+	f, err := os.CreateTemp(dir, ".tmp-")
 	if err != nil {
 		return err
 	}
@@ -110,12 +126,56 @@ func (c *Cache) Put(key string, bd Bundle) error {
 	return os.Rename(f.Name(), c.path(key))
 }
 
-// Clean removes the whole cache directory.
-func (c *Cache) Clean() error {
-	if c.Dir == "" || c.Dir == "/" {
-		return fmt.Errorf("cache: refusing to remove %q", c.Dir)
+var (
+	shardRE  = regexp.MustCompile(`^[0-9a-f]{2}$`)
+	recordRE = regexp.MustCompile(`^[0-9a-f]{64}\.json$`)
+	tempRE   = regexp.MustCompile(`^\.tmp-[0-9]+$`)
+)
+
+// Clean removes cache records, and only them: files named like a record (or a temporary record)
+// inside two-hex-digit shard directories directly under Dir. Anything else in Dir, a file someone
+// else put there or a whole project if Dir was pointed at one, is left alone. With expiredOnly it
+// removes only records older than the TTL. Empty shard directories are removed afterwards.
+func (c *Cache) Clean(expiredOnly bool) (int, error) {
+	if c.Dir == "" {
+		return 0, errors.New("cache: no directory")
 	}
-	return os.RemoveAll(c.Dir)
+	shards, err := os.ReadDir(c.Dir)
+	if errors.Is(err, os.ErrNotExist) {
+		return 0, nil
+	}
+	if err != nil {
+		return 0, err
+	}
+	n := 0
+	for _, sh := range shards {
+		if !sh.IsDir() || !shardRE.MatchString(sh.Name()) {
+			continue
+		}
+		dir := filepath.Join(c.Dir, sh.Name())
+		files, err := os.ReadDir(dir)
+		if err != nil {
+			return n, err
+		}
+		for _, f := range files {
+			if f.IsDir() || !(recordRE.MatchString(f.Name()) || tempRE.MatchString(f.Name())) {
+				continue
+			}
+			p := filepath.Join(dir, f.Name())
+			if expiredOnly {
+				key := strings.TrimSuffix(f.Name(), ".json")
+				if _, fresh := c.Get(key); fresh {
+					continue
+				}
+			}
+			if err := os.Remove(p); err != nil {
+				return n, err
+			}
+			n++
+		}
+		os.Remove(dir) // only succeeds when empty
+	}
+	return n, nil
 }
 
 func (c *Cache) now() time.Time {

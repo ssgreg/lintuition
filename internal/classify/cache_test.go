@@ -73,8 +73,8 @@ func TestCache(t *testing.T) {
 	if err := c.Put(key, Bundle{}); err == nil {
 		t.Error("an empty bundle must not be cached")
 	}
-	if err := (&Cache{Dir: "/"}).Clean(); err == nil {
-		t.Error("cleaning / must be refused")
+	if _, err := (&Cache{}).Clean(false); err == nil {
+		t.Error("cleaning without a directory must be refused")
 	}
 }
 
@@ -114,5 +114,49 @@ func TestVote(t *testing.T) {
 	}
 	if _, _, err := Vote(q, nil); err == nil {
 		t.Error("no samples is an error")
+	}
+}
+
+func TestCleanRemovesOnlyRecords(t *testing.T) {
+	dir := t.TempDir()
+	foreign := []string{"README.md", "src/main.go", "ab/notes.txt", "zz/0000.json"}
+	for _, f := range foreign {
+		p := filepath.Join(dir, f)
+		os.MkdirAll(filepath.Dir(p), 0o700)
+		os.WriteFile(p, []byte("keep"), 0o600)
+	}
+	c := &Cache{Dir: dir, TTL: time.Hour}
+	key, _ := Key("id", "l@1", 1, sdk.Request{Questions: q})
+	c.Put(key, Bundle{Samples: [][]sdk.Answer{{{QuestionID: "k", Choice: "a"}}}})
+	n, err := c.Clean(false)
+	if err != nil || n != 1 {
+		t.Fatalf("removed %d, %v", n, err)
+	}
+	for _, f := range foreign {
+		if _, err := os.Stat(filepath.Join(dir, f)); err != nil {
+			t.Errorf("%s was removed", f)
+		}
+	}
+	if _, err := os.Stat(dir); err != nil {
+		t.Error("the configured directory itself must stay")
+	}
+}
+
+func TestLookupValidates(t *testing.T) {
+	c := &Cache{Dir: t.TempDir(), TTL: time.Hour}
+	key, _ := Key("id", "l@1", 3, sdk.Request{Questions: q})
+	good := []sdk.Answer{{QuestionID: "k", Choice: "a"}, {QuestionID: "y", Yes: f(0.5)}, {QuestionID: "s", Score: f(1)}}
+	c.Put(key, Bundle{Samples: [][]sdk.Answer{good}})
+	if _, ok := c.Lookup(key, 3, q); ok {
+		t.Error("one sample under a three-vote key must miss")
+	}
+	bad := []sdk.Answer{{QuestionID: "k", Choice: "zzz"}, good[1], good[2]}
+	c.Put(key, Bundle{Samples: [][]sdk.Answer{good, good, bad}})
+	if _, ok := c.Lookup(key, 3, q); ok {
+		t.Error("an invalid sample must miss")
+	}
+	c.Put(key, Bundle{Samples: [][]sdk.Answer{good, good, good}})
+	if _, ok := c.Lookup(key, 3, q); !ok {
+		t.Error("a valid record must hit")
 	}
 }

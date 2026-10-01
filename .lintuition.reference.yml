@@ -102,6 +102,8 @@ semantic:
       requests-per-minute: 1000
       # USD per million input tokens, for estimates and budgets only.
       price-per-mtok: 0.042
+      # Scopes the answer cache to an account. Default: a one-way hash of the API key.
+      account: ""
   # What may leave the machine: facts (structural facts only), prose (default: facts plus
   # person-written text such as comments, metric Help and log messages), source (adds Go source).
   payload: prose
@@ -119,7 +121,8 @@ semantic:
     disabled: false
     # Default: the user cache directory (lintuition cache path).
     dir: ""
-    # Default: 168h. A moving model alias such as jev-latest needs a bound.
+    # Default: 168h. A moving model alias such as jev-latest needs a bound. Expired records are
+    # misses; lintuition cache clean --expired removes them. The cache size is not bounded yet.
     ttl: 168h
   # Caps for one run; reaching one makes the run incomplete. 0 means no cap.
   budget:

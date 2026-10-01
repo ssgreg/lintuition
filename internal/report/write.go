@@ -16,7 +16,9 @@ type Run struct {
 	Incomplete bool           `json:"Incomplete"`
 	// Problems say why a run is incomplete: packages that failed to load, failed requests, a hit budget.
 	Problems []string `json:"Problems,omitempty"`
-	Stats    Stats    `json:"Stats"`
+	// Abstentions are the candidates asked but not decided, with the reason.
+	Abstentions []Abstention `json:"Abstentions,omitempty"`
+	Stats       Stats        `json:"Stats"`
 }
 
 // LinterStatus is a linter's line in the run report.
@@ -178,4 +180,12 @@ func (s *LinterStatus) Skip(reason string) {
 		s.SkippedBy = map[string]int{}
 	}
 	s.SkippedBy[reason]++
+}
+
+// Abstention is a candidate the rule did not decide.
+type Abstention struct {
+	Linter string `json:"Linter"`
+	File   string `json:"File"`
+	Line   int    `json:"Line"`
+	Reason string `json:"Reason"`
 }

@@ -32,9 +32,15 @@ type Evidence struct {
 	Classifier string             `json:"classifier"`
 	Answers    map[string]string  `json:"answers"`
 	Scores     map[string]float64 `json:"scores,omitempty"`
+	// Model is the backend's model; LinterVersion the version of the rule that decided.
+	Model         string `json:"model,omitempty"`
+	LinterVersion string `json:"linter_version,omitempty"`
 	// Samples is how many answers were voted on; Replayed says they came from the cache.
 	Samples  int  `json:"samples"`
 	Replayed bool `json:"replayed,omitempty"`
+	// Agreement is, per question, how the samples split ("current 2, total 1"). Agreement of
+	// correlated samples is not a probability of being right.
+	Agreement map[string]string `json:"agreement,omitempty"`
 }
 
 // Processor applies exclusions, severity and limits from the config.

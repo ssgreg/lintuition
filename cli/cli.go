@@ -442,18 +442,29 @@ func cacheCmd() *cobra.Command {
 			return nil
 		},
 	}
+	var expired bool
 	clean := &cobra.Command{
 		Use:   "clean",
-		Short: "Remove every cached answer",
+		Short: "Remove cached answer records (and nothing else in the directory)",
 		Args:  cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, _ []string) error {
 			d, err := dir()
 			if err != nil {
 				return err
 			}
-			return (&classify.Cache{Dir: d}).Clean()
+			c, err := cf.load()
+			if err != nil {
+				return err
+			}
+			n, err := (&classify.Cache{Dir: d, TTL: time.Duration(c.Semantic.Cache.TTL)}).Clean(expired)
+			if err != nil {
+				return err
+			}
+			fmt.Fprintf(cmd.OutOrStdout(), "removed %d cached answer record(s) from %s\n", n, d)
+			return nil
 		},
 	}
+	clean.Flags().BoolVar(&expired, "expired", false, "remove only records older than semantic.cache.ttl")
 	cf.add(path)
 	cf.add(clean)
 	cmd.AddCommand(path, clean)

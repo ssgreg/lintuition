@@ -154,12 +154,15 @@ func Run(ctx context.Context, o Options) (*Result, error) {
 			case j.asked && j.decision.Abstained != "":
 				st.Asked++
 				st.Abstained++
+				res.Run.Abstentions = append(res.Run.Abstentions, report.Abstention{
+					Linter: e.Linter.Name, File: j.cand.Pos.Filename, Line: j.cand.Pos.Line, Reason: j.decision.Abstained,
+				})
 			case j.asked:
 				st.Asked++
 				if j.decision.Report {
 					res.Issues = append(res.Issues, report.Issue{
 						FromLinter: e.Linter.Name, Text: j.decision.Message, Pos: j.cand.Pos,
-						Evidence:    evidence(clName, j.answers, j.samples, j.replayed),
+						Evidence:    evidence(clName, r.model(), e.Linter.Version, j),
 						Fingerprint: fingerprint(e.Linter.Name, j.cand.Pos.Filename, j.cand.Subject, j.decision.Message),
 					})
 				}
@@ -178,7 +181,10 @@ func Run(ctx context.Context, o Options) (*Result, error) {
 	if ctx.Err() != nil {
 		res.Run.Problems = append(res.Run.Problems, "run stopped: "+ctx.Err().Error())
 	}
-	res.Run.Stats.Requests, res.Run.Stats.InputTokens, res.Run.Stats.CostUSD = r.requests, r.tokens, r.cost
+	res.Run.Stats.Requests, res.Run.Stats.InputTokens, res.Run.Stats.CostUSD = r.sent, r.tokens, r.cost
+	if o.DryRun {
+		res.Run.Stats.Requests = r.requests // planned
+	}
 	res.Run.Stats.CacheHits, res.Run.Stats.Votes = r.hits, r.votes
 	proc.Base = base
 	res.Issues = proc.Process(res.Issues)
@@ -190,15 +196,16 @@ type job struct {
 	rule   sdk.Rule
 	cand   *sdk.Candidate
 
-	asked    bool
-	planned  bool
-	replayed bool
-	samples  int
-	key      string
-	skipped  string
-	err      error
-	answers  map[string]sdk.Answer
-	decision sdk.Decision
+	asked     bool
+	planned   bool
+	replayed  bool
+	samples   int
+	agreement map[string]string
+	key       string
+	skipped   string
+	err       error
+	answers   map[string]sdk.Answer
+	decision  sdk.Decision
 }
 
 type runner struct {
@@ -214,7 +221,8 @@ type runner struct {
 	log      io.Writer
 
 	mu       sync.Mutex
-	requests int
+	requests int // reserved
+	sent     int // attempted
 	hits     int
 	tokens   int
 	texts    map[string]string
@@ -256,7 +264,7 @@ func (r *runner) do(ctx context.Context, jobs []*job) {
 				continue
 			}
 			j.key = key
-			if bd, ok := r.cache.Get(key); ok {
+			if bd, ok := r.cache.Lookup(key, r.votes, qs); ok {
 				// A replay: the same samples as before, not new votes.
 				r.mu.Lock()
 				r.hits++
@@ -340,6 +348,20 @@ func (r *runner) plan(qs []sdk.Question) error {
 	return nil
 }
 
+// overCost reports, and records as the reason the run is incomplete, that the observed cost has
+// passed semantic.budget.max-cost-usd.
+func (r *runner) overCost() bool {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	if r.budget.MaxCostUSD > 0 && r.cost > r.budget.MaxCostUSD {
+		if r.capped == "" {
+			r.capped = fmt.Sprintf("semantic.budget.max-cost-usd %.4f passed (spent %.4f)", r.budget.MaxCostUSD, r.cost)
+		}
+		return true
+	}
+	return false
+}
+
 // reserve counts n requests against the budget before they are sent; false means the budget does
 // not cover all of them, and none is sent: a vote with missing samples is not a vote.
 func (r *runner) reserve(n int) bool {
@@ -368,9 +390,21 @@ func (r *runner) ask(ctx context.Context, j *job, req sdk.Request) {
 		if !r.reserve(1) {
 			return errors.New(r.capped)
 		}
+		r.mu.Lock()
+		r.sent++
+		r.mu.Unlock()
 		return nil
 	}
-	for range r.votes {
+	for i := range r.votes {
+		// The cost of the samples already back may have spent the budget; a vote with missing
+		// samples is not a vote, so the candidate fails rather than deciding on fewer.
+		if i > 0 && r.overCost() {
+			j.err = errors.New("not all samples sent: " + r.capped)
+			return
+		}
+		r.mu.Lock()
+		r.sent++
+		r.mu.Unlock()
 		resp, err := r.cl.Classify(ctx, req)
 		if err != nil {
 			j.err = fmt.Errorf("classifier %s: %w", r.clName, err)
@@ -380,6 +414,7 @@ func (r *runner) ask(ctx context.Context, j *job, req sdk.Request) {
 		r.tokens += resp.Usage.InputTokens
 		r.cost += resp.Usage.CostUSD
 		r.mu.Unlock()
+		r.overCost() // a response that crosses the cap makes the run incomplete
 		if _, err := classify.Check(req.Questions, resp); err != nil {
 			j.err = fmt.Errorf("classifier %s: invalid response: %w", r.clName, err)
 			return
@@ -413,6 +448,7 @@ func (r *runner) decide(j *job, req sdk.Request, samples [][]sdk.Answer) {
 		return
 	}
 	j.asked, j.samples = true, len(samples)
+	j.agreement = agreement(req.Questions, checked)
 	if disagree != "" {
 		j.decision = sdk.Abstain(disagree)
 		return
@@ -430,9 +466,13 @@ func (r *runner) problems() []string {
 	return nil
 }
 
-func evidence(cl string, answers map[string]sdk.Answer, samples int, replayed bool) *report.Evidence {
-	ev := &report.Evidence{Classifier: cl, Answers: map[string]string{}, Scores: map[string]float64{}, Samples: samples, Replayed: replayed}
-	for id, a := range answers {
+func evidence(cl, model, version string, j *job) *report.Evidence {
+	ev := &report.Evidence{
+		Classifier: cl, Model: model, LinterVersion: version,
+		Answers: map[string]string{}, Scores: map[string]float64{},
+		Samples: j.samples, Replayed: j.replayed, Agreement: j.agreement,
+	}
+	for id, a := range j.answers {
 		switch {
 		case a.Choice != "":
 			ev.Answers[id] = a.Choice
@@ -446,6 +486,49 @@ func evidence(cl string, answers map[string]sdk.Answer, samples int, replayed bo
 		}
 	}
 	return ev
+}
+
+// agreement is, per question, how the samples split: "current 2, total 1"; nil for one sample.
+func agreement(qs []sdk.Question, samples []map[string]sdk.Answer) map[string]string {
+	if len(samples) < 2 {
+		return nil
+	}
+	out := map[string]string{}
+	for _, q := range qs {
+		count := map[string]int{}
+		for _, s := range samples {
+			a := s[q.ID]
+			switch {
+			case a.Choice != "":
+				count[a.Choice]++
+			case a.Yes != nil && *a.Yes > 0.5:
+				count["yes"]++
+			case a.Yes != nil:
+				count["no"]++
+			case a.Score != nil:
+				count[fmt.Sprintf("%.0f", *a.Score)]++
+			}
+		}
+		keys := make([]string, 0, len(count))
+		for k := range count {
+			keys = append(keys, k)
+		}
+		sort.Strings(keys)
+		parts := make([]string, 0, len(keys))
+		for _, k := range keys {
+			parts = append(parts, fmt.Sprintf("%s %d", k, count[k]))
+		}
+		out[q.ID] = strings.Join(parts, ", ")
+	}
+	return out
+}
+
+// model is the backend's public model identity for evidence, without any account scope.
+func (r *runner) model() string {
+	if m, ok := r.cl.(interface{ Model() string }); ok {
+		return m.Model()
+	}
+	return ""
 }
 
 func hasStatus(ss []report.LinterStatus, name string) bool {

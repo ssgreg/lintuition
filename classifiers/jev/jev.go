@@ -14,6 +14,8 @@ package jev
 import (
 	"bytes"
 	"context"
+	"crypto/sha256"
+	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -55,6 +57,8 @@ type Settings struct {
 	RequestsPerMinute int `yaml:"requests-per-minute"`
 	// PricePerMTok is the input price used for cost estimates and budgets.
 	PricePerMTok *float64 `yaml:"price-per-mtok"`
+	// Account scopes the answer cache; by default a one-way hash of the API key does.
+	Account string `yaml:"account"`
 }
 
 func init() {
@@ -68,6 +72,7 @@ func init() {
 
 // Classifier is the Jev backend.
 type Classifier struct {
+	account  string
 	keyEnv   string
 	endpoint string
 	model    string
@@ -81,7 +86,7 @@ type Classifier struct {
 
 // New validates the settings and returns the backend. getenv reads the API key.
 func New(s Settings, getenv func(string) string) (*Classifier, error) {
-	c := &Classifier{endpoint: s.Endpoint, model: s.Model, retries: 4, price: DefaultPricePerMTok, sleep: sleepCtx}
+	c := &Classifier{account: s.Account, endpoint: s.Endpoint, model: s.Model, retries: 4, price: DefaultPricePerMTok, sleep: sleepCtx}
 	if c.endpoint == "" {
 		c.endpoint = DefaultEndpoint
 	}
@@ -152,9 +157,21 @@ func (c *Classifier) Ready() error {
 	return nil
 }
 
-// Identity names what decides an answer besides the request, for the answer cache: the endpoint
-// and the model. A moving alias such as jev-latest is bounded by the cache TTL.
-func (c *Classifier) Identity() string { return "jev|" + c.endpoint + "|" + c.model }
+// Identity names what decides an answer besides the request, for the answer cache: the endpoint,
+// the model and the account. The account is the account setting, or else a one-way hash of the API
+// key, so answers never cross accounts and the key is never stored. A moving alias such as
+// jev-latest is bounded by the cache TTL.
+func (c *Classifier) Identity() string {
+	acct := c.account
+	if acct == "" {
+		sum := sha256.Sum256([]byte("lintuition-cache-scope\x00" + c.key))
+		acct = "key:" + hex.EncodeToString(sum[:8])
+	}
+	return "jev|" + c.endpoint + "|" + c.model + "|" + acct
+}
+
+// Model is the public model identity for report evidence.
+func (c *Classifier) Model() string { return c.model }
 
 // Capabilities implements sdk.Classifier.
 func (c *Classifier) Capabilities() sdk.Capabilities {
