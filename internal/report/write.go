@@ -27,7 +27,7 @@ type LinterStatus struct {
 	Asked      int    `json:"Asked"`
 	Abstained  int    `json:"Abstained"`
 	Skipped    int    `json:"Skipped"`
-	// SkippedBy breaks Skipped down by reason: excluded, generated, payload-policy, no-questions.
+	// SkippedBy breaks Skipped down by reason: excluded, generated, nolint, payload-policy, no-questions.
 	SkippedBy map[string]int `json:"SkippedBy,omitempty"`
 	// Unsupported counts shapes the analyzer saw but could not extract facts for.
 	Unsupported int `json:"Unsupported"`
@@ -51,13 +51,25 @@ type Stats struct {
 // Write renders the issues to every configured format.
 func Write(c *config.Config, issues []Issue, run Run, stdout, stderr io.Writer) error {
 	f := c.Output.Formats
-	if f.Text != nil {
-		if err := to(f.Text.Path, stdout, stderr, func(w io.Writer) error { return writeText(w, f.Text, issues) }); err != nil {
-			return err
+	for _, d := range f.Dests() {
+		var fn func(io.Writer) error
+		switch d.Format {
+		case "text":
+			fn = func(w io.Writer) error { return writeText(w, f.Text, issues) }
+		case "json":
+			fn = func(w io.Writer) error { return writeJSON(w, issues, run) }
+		case "sarif":
+			fn = func(w io.Writer) error { return writeSARIF(w, issues, run) }
+		case "checkstyle":
+			fn = func(w io.Writer) error { return writeCheckstyle(w, issues) }
+		case "code-climate":
+			fn = func(w io.Writer) error { return writeCodeClimate(w, issues) }
+		case "junit-xml":
+			fn = func(w io.Writer) error { return writeJUnit(w, issues) }
+		case "github-actions":
+			fn = func(w io.Writer) error { return writeGitHubActions(w, issues) }
 		}
-	}
-	if f.JSON != nil {
-		if err := to(f.JSON.Path, stdout, stderr, func(w io.Writer) error { return writeJSON(w, issues, run) }); err != nil {
+		if err := to(d.Path, stdout, stderr, fn); err != nil {
 			return err
 		}
 	}
@@ -121,6 +133,7 @@ func caret(line string, col int) string {
 
 type jsonIssue struct {
 	FromLinter  string    `json:"FromLinter"`
+	Fingerprint string    `json:"Fingerprint,omitempty"`
 	Text        string    `json:"Text"`
 	Severity    string    `json:"Severity"`
 	SourceLines []string  `json:"SourceLines"`
@@ -147,7 +160,7 @@ func writeJSON(w io.Writer, issues []Issue, run Run) error {
 	}{Issues: []jsonIssue{}}
 	for _, is := range issues {
 		out.Issues = append(out.Issues, jsonIssue{
-			FromLinter: is.FromLinter, Text: is.Text, Severity: is.Severity, SourceLines: is.SourceLines,
+			FromLinter: is.FromLinter, Fingerprint: is.Fingerprint, Text: is.Text, Severity: is.Severity, SourceLines: is.SourceLines,
 			Pos:      jsonPos{Filename: is.Pos.Filename, Offset: is.Pos.Offset, Line: is.Pos.Line, Column: is.Pos.Column},
 			Evidence: is.Evidence,
 		})

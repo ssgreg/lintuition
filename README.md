@@ -46,6 +46,22 @@ lintuition classifiers                # available backends
 lintuition config verify              # strict: unknown keys, linters and settings are errors
 ```
 
+Formats: `text`, `json`, `sarif`, `checkstyle`, `code-climate`, `junit-xml` and, as an extension
+(golangci-lint v2 dropped it), `github-actions`. Each has `--output.<format>.path`; each needs its own
+destination.
+
+### Suppressing a finding
+
+```go
+x := f() //nolint:premature-success // f is a pure lookup and cannot fail
+```
+
+As in golangci-lint, a directive at the end of a line covers the line; one on its own line above a
+declaration or statement covers it; one above the package clause covers the file. Stricter than
+golangci-lint by default: the directive must name the linter and give a reason after `//`. A bare
+`//nolint`, `//nolint:all` or a directive without a reason does not suppress. A suppressed candidate
+is never sent to the classifier.
+
 Exit codes: `0` clean, `1` issues found (`run.issues-exit-code`), `2` the run is incomplete or failed:
 a package did not load, a request failed, or a budget was reached. An incomplete run never exits 0.
 

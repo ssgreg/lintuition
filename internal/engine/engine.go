@@ -3,6 +3,8 @@ package engine
 
 import (
 	"context"
+	"crypto/sha256"
+	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -111,6 +113,7 @@ func Run(ctx context.Context, o Options) (*Result, error) {
 		res.Run.Problems = append(res.Run.Problems, fmt.Sprintf("package %s not analysed: %s", p.Package, p.Err))
 	}
 	generated := map[string]bool{}
+	nolint := report.NewNolint()
 	for _, e := range enabled {
 		st := report.LinterStatus{Name: e.Linter.Name, Enabled: true}
 		var jobs []*job
@@ -129,6 +132,11 @@ func Run(ctx context.Context, o Options) (*Result, error) {
 			}
 			if isGenerated(c, generated, abs) {
 				st.Skip("generated")
+				continue
+			}
+			// An explained //nolint for this linter on this line: no need to ask, nothing is sent.
+			if nolint.Covers(abs, e.Linter.Name, cand.Pos.Line) {
+				st.Skip("nolint")
 				continue
 			}
 			jobs = append(jobs, &job{linter: e.Linter, rule: e.Rule, cand: cand})
@@ -151,7 +159,8 @@ func Run(ctx context.Context, o Options) (*Result, error) {
 				if j.decision.Report {
 					res.Issues = append(res.Issues, report.Issue{
 						FromLinter: e.Linter.Name, Text: j.decision.Message, Pos: j.cand.Pos,
-						Evidence: evidence(clName, j.answers, j.samples, j.replayed),
+						Evidence:    evidence(clName, j.answers, j.samples, j.replayed),
+						Fingerprint: fingerprint(e.Linter.Name, j.cand.Pos.Filename, j.cand.Subject, j.decision.Message),
 					})
 				}
 			}
@@ -512,4 +521,10 @@ func (r *runner) stable(linter string, qs []sdk.Question) error {
 		r.texts[k] = q.Text
 	}
 	return nil
+}
+
+// fingerprint identifies a finding without its line, so it survives code moving around it.
+func fingerprint(linter, file, subject, text string) string {
+	sum := sha256.Sum256([]byte(linter + "\x00" + file + "\x00" + subject + "\x00" + text))
+	return hex.EncodeToString(sum[:8])
 }

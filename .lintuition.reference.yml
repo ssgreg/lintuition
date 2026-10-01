@@ -67,6 +67,18 @@ output:
       print-issued-lines: true
     json:
       path: lintuition-report.json
+    sarif:
+      path: lintuition.sarif
+    checkstyle:
+      path: lintuition-checkstyle.xml
+    code-climate:
+      path: gl-code-quality-report.json
+    junit-xml:
+      path: lintuition-junit.xml
+    # Workflow-command annotations; golangci-lint v2 dropped this format, lintuition keeps it as an
+    # extension. stdout or stderr both reach the job log.
+    github-actions:
+      path: stderr
 
 # lintuition's extension: the classifier and what may be sent to it.
 semantic:

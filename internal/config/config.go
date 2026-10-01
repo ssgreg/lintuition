@@ -106,8 +106,38 @@ type Output struct {
 
 // Formats is `output.formats`: each set format writes to its own path (stdout, stderr or a file).
 type Formats struct {
-	Text *TextFormat `yaml:"text"`
-	JSON *PathFormat `yaml:"json"`
+	Text        *TextFormat `yaml:"text"`
+	JSON        *PathFormat `yaml:"json"`
+	SARIF       *PathFormat `yaml:"sarif"`
+	Checkstyle  *PathFormat `yaml:"checkstyle"`
+	CodeClimate *PathFormat `yaml:"code-climate"`
+	JUnitXML    *PathFormat `yaml:"junit-xml"`
+	// GitHubActions writes workflow-command annotations. golangci-lint v2 dropped this format;
+	// lintuition keeps it as a documented extension.
+	GitHubActions *PathFormat `yaml:"github-actions"`
+}
+
+// Dest is one configured format and where it goes.
+type Dest struct {
+	Format string
+	Path   string
+}
+
+// Dests lists the configured formats, text first.
+func (f Formats) Dests() []Dest {
+	var out []Dest
+	if f.Text != nil {
+		out = append(out, Dest{"text", f.Text.Path})
+	}
+	for _, x := range []struct {
+		name string
+		p    *PathFormat
+	}{{"json", f.JSON}, {"sarif", f.SARIF}, {"checkstyle", f.Checkstyle}, {"code-climate", f.CodeClimate}, {"junit-xml", f.JUnitXML}, {"github-actions", f.GitHubActions}} {
+		if x.p != nil {
+			out = append(out, Dest{x.name, x.p.Path})
+		}
+	}
+	return out
 }
 
 // TextFormat is `output.formats.text`.
@@ -361,66 +391,42 @@ func (f Formats) CheckExtra(name, path string) error {
 	if err != nil {
 		return err
 	}
-	for format, p := range map[string]*string{"text": textPath(f), "json": jsonPath(f)} {
-		if p == nil || *p == "stdout" || *p == "stderr" || *p == "" {
+	for _, d := range f.Dests() {
+		if d.Path == "stdout" || d.Path == "stderr" || d.Path == "" {
 			continue
 		}
-		if other, err := filepath.Abs(*p); err == nil && other == abs {
-			return fmt.Errorf("%s: %s already gets the %s output", name, path, format)
+		if other, err := filepath.Abs(d.Path); err == nil && other == abs {
+			return fmt.Errorf("%s: %s already gets the %s output", name, path, d.Format)
 		}
 	}
 	return nil
 }
 
-func textPath(f Formats) *string {
-	if f.Text == nil {
-		return nil
-	}
-	return &f.Text.Path
-}
-
-func jsonPath(f Formats) *string {
-	if f.JSON == nil {
-		return nil
-	}
-	return &f.JSON.Path
-}
-
 // checkDestinations refuses two formats writing to one place, and machine-readable output on stderr,
-// which carries the run summary and problems.
+// which carries the run summary and problems. github-actions annotations are read from the log, so
+// stderr is allowed for them too.
 func (f Formats) checkDestinations() error {
 	seen := map[string]string{}
-	add := func(format, path string) error {
-		key := path
-		switch path {
+	for _, d := range f.Dests() {
+		key := d.Path
+		switch d.Path {
 		case "", "stdout":
 			key = "stdout"
 		case "stderr":
-			if format != "text" {
-				return fmt.Errorf("output.formats.%s.path: stderr carries the run summary; use stdout or a file", format)
+			if d.Format != "text" && d.Format != "github-actions" {
+				return fmt.Errorf("output.formats.%s.path: stderr carries the run summary; use stdout or a file", d.Format)
 			}
 		default:
-			abs, err := filepath.Abs(path)
+			abs, err := filepath.Abs(d.Path)
 			if err != nil {
 				return err
 			}
 			key = abs
 		}
 		if other, ok := seen[key]; ok {
-			return fmt.Errorf("output.formats.%s.path: %s already gets the %s output", format, path, other)
+			return fmt.Errorf("output.formats.%s.path: %s already gets the %s output", d.Format, d.Path, other)
 		}
-		seen[key] = format
-		return nil
-	}
-	if f.Text != nil {
-		if err := add("text", f.Text.Path); err != nil {
-			return err
-		}
-	}
-	if f.JSON != nil {
-		if err := add("json", f.JSON.Path); err != nil {
-			return err
-		}
+		seen[key] = d.Format
 	}
 	return nil
 }

@@ -94,6 +94,7 @@ func runCmd(code *int) *cobra.Command {
 		preview     string
 		textPath    string
 		jsonPath    string
+		otherPaths  = map[string]*string{}
 		payload     string
 		classifier  string
 		maxRequests int
@@ -128,14 +129,29 @@ func runCmd(code *int) *cobra.Command {
 				}
 				c.Run.IssuesExitCode = &exitCode
 			}
-			if fl.Changed("output.text.path") || fl.Changed("output.json.path") {
-				c.Output.Formats = config.Formats{}
+			changed := fl.Changed("output.text.path") || fl.Changed("output.json.path")
+			for name := range otherPaths {
+				changed = changed || fl.Changed("output."+name+".path")
+			}
+			if changed {
+				// Output flags replace the configured formats, as in golangci-lint.
+				f := config.Formats{}
 				if textPath != "" {
-					c.Output.Formats.Text = &config.TextFormat{Path: textPath}
+					f.Text = &config.TextFormat{Path: textPath}
 				}
-				if jsonPath != "" {
-					c.Output.Formats.JSON = &config.PathFormat{Path: jsonPath}
+				pf := func(p string) *config.PathFormat {
+					if p == "" {
+						return nil
+					}
+					return &config.PathFormat{Path: p}
 				}
+				f.JSON = pf(jsonPath)
+				f.SARIF = pf(*otherPaths["sarif"])
+				f.Checkstyle = pf(*otherPaths["checkstyle"])
+				f.CodeClimate = pf(*otherPaths["code-climate"])
+				f.JUnitXML = pf(*otherPaths["junit-xml"])
+				f.GitHubActions = pf(*otherPaths["github-actions"])
+				c.Output.Formats = f
 			}
 			if fl.Changed("payload") {
 				c.Semantic.Payload = payload
@@ -200,7 +216,12 @@ func runCmd(code *int) *cobra.Command {
 	f.BoolVar(&dryRun, "dry-run", false, "extract and plan requests, send none")
 	f.StringVar(&preview, "preview", "", "with --dry-run: write every planned request, as it would be sent, to this file (JSON lines)")
 	f.StringVar(&textPath, "output.text.path", "", "text output: stdout, stderr or a file path")
-	f.StringVar(&jsonPath, "output.json.path", "", "JSON output: stdout, stderr or a file path")
+	f.StringVar(&jsonPath, "output.json.path", "", "JSON output: stdout or a file path")
+	for _, name := range []string{"sarif", "checkstyle", "code-climate", "junit-xml", "github-actions"} {
+		p := new(string)
+		otherPaths[name] = p
+		f.StringVar(p, "output."+name+".path", "", name+" output: stdout or a file path")
+	}
 	f.StringVar(&payload, "payload", "", "what may leave the machine: facts, prose, source")
 	f.StringVar(&classifier, "classifier", "", "classifier backend to use")
 	f.IntVar(&maxRequests, "max-requests", 0, "cap on classifier requests; reaching it makes the run incomplete")

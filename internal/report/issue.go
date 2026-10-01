@@ -23,6 +23,8 @@ type Issue struct {
 	SourceLines []string
 	// Evidence is lintuition's extension: what the decision rested on.
 	Evidence *Evidence
+	// Fingerprint identifies the finding across runs and line moves: linter, file, subject, text.
+	Fingerprint string
 }
 
 // Evidence records the classifier answers behind an issue.
