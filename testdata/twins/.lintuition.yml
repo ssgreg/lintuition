@@ -2,7 +2,7 @@ version: "2"
 
 linters:
   default: none
-  enable: [metric-type-vs-help, premature-success, table-case-vs-expectation, sentinel-name-vs-text, error-needs-type]
+  enable: [metric-type-vs-help, premature-success, table-case-vs-expectation, sentinel-name-vs-text, error-needs-type, human-unit-contradiction]
 
 semantic:
   classifier: fake
@@ -38,3 +38,8 @@ semantic:
         - {linter: error-needs-type, question: branchable, when: "invoice not found", yes: 0.9}
         - {linter: error-needs-type, question: branchable, when: "invoice ledger invariant broken", yes: 0.1}
         - {linter: error-needs-type, question: branchable, when: "invoice payload rejected", yes: 0.6}
+        # human-unit-contradiction
+        - {linter: human-unit-contradiction, question: unit, when: "compaction took %.0f ms", choice: milliseconds, probability: 0.9}
+        - {linter: human-unit-contradiction, question: unit, when: "compaction took %d ms", choice: milliseconds, probability: 0.95}
+        - {linter: human-unit-contradiction, question: unit, when: "compaction retry, backoff factor", choice: unspecified, probability: 0.9}
+        - {linter: human-unit-contradiction, question: unit, when: "compaction window %.0f", choice: minutes, probability: 0.6}

@@ -26,6 +26,9 @@ linters:
     error-needs-type:
       # Minimum probability of yes for a finding, and of no for a clean answer. Default: 0.8.
       threshold: 0.8
+    human-unit-contradiction:
+      # Minimum probability of the stated unit for a decision either way. Default: 0.85.
+      threshold: 0.85
     metric-type-vs-help:
       # Minimum probability of the classifier's answer for a finding. Default: 0.8.
       threshold: 0.8
