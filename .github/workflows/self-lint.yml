@@ -48,14 +48,20 @@ jobs:
         uses: actions/cache/restore@0057852bfaa89a56745cba8c7296529d2fc39830 # v4.3.0
         with:
           path: ${{ runner.temp }}/lintuition-cache
-          key: lintuition-answers-${{ github.run_id }}
-          restore-keys: lintuition-answers-
+          # A cache entry cannot be overwritten, so each attempt of a run saves its own; a re-run
+          # starts from the latest attempt of this run, then from any earlier run.
+          key: lintuition-answers-${{ github.run_id }}-${{ github.run_attempt }}
+          restore-keys: |
+            lintuition-answers-${{ github.run_id }}-
+            lintuition-answers-
+      - name: build
+        if: steps.key.outputs.skip != 'true'
+        run: go build -o "$RUNNER_TEMP/lintuition" ./cmd/lintuition
       - name: lintuition
         if: steps.key.outputs.skip != 'true'
         env:
           TYPESAFE_API_KEY: ${{ secrets.TYPESAFE_API_KEY }}
         run: |
-          go build -o "$RUNNER_TEMP/lintuition" ./cmd/lintuition
           cat .github/lintuition.yml > "$RUNNER_TEMP/self.yml"
           printf '  cache:\n    dir: %s\n' "$RUNNER_TEMP/lintuition-cache" >> "$RUNNER_TEMP/self.yml"
           "$RUNNER_TEMP/lintuition" run -c "$RUNNER_TEMP/self.yml" \
@@ -66,7 +72,7 @@ jobs:
         uses: actions/cache/save@0057852bfaa89a56745cba8c7296529d2fc39830 # v4.3.0
         with:
           path: ${{ runner.temp }}/lintuition-cache
-          key: lintuition-answers-${{ github.run_id }}
+          key: lintuition-answers-${{ github.run_id }}-${{ github.run_attempt }}
       - uses: github/codeql-action/upload-sarif@1190a975f95ce23525efb6a3fc21ea29567c1b52 # v3.38.2
         if: always() && steps.key.outputs.skip != 'true' && hashFiles('lintuition.sarif') != ''
         with:
