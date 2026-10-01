@@ -62,7 +62,7 @@ jobs:
         env:
           TYPESAFE_API_KEY: ${{ secrets.TYPESAFE_API_KEY }}
         run: |
-          cat .github/lintuition.yml > "$RUNNER_TEMP/self.yml"
+          cat .lintuition.yml > "$RUNNER_TEMP/self.yml"
           printf '  cache:\n    dir: %s\n' "$RUNNER_TEMP/lintuition-cache" >> "$RUNNER_TEMP/self.yml"
           "$RUNNER_TEMP/lintuition" run -c "$RUNNER_TEMP/self.yml" \
             --output.text.path stdout --output.sarif.path lintuition.sarif --output.github-actions.path stderr ./...

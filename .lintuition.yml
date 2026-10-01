@@ -1,5 +1,5 @@
-# lintuition run on its own code (the self-lint workflow). Findings are review hints: they go to
-# code scanning, they do not fail the build; an incomplete run does.
+# lintuition on its own code: `lintuition run ./...` here, and the self-lint workflow. Findings are
+# review hints: in CI they go to code scanning and do not fail the build; an incomplete run does.
 version: "2"
 
 run:
