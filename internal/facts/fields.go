@@ -21,29 +21,20 @@ type LogField struct {
 	Literal bool
 }
 
-// Fields returns the structured fields of a log call: field constructors such as zap.String("k", v),
-// slog.Int("k", n) or logf.String("k", v); slog's alternating key, value arguments; and fields added
-// along a call chain (logrus WithField("k", v), zerolog Str("k", v)). Arguments it cannot read as
-// fields are left out; a printf argument is not a field.
-func Fields(info *types.Info, lc LogCall) []LogField {
-	var out []LogField
+// Fields returns the structured fields of a log call, and whether some arguments could not be read
+// as fields (partial). Fields are read only where the logger defines them:
+//   - field constructors returning a field type (slog.Attr, zap.Field, logf.Field): slog.String("k", v),
+//     zap.Error(err), logf.String("k", v); slog.Group("g", ...) contributes its fields as g.k;
+//   - alternating key, value arguments, only for log/slog and zap's sugared *w methods;
+//   - fields added along a call chain: slog.With(...), logrus WithField("k", v), zerolog Str("k", v).
+//
+// The arguments of Print, Println, logrus.Info(args ...) and printf formats are not fields.
+func Fields(info *types.Info, lc LogCall) (fields []LogField, partial bool) {
 	args := lc.Call.Args
-	start := lc.MessageArg + 1
-	if lc.MessageArg < 0 {
-		start = len(args)
-	}
-	printf := strings.HasSuffix(lc.Func.Name(), "f")
-	for i := start; i < len(args) && !printf; i++ {
-		a := ast.Unparen(args[i])
-		if f, ok := fieldCall(info, a); ok {
-			out = append(out, f)
-			continue
-		}
-		// slog style: "key", value.
-		if k, ok := ConstString(info, a); ok && i+1 < len(args) {
-			out = append(out, field(info, k, args[i+1]))
-			i++
-		}
+	if lc.MessageArg >= 0 && !strings.HasSuffix(lc.Func.Name(), "f") && structured(lc.Func) {
+		rest := args[lc.MessageArg+1:]
+		f, p := readArgs(info, rest, alternates(lc.Func))
+		fields, partial = append(fields, f...), p
 	}
 	// Fields along the chain the call is made on.
 	x := lc.Call.Fun
@@ -56,36 +47,126 @@ func Fields(info *types.Info, lc LogCall) []LogField {
 		if !ok {
 			break
 		}
-		if fn := Callee(info, inner); fn != nil && isLogPackage(fn.Pkg()) && len(inner.Args) == 2 {
-			if k, ok := ConstString(info, inner.Args[0]); ok {
-				out = append(out, field(info, k, inner.Args[1]))
+		if fn := Callee(info, inner); fn != nil && isLogPackage(fn.Pkg()) {
+			switch {
+			case fn.Name() == "With" || fn.Name() == "WithGroup":
+				if fn.Name() == "With" {
+					f, p := readArgs(info, inner.Args, alternates(fn))
+					fields, partial = append(fields, f...), partial || p
+				}
+			case len(inner.Args) == 2:
+				if k, ok := ConstString(info, inner.Args[0]); ok {
+					fields = append(fields, field(info, k, inner.Args[1]))
+				}
 			}
 		}
 		x = inner.Fun
 	}
-	return out
+	return fields, partial
 }
 
-// fieldCall reads a field constructor of a logger package: F("key", value) returning a value, or
-// zap.Error(err) style constructors whose key is their name.
-func fieldCall(info *types.Info, e ast.Expr) (LogField, bool) {
+// structured reports whether a logging function takes fields after its message: alternating key,
+// value arguments, or a variadic parameter of a field type. Print(v ...any) and logrus.Info(args
+// ...any) take values to print, not fields.
+func structured(fn *types.Func) bool {
+	if alternates(fn) {
+		return true
+	}
+	sig := fn.Type().(*types.Signature)
+	if !sig.Variadic() {
+		return false
+	}
+	last := sig.Params().At(sig.Params().Len() - 1).Type()
+	sl, ok := last.(*types.Slice)
+	return ok && isFieldType(sl.Elem())
+}
+
+// alternates reports whether a logging function takes alternating key, value arguments.
+func alternates(fn *types.Func) bool {
+	if fn.Pkg() == nil {
+		return false
+	}
+	switch fn.Pkg().Path() {
+	case "log/slog":
+		return true
+	case "go.uber.org/zap":
+		return strings.HasSuffix(fn.Name(), "w") || fn.Name() == "With"
+	}
+	return false
+}
+
+func readArgs(info *types.Info, args []ast.Expr, alternating bool) (out []LogField, partial bool) {
+	for i := 0; i < len(args); i++ {
+		a := ast.Unparen(args[i])
+		if fs, ok := fieldCall(info, a, ""); ok {
+			out = append(out, fs...)
+			continue
+		}
+		if alternating {
+			if k, ok := ConstString(info, a); ok && i+1 < len(args) {
+				out = append(out, field(info, k, args[i+1]))
+				i++
+				continue
+			}
+		}
+		partial = true
+	}
+	return out, partial
+}
+
+// fieldTypes are the types a field constructor returns, by package and name.
+var fieldTypes = map[string]bool{
+	"log/slog.Attr": true, "go.uber.org/zap/zapcore.Field": true, "go.uber.org/zap.Field": true,
+	"github.com/ssgreg/logf.Field": true,
+}
+
+// fieldCall reads a field constructor: F("key", value) or zap.Error(err) style constructors whose key
+// is their name, returning a field type; slog.Group adds its fields under its key.
+func fieldCall(info *types.Info, e ast.Expr, prefix string) ([]LogField, bool) {
 	call, ok := e.(*ast.CallExpr)
 	if !ok {
-		return LogField{}, false
+		return nil, false
 	}
 	fn := Callee(info, call)
-	if fn == nil || !isLogPackage(fn.Pkg()) || fn.Type().(*types.Signature).Results().Len() != 1 {
-		return LogField{}, false
+	if fn == nil || !isLogPackage(fn.Pkg()) {
+		return nil, false
+	}
+	res := fn.Type().(*types.Signature).Results()
+	if res.Len() != 1 || !isFieldType(res.At(0).Type()) {
+		return nil, false
+	}
+	if fn.Pkg().Path() == "log/slog" && fn.Name() == "Group" && len(call.Args) >= 1 {
+		g, ok := ConstString(info, call.Args[0])
+		if !ok {
+			return nil, false
+		}
+		var out []LogField
+		for _, a := range call.Args[1:] {
+			fs, ok := fieldCall(info, ast.Unparen(a), prefix+g+".")
+			if !ok {
+				return nil, false
+			}
+			out = append(out, fs...)
+		}
+		return out, true
 	}
 	switch len(call.Args) {
 	case 1:
-		return field(info, strings.ToLower(fn.Name()), call.Args[0]), true
+		return []LogField{field(info, prefix+strings.ToLower(fn.Name()), call.Args[0])}, true
 	case 2:
 		if k, ok := ConstString(info, call.Args[0]); ok {
-			return field(info, k, call.Args[1]), true
+			return []LogField{field(info, prefix+k, call.Args[1])}, true
 		}
 	}
-	return LogField{}, false
+	return nil, false
+}
+
+func isFieldType(t types.Type) bool {
+	n, ok := types.Unalias(t).(*types.Named)
+	if !ok || n.Obj().Pkg() == nil {
+		return false
+	}
+	return fieldTypes[n.Obj().Pkg().Path()+"."+n.Obj().Name()]
 }
 
 func field(info *types.Info, key string, v ast.Expr) LogField {

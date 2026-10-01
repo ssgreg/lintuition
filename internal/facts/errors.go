@@ -40,8 +40,33 @@ func AsErrorCall(info *types.Info, call *ast.CallExpr) (ErrorCall, bool) {
 	if msgArg < len(call.Args) {
 		ec.Message, ec.MessageKnown = ConstString(info, call.Args[msgArg])
 	}
-	if ec.MessageKnown && strings.Contains(ec.Message, "%w") {
+	// Only a formatter that implements %w wraps through its format: fmt.Errorf and xerrors.Errorf.
+	// errors.New("%w") is a literal percent sign; pkg/errors.Errorf does not wrap with %w.
+	if ec.MessageKnown && wrapsWithVerb[fn.Pkg().Path()+"."+fn.Name()] && hasWrapVerb(ec.Message) {
 		ec.Wraps = true
 	}
 	return ec, true
+}
+
+var wrapsWithVerb = map[string]bool{"fmt.Errorf": true, "golang.org/x/xerrors.Errorf": true}
+
+// hasWrapVerb reports whether a format has a %w verb, with flags, width, precision or an explicit
+// argument index (%[1]w), and not an escaped %%w.
+func hasWrapVerb(format string) bool {
+	for i := 0; i < len(format); i++ {
+		if format[i] != '%' {
+			continue
+		}
+		i++
+		if i < len(format) && format[i] == '%' {
+			continue
+		}
+		for i < len(format) && strings.IndexByte("+-# 0123456789.*[]", format[i]) >= 0 {
+			i++
+		}
+		if i < len(format) && format[i] == 'w' {
+			return true
+		}
+	}
+	return false
 }
