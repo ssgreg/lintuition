@@ -12,24 +12,17 @@
 package jev
 
 import (
-	"bytes"
 	"context"
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"fmt"
-	"io"
 	"math"
-	"math/rand/v2"
-	"net"
 	"net/http"
-	"net/url"
 	"os"
-	"strconv"
-	"sync"
-	"time"
 
+	"github.com/ssgreg/lintuition/internal/httpx"
 	"github.com/ssgreg/lintuition/sdk"
 )
 
@@ -72,32 +65,25 @@ func init() {
 
 // Classifier is the Jev backend.
 type Classifier struct {
-	account  string
-	keyEnv   string
-	endpoint string
-	model    string
-	key      string
-	client   *http.Client
-	retries  int
-	price    float64
-	limiter  *limiter
-	sleep    func(context.Context, time.Duration) error
+	account string
+	keyEnv  string
+	model   string
+	key     string
+	price   float64
+	hc      *httpx.Client
 }
 
 // New validates the settings and returns the backend. getenv reads the API key.
 func New(s Settings, getenv func(string) string) (*Classifier, error) {
-	c := &Classifier{account: s.Account, endpoint: s.Endpoint, model: s.Model, retries: 4, price: DefaultPricePerMTok, sleep: sleepCtx}
-	if c.endpoint == "" {
-		c.endpoint = DefaultEndpoint
+	endpoint := s.Endpoint
+	if endpoint == "" {
+		endpoint = DefaultEndpoint
 	}
-	u, err := url.Parse(c.endpoint)
+	hc, err := httpx.New(endpoint, httpx.Options{Timeout: s.Timeout, MaxRetries: s.MaxRetries, RequestsPerMinute: s.RequestsPerMinute})
 	if err != nil {
-		return nil, fmt.Errorf("endpoint: %w", err)
+		return nil, err
 	}
-	// Plain HTTP only to a loopback address (a test server or a local proxy).
-	if u.Scheme != "https" && !(u.Scheme == "http" && isLoopback(u.Hostname())) {
-		return nil, fmt.Errorf("endpoint %q: https is required", c.endpoint)
-	}
+	c := &Classifier{account: s.Account, model: s.Model, price: DefaultPricePerMTok, hc: hc}
 	if c.model == "" {
 		c.model = DefaultModel
 	}
@@ -107,31 +93,6 @@ func New(s Settings, getenv func(string) string) (*Classifier, error) {
 	}
 	// A missing key is reported by Ready, so config verify and a dry-run preview work offline.
 	c.key, c.keyEnv = getenv(env), env
-	timeout := 60 * time.Second
-	if s.Timeout != "" {
-		if timeout, err = time.ParseDuration(s.Timeout); err != nil || timeout <= 0 {
-			return nil, fmt.Errorf("timeout %q: must be a positive duration", s.Timeout)
-		}
-	}
-	c.client = &http.Client{
-		Timeout: timeout,
-		// Never follow a redirect: it would resend the body and the key to a place New did not check.
-		CheckRedirect: func(*http.Request, []*http.Request) error { return http.ErrUseLastResponse },
-	}
-	if s.MaxRetries != nil {
-		if *s.MaxRetries < 0 || *s.MaxRetries > 10 {
-			return nil, fmt.Errorf("max-retries %d: must be 0 to 10", *s.MaxRetries)
-		}
-		c.retries = *s.MaxRetries
-	}
-	rpm := s.RequestsPerMinute
-	if rpm == 0 {
-		rpm = 1000
-	}
-	if rpm < 0 {
-		return nil, fmt.Errorf("requests-per-minute %d: must be positive", rpm)
-	}
-	c.limiter = newLimiter(rpm)
 	if s.PricePerMTok != nil {
 		if p := *s.PricePerMTok; math.IsNaN(p) || math.IsInf(p, 0) || p < 0 {
 			return nil, fmt.Errorf("price-per-mtok %v: must be a finite number, 0 or more", p)
@@ -139,14 +100,6 @@ func New(s Settings, getenv func(string) string) (*Classifier, error) {
 		c.price = *s.PricePerMTok
 	}
 	return c, nil
-}
-
-func isLoopback(host string) bool {
-	if host == "localhost" {
-		return true
-	}
-	ip := net.ParseIP(host)
-	return ip != nil && ip.IsLoopback()
 }
 
 // Ready reports whether the backend can send: the API key must be set.
@@ -167,7 +120,7 @@ func (c *Classifier) Identity() string {
 		sum := sha256.Sum256([]byte("lintuition-cache-scope\x00" + c.key))
 		acct = "key:" + hex.EncodeToString(sum[:8])
 	}
-	return "jev|" + c.endpoint + "|" + c.model + "|" + acct
+	return "jev|" + c.hc.Endpoint() + "|" + c.model + "|" + acct
 }
 
 // Model is the public model identity for report evidence.
@@ -238,11 +191,11 @@ func (c *Classifier) Classify(ctx context.Context, req sdk.Request) (sdk.Respons
 	if err := c.Ready(); err != nil {
 		return sdk.Response{}, err
 	}
-	raw, err := c.post(ctx, body, req.Retry)
+	raw, err := c.hc.Post(ctx, body, http.Header{"Authorization": {"Bearer " + c.key}}, req.Retry)
 	if err != nil {
 		return sdk.Response{}, err
 	}
-	if err := noDuplicateKeys(raw); err != nil {
+	if err := httpx.NoDuplicateKeys(raw); err != nil {
 		return sdk.Response{}, err
 	}
 	var wr wireResponse
@@ -316,184 +269,4 @@ func convert(q sdk.Question, wa wireAnswer) (sdk.Answer, error) {
 		a.Score = wa.Score
 	}
 	return a, nil
-}
-
-// noDuplicateKeys refuses a response with a repeated key in any JSON object (two "answers", two
-// answers to one question, two "choice" fields): a decoder would silently keep the last one.
-func noDuplicateKeys(raw []byte) error {
-	dec := json.NewDecoder(bytes.NewReader(raw))
-	var walk func() error
-	walk = func() error {
-		t, err := dec.Token()
-		if err != nil {
-			return err
-		}
-		switch t {
-		case json.Delim('{'):
-			seen := map[string]bool{}
-			for dec.More() {
-				kt, err := dec.Token()
-				if err != nil {
-					return err
-				}
-				k, _ := kt.(string)
-				if seen[k] {
-					return errDuplicate
-				}
-				seen[k] = true
-				if err := walk(); err != nil {
-					return err
-				}
-			}
-			_, err = dec.Token()
-			return err
-		case json.Delim('['):
-			for dec.More() {
-				if err := walk(); err != nil {
-					return err
-				}
-			}
-			_, err = dec.Token()
-			return err
-		}
-		return nil
-	}
-	if err := walk(); err != nil {
-		if errors.Is(err, errDuplicate) {
-			return errors.New("the response repeats a key in one object")
-		}
-		return errors.New("the response is not valid JSON")
-	}
-	return nil
-}
-
-var errDuplicate = errors.New("duplicate key")
-
-// apiError is a failure the service reported, including a redirect, which is never followed. It never carries the request or response body: a
-// service may echo the input, and the input may be private.
-type apiError struct {
-	Status int
-}
-
-func (e apiError) Error() string {
-	return fmt.Sprintf("HTTP %d %s", e.Status, http.StatusText(e.Status))
-}
-
-// post sends the body, retrying 429, 5xx and transport errors. Every attempt after the first is
-// first cleared with spend (the run's budget); a refusal stops the retries with its error.
-func (c *Classifier) post(ctx context.Context, body []byte, spend func() error) ([]byte, error) {
-	var last error
-	for attempt := 0; attempt <= c.retries; attempt++ {
-		if attempt > 0 && spend != nil {
-			if err := spend(); err != nil {
-				return nil, fmt.Errorf("%v; retry not sent: %w", last, err)
-			}
-		}
-		if err := c.limiter.wait(ctx, c.sleep); err != nil {
-			return nil, err
-		}
-		raw, retryAfter, err := c.once(ctx, body)
-		if err == nil {
-			return raw, nil
-		}
-		last = err
-		var ae apiError
-		retryable := !errors.As(err, &ae) || ae.Status == http.StatusTooManyRequests || ae.Status >= 500
-		if !retryable || attempt == c.retries || ctx.Err() != nil {
-			break
-		}
-		wait := retryAfter
-		if wait == 0 {
-			// Exponential backoff with jitter: 0.5-1.5 s, 1-3 s, 2-6 s, ...
-			base := time.Duration(1<<attempt) * time.Second
-			wait = base/2 + time.Duration(rand.Int64N(int64(base)))
-		}
-		// The server's delay is honoured as given; the run's context bounds the total wait.
-		if dl, ok := ctx.Deadline(); ok && time.Until(dl) < wait {
-			return nil, fmt.Errorf("%v; the requested retry delay of %s exceeds the run's remaining time", last, wait.Round(time.Second))
-		}
-		if err := c.sleep(ctx, wait); err != nil {
-			return nil, err
-		}
-	}
-	return nil, last
-}
-
-func (c *Classifier) once(ctx context.Context, body []byte) ([]byte, time.Duration, error) {
-	req, err := http.NewRequestWithContext(ctx, http.MethodPost, c.endpoint, bytes.NewReader(body))
-	if err != nil {
-		return nil, 0, err
-	}
-	req.Header.Set("Authorization", "Bearer "+c.key)
-	req.Header.Set("Content-Type", "application/json")
-	resp, err := c.client.Do(req)
-	if err != nil {
-		// url.Error names the endpoint and the cause; the key travels in a header and is not in it.
-		return nil, 0, err
-	}
-	defer resp.Body.Close()
-	raw, err := io.ReadAll(io.LimitReader(resp.Body, 8<<20))
-	if err != nil {
-		return nil, 0, err
-	}
-	if resp.StatusCode != http.StatusOK {
-		return nil, retryAfter(resp.Header.Get("Retry-After"), time.Now()), apiError{Status: resp.StatusCode}
-	}
-	return raw, 0, nil
-}
-
-// retryAfter parses Retry-After in both forms HTTP allows (RFC 9110, 10.2.3): delay seconds or an
-// HTTP date. Zero means none was given, or the date has passed.
-func retryAfter(v string, now time.Time) time.Duration {
-	if v == "" {
-		return 0
-	}
-	if s, err := strconv.ParseFloat(v, 64); err == nil {
-		if s <= 0 || math.IsNaN(s) || math.IsInf(s, 0) {
-			return 0
-		}
-		return time.Duration(s * float64(time.Second))
-	}
-	if t, err := http.ParseTime(v); err == nil && t.After(now) {
-		return t.Sub(now)
-	}
-	return 0
-}
-
-func sleepCtx(ctx context.Context, d time.Duration) error {
-	t := time.NewTimer(d)
-	defer t.Stop()
-	select {
-	case <-ctx.Done():
-		return ctx.Err()
-	case <-t.C:
-		return nil
-	}
-}
-
-// limiter spaces requests evenly to a rate per minute.
-type limiter struct {
-	mu       sync.Mutex
-	interval time.Duration
-	next     time.Time
-	now      func() time.Time
-}
-
-func newLimiter(rpm int) *limiter {
-	return &limiter{interval: time.Minute / time.Duration(rpm), now: time.Now}
-}
-
-func (l *limiter) wait(ctx context.Context, sleep func(context.Context, time.Duration) error) error {
-	l.mu.Lock()
-	now := l.now()
-	at := l.next
-	if at.Before(now) {
-		at = now
-	}
-	l.next = at.Add(l.interval)
-	l.mu.Unlock()
-	if d := at.Sub(now); d > 0 {
-		return sleep(ctx, d)
-	}
-	return nil
 }

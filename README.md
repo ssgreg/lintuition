@@ -141,6 +141,7 @@ as unsupported rather than silently dropped.
 |---|---|
 | `fake` | deterministic scripted answers, local; for tests and offline runs |
 | `jev` | [TypeSafe](https://typesafe.ai) System One models (Jev); remote, reads the API key from `TYPESAFE_API_KEY` |
+| `openai` | OpenAI-compatible chat completions with log probabilities: OpenAI, or a local Ollama, llama.cpp, vLLM, LM Studio; local when the server is |
 
 ```yaml
 semantic:
@@ -161,8 +162,36 @@ To see exactly what would be sent, without sending it:
 lintuition run --dry-run --preview requests.jsonl ./...
 ```
 
-More backends (a hosted LLM API, a local model) can plug in behind the same `sdk.Classifier`
-interface.
+### A general LLM as the classifier
+
+`openai` turns a chat model into a classifier: each option gets a letter, the model is asked for
+one letter, and the answer's probabilities are read from the log probabilities of that first token.
+The probabilities come from the model's own token distribution, not from a number it writes.
+
+```yaml
+semantic:
+  classifier: openai
+  local-only: true                       # refuse anything that would leave the machine
+  classifiers:
+    openai:
+      base-url: http://127.0.0.1:11434/v1 # Ollama
+      model: qwen2.5:7b
+```
+
+How good the answers are depends on the model, and thresholds tuned for one backend do not carry
+over. Measured on this repository's twins, 2026-10-01:
+
+| classifier | model | defects caught | false alarms | requests |
+|---|---|---|---|---|
+| `jev` | jev-latest | 6/6 in each of 3 runs | 0 | 48 |
+| `openai` (Ollama, local) | qwen2.5:7b | 1/6 | 0 | 16 |
+| `openai` (Ollama, local) | qwen2.5:3b | 0/6 | 0 | 16 |
+
+The small local models mostly answer "the text does not let you tell" or read "config saved to
+disk" as an operation that is starting; the rules then abstain or stay quiet rather than report
+noise. Run `lintuition eval` on your twins before trusting another backend.
+
+More backends can plug in behind the same `sdk.Classifier` interface.
 
 ## Plugins
 

@@ -104,6 +104,23 @@ semantic:
       price-per-mtok: 0.042
       # Scopes the answer cache to an account. Default: a one-way hash of the API key.
       account: ""
+    openai:
+      # The API root; /chat/completions is appended. A loopback server (Ollama, llama.cpp) is local.
+      base-url: https://api.openai.com/v1
+      # Required; there is no default model.
+      model: qwen2.5:7b
+      # Not needed for a loopback server.
+      api-key-env: OPENAI_API_KEY
+      # At 0 the model answers the same way every time, so votes above 1 add nothing.
+      temperature: 0
+      # Least probability the first token must put on the offered option letters.
+      min-letter-mass: 0.5
+      timeout: 60s
+      max-retries: 4
+      requests-per-minute: 1000
+      # USD per million input tokens, for estimates and budgets; unset means unknown.
+      price-per-mtok: 0
+      account: ""
   # What may leave the machine: facts (structural facts only), prose (default: facts plus
   # person-written text such as comments, metric Help and log messages), source (adds Go source).
   payload: prose

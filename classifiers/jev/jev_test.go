@@ -48,7 +48,7 @@ func newTest(t *testing.T, url string) *Classifier {
 	if err != nil {
 		t.Fatal(err)
 	}
-	c.sleep = func(context.Context, time.Duration) error { return nil }
+	c.hc.Sleep = func(context.Context, time.Duration) error { return nil }
 	return c
 }
 
@@ -126,7 +126,7 @@ func TestRetries(t *testing.T) {
 	})
 	c := newTest(t, s.URL)
 	var waits []time.Duration
-	c.sleep = func(_ context.Context, d time.Duration) error { waits = append(waits, d); return nil }
+	c.hc.Sleep = func(_ context.Context, d time.Duration) error { waits = append(waits, d); return nil }
 	if _, err := c.Classify(context.Background(), req); err != nil {
 		t.Fatal(err)
 	}
@@ -183,22 +183,8 @@ func TestSettings(t *testing.T) {
 		t.Error("negative retries must be refused")
 	}
 	c, err := New(Settings{APIKeyEnv: "MY_KEY"}, k)
-	if err != nil || c.endpoint != DefaultEndpoint || c.model != DefaultModel || c.Capabilities().Local {
+	if err != nil || c.hc.Endpoint() != DefaultEndpoint || c.model != DefaultModel || c.Capabilities().Local {
 		t.Fatalf("defaults: %+v %v", c, err)
-	}
-}
-
-func TestLimiterSpacesRequests(t *testing.T) {
-	l := newLimiter(60) // one a second
-	now := time.Unix(0, 0)
-	l.now = func() time.Time { return now }
-	var waits []time.Duration
-	sleep := func(_ context.Context, d time.Duration) error { waits = append(waits, d); return nil }
-	for range 3 {
-		l.wait(context.Background(), sleep)
-	}
-	if len(waits) != 2 || waits[0] != time.Second || waits[1] != 2*time.Second {
-		t.Fatalf("waits %v", waits)
 	}
 }
 
@@ -262,20 +248,6 @@ func TestMalformedAnswersRejectedWithoutQuotingThem(t *testing.T) {
 }
 
 func TestRetryAfter(t *testing.T) {
-	now := time.Date(2026, 10, 1, 12, 0, 0, 0, time.UTC)
-	for v, want := range map[string]time.Duration{
-		"120":  120 * time.Second,
-		"1.5":  1500 * time.Millisecond,
-		"0":    0,
-		"-3":   0,
-		"soon": 0,
-		now.Add(2 * time.Minute).Format(http.TimeFormat):  2 * time.Minute,
-		now.Add(-2 * time.Minute).Format(http.TimeFormat): 0,
-	} {
-		if got := retryAfter(v, now); got != want {
-			t.Errorf("retryAfter(%q) = %v, want %v", v, got, want)
-		}
-	}
 	// A delay longer than the run has left fails at once instead of retrying early.
 	s := newServer(t, func(_ int, _ map[string]any, w http.ResponseWriter) {
 		w.Header().Set("Retry-After", "120")
