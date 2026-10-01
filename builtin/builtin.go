@@ -10,4 +10,5 @@ import (
 	_ "github.com/ssgreg/lintuition/linters/metrictypevshelp"
 	_ "github.com/ssgreg/lintuition/linters/prematuresuccess"
 	_ "github.com/ssgreg/lintuition/linters/tablecase"
+	_ "github.com/ssgreg/lintuition/linters/testnameassert"
 )

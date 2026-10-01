@@ -6,6 +6,7 @@ package facts
 import (
 	"go/ast"
 	"go/constant"
+	"go/token"
 	"go/types"
 	"strings"
 	"unicode"
@@ -145,4 +146,12 @@ func Words(ident string) []string {
 	}
 	flush(len(rs))
 	return out
+}
+
+// IsTest reports whether fd is a top-level TestXxx function in a _test.go file.
+func IsTest(fset *token.FileSet, fd *ast.FuncDecl) bool {
+	if !strings.HasPrefix(fd.Name.Name, "Test") || fd.Recv != nil {
+		return false
+	}
+	return strings.HasSuffix(fset.Position(fd.Pos()).Filename, "_test.go")
 }

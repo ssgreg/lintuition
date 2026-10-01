@@ -2,7 +2,7 @@ version: "2"
 
 linters:
   default: none
-  enable: [metric-type-vs-help, premature-success, table-case-vs-expectation]
+  enable: [metric-type-vs-help, premature-success, table-case-vs-expectation, test-name-vs-assertion]
 
 semantic:
   classifier: fake
@@ -27,3 +27,7 @@ semantic:
         - {question: outcome, when: "passed=false", choice: unstated, probability: 0.9}
         - {question: outcome, when: "whether expired", choice: "false", probability: 0.95}
         - {question: outcome, when: "whether valid", choice: "true", probability: 0.95}
+        # test-name-vs-assertion
+        - {linter: test-name-vs-assertion, question: name_says, when: "unquote rejects unbalanced quote", choice: error, probability: 0.95}
+        - {linter: test-name-vs-assertion, question: name_says, when: "unquote accepts quoted word", choice: no_error, probability: 0.95}
+        - {linter: test-name-vs-assertion, question: name_says, when: "unquote empty string", choice: input_only, probability: 0.95}
