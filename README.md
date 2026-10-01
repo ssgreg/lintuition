@@ -117,6 +117,7 @@ person-written text does leave the machine when the backend is remote.
 
 | linter | checks |
 |---|---|
+| `destructive-remediation` | an error or log message that advises deleting, wiping, resetting or reinstalling without saying what is lost |
 | `log-key-value-role` | a structured log key that names a different quantity or role than the variable logged under it |
 | `log-sensitive-field` | a structured log field that logs a secret (token, password, key material) as is |
 | `metric-type-vs-help` | Prometheus metric Help that describes a different kind of value than the metric type records |

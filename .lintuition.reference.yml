@@ -38,6 +38,9 @@ linters:
     severe-event-understated:
       # Minimum probability that a debug or info message states an unintended loss. Default: 0.85.
       threshold: 0.85
+    destructive-remediation:
+      # Minimum probability that a text advises a destructive step. Default: 0.85.
+      threshold: 0.85
   exclusions:
     # Generated files: lax (default; also loose "do not edit" markers), strict (the standard header only), disable.
     generated: lax

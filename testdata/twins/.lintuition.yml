@@ -2,7 +2,7 @@ version: "2"
 
 linters:
   default: none
-  enable: [metric-type-vs-help, premature-success, table-case-vs-expectation, log-sensitive-field, log-key-value-role, normal-event-at-error, severe-event-understated]
+  enable: [metric-type-vs-help, premature-success, table-case-vs-expectation, log-sensitive-field, log-key-value-role, normal-event-at-error, severe-event-understated, destructive-remediation]
 
 semantic:
   classifier: fake
@@ -65,3 +65,19 @@ semantic:
         - {linter: severe-event-understated, question: on_purpose, when: "\"message\":\"cache warmed\"", yes: 0.5}
         - {linter: severe-event-understated, question: consequence, when: "\"message\":\"upload 3 of 5\"", choice: routine, probability: 0.95}
         - {linter: severe-event-understated, question: on_purpose, when: "\"message\":\"upload 3 of 5\"", yes: 0.5}
+        # destructive-remediation
+        - {linter: destructive-remediation, question: advice, when: "delete the repository directory and run init again", choice: destructive_advice, probability: 0.95}
+        - {linter: destructive-remediation, question: states_loss, when: "delete the repository directory and run init again", yes: 0.1}
+        - {linter: destructive-remediation, question: advice, when: "erases every stored backup, so copy it elsewhere first", choice: destructive_advice, probability: 0.95}
+        - {linter: destructive-remediation, question: states_loss, when: "erases every stored backup, so copy it elsewhere first", yes: 0.95}
+        - {linter: destructive-remediation, question: advice, when: "remove the --dry-run flag to apply the plan", choice: safe_advice, probability: 0.9}
+        - {linter: destructive-remediation, question: states_loss, when: "remove the --dry-run flag to apply the plan", yes: 0.2}
+        - {linter: destructive-remediation, question: advice, when: "lock file was removed by another process", choice: no_advice, probability: 0.95}
+        - {linter: destructive-remediation, question: states_loss, when: "lock file was removed by another process", yes: 0.2}
+        # destructive-remediation reads every text with a destructive word, the other linters' twins too.
+        - {linter: destructive-remediation, question: advice, when: "\"text\":\"queue full, event dropped and not retried\"", choice: no_advice, probability: 0.95}
+        - {linter: destructive-remediation, question: states_loss, when: "\"text\":\"queue full, event dropped and not retried\"", yes: 0.5}
+        - {linter: destructive-remediation, question: advice, when: "\"text\":\"deleted expired sessions as requested\"", choice: no_advice, probability: 0.95}
+        - {linter: destructive-remediation, question: states_loss, when: "\"text\":\"deleted expired sessions as requested\"", yes: 0.5}
+        - {linter: destructive-remediation, question: advice, when: "\"text\":\"debug event dropped by the sampler as configured\"", choice: no_advice, probability: 0.95}
+        - {linter: destructive-remediation, question: states_loss, when: "\"text\":\"debug event dropped by the sampler as configured\"", yes: 0.5}
