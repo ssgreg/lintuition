@@ -395,7 +395,8 @@ func (r *runner) callsPer(qs []sdk.Question) int {
 func (r *runner) spent() bool {
 	r.mu.Lock()
 	defer r.mu.Unlock()
-	if r.budget.MaxCostUSD > 0 && r.cost >= r.budget.MaxCostUSD {
+	if r.budget.MaxCostUSD > 0 && (r.cost >= r.budget.MaxCostUSD || r.unknownCost > 0) {
+		// An unknown cost counts as spent: the run cannot tell what is left.
 		if r.capped == "" {
 			r.capped = fmt.Sprintf("semantic.budget.max-cost-usd %.4f spent", r.budget.MaxCostUSD)
 		}

@@ -160,3 +160,14 @@ func TestLookupValidates(t *testing.T) {
 		t.Error("a valid record must hit")
 	}
 }
+
+func TestVoteKeepsConfidence(t *testing.T) {
+	qs := []sdk.Question{{ID: "k", Kind: sdk.Choice, Text: "?", Options: []sdk.Option{{Key: "a"}, {Key: "b"}}}}
+	s := func(c float64) map[string]sdk.Answer {
+		return map[string]sdk.Answer{"k": {QuestionID: "k", Choice: "a", Probabilities: map[string]float64{"a": 1}, Confidence: f(c), ConfidenceMeaning: sdk.ConfidenceOptionMass}}
+	}
+	got, _, _ := Vote(qs, []map[string]sdk.Answer{s(0.8), s(0.8), s(0.8)})
+	if got["k"].Confidence == nil || *got["k"].Confidence != 0.8000000000000002 && *got["k"].Confidence != 0.8 || got["k"].ConfidenceMeaning != sdk.ConfidenceOptionMass {
+		t.Fatalf("vote must keep the option mass: %+v", got["k"])
+	}
+}

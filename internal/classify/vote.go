@@ -31,6 +31,19 @@ func Vote(qs []sdk.Question, samples []map[string]sdk.Answer) (map[string]sdk.An
 	out := map[string]sdk.Answer{}
 	for _, q := range qs {
 		a := sdk.Answer{QuestionID: q.ID, ConfidenceMeaning: samples[0][q.ID].ConfidenceMeaning}
+		// The confidence, when the samples carry one, is their mean: for option mass, the share of
+		// probability that fell on the options across the samples.
+		confs, withConf := 0.0, 0
+		for _, s := range samples {
+			if c := s[q.ID].Confidence; c != nil {
+				confs += *c
+				withConf++
+			}
+		}
+		if withConf == n {
+			m := confs / float64(n)
+			a.Confidence = &m
+		}
 		switch q.Kind {
 		case sdk.Choice:
 			count := map[string]int{}

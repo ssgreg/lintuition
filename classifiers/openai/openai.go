@@ -256,12 +256,17 @@ type completionResponse struct {
 		} `json:"logprobs"`
 	} `json:"choices"`
 	Usage struct {
-		PromptTokens int `json:"prompt_tokens"`
+		PromptTokens *int `json:"prompt_tokens"`
 	} `json:"usage"`
 }
 
 func (c *Classifier) usage(cr completionResponse) sdk.Usage {
-	return sdk.Usage{InputTokens: cr.Usage.PromptTokens, CostUSD: float64(cr.Usage.PromptTokens) * c.price / 1e6}
+	// Missing, null or negative usage is unknown, never free.
+	if cr.Usage.PromptTokens == nil || *cr.Usage.PromptTokens < 0 {
+		return sdk.Usage{Unknown: true}
+	}
+	n := *cr.Usage.PromptTokens
+	return sdk.Usage{InputTokens: n, CostUSD: float64(n) * c.price / 1e6}
 }
 
 // Classify implements sdk.Classifier: one completion per question.
@@ -291,10 +296,12 @@ func (c *Classifier) Classify(ctx context.Context, req sdk.Request) (sdk.Respons
 			return sdk.Response{}, err
 		}
 		if err := httpx.NoDuplicateKeys(raw); err != nil {
+			used(sdk.Usage{Unknown: true})
 			return sdk.Response{}, err
 		}
 		var cr completionResponse
 		if err := json.Unmarshal(raw, &cr); err != nil {
+			used(sdk.Usage{Unknown: true})
 			return sdk.Response{}, errors.New("the response is not valid JSON of the expected shape")
 		}
 		// Usage is reported before the answer is judged: a rejected completion still cost money.

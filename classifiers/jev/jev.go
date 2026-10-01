@@ -195,6 +195,9 @@ func (c *Classifier) Classify(ctx context.Context, req sdk.Request) (sdk.Respons
 	if err != nil {
 		return sdk.Response{}, err
 	}
+	// A 200 response cost money whatever its answers: report it first, unknown when it says nothing
+	// usable.
+	reportUsage(req, raw, c.price)
 	if err := httpx.NoDuplicateKeys(raw); err != nil {
 		return sdk.Response{}, err
 	}
@@ -212,10 +215,7 @@ func (c *Classifier) Classify(ctx context.Context, req sdk.Request) (sdk.Respons
 			return sdk.Response{}, errors.New("the response answers a question that was not asked")
 		}
 	}
-	resp := sdk.Response{Usage: sdk.Usage{
-		InputTokens: wr.Usage.InputTokens,
-		CostUSD:     float64(wr.Usage.InputTokens) * c.price / 1e6,
-	}}
+	var resp sdk.Response
 	for _, q := range req.Questions {
 		wa, ok := wr.Answers[q.ID]
 		if !ok {
@@ -229,6 +229,24 @@ func (c *Classifier) Classify(ctx context.Context, req sdk.Request) (sdk.Respons
 		resp.Answers = append(resp.Answers, a)
 	}
 	return resp, nil
+}
+
+// reportUsage reports the input tokens of a response; missing, null or negative is unknown.
+func reportUsage(req sdk.Request, raw []byte, price float64) {
+	if req.Used == nil {
+		return
+	}
+	var u struct {
+		Usage struct {
+			InputTokens *int `json:"input_tokens"`
+		} `json:"usage"`
+	}
+	if json.Unmarshal(raw, &u) != nil || u.Usage.InputTokens == nil || *u.Usage.InputTokens < 0 {
+		req.Used(sdk.Usage{Unknown: true})
+		return
+	}
+	n := *u.Usage.InputTokens
+	req.Used(sdk.Usage{InputTokens: n, CostUSD: float64(n) * price / 1e6})
 }
 
 // convert maps a wire answer to the SDK, refusing a wrong type or value fields of another kind

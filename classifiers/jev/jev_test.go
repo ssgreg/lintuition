@@ -70,7 +70,10 @@ const okResp = `{"model":"jev-1.13.0","answers":{
 
 func TestRequestAndResponse(t *testing.T) {
 	s := newServer(t, func(_ int, _ map[string]any, w http.ResponseWriter) { io.WriteString(w, okResp) })
-	resp, err := newTest(t, s.URL).Classify(context.Background(), req)
+	var usage []sdk.Usage
+	r := req
+	r.Used = func(u sdk.Usage) { usage = append(usage, u) }
+	resp, err := newTest(t, s.URL).Classify(context.Background(), r)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -107,8 +110,8 @@ func TestRequestAndResponse(t *testing.T) {
 	if *by["yes"].Yes != 0.94 || *by["lvl"].Score != 1.4 {
 		t.Errorf("noul/score: %+v %+v", by["yes"], by["lvl"])
 	}
-	if resp.Usage.InputTokens != 1000000 || resp.Usage.CostUSD != DefaultPricePerMTok {
-		t.Errorf("usage: %+v", resp.Usage)
+	if len(usage) != 1 || usage[0].InputTokens != 1000000 || usage[0].CostUSD != DefaultPricePerMTok {
+		t.Errorf("usage: %+v", usage)
 	}
 }
 
@@ -258,5 +261,30 @@ func TestRetryAfter(t *testing.T) {
 	defer cancel()
 	if _, err := c.Classify(ctx, req); err == nil || !strings.Contains(err.Error(), "exceeds the run's remaining time") || len(s.bodies) != 1 {
 		t.Fatalf("err %v, %d attempts", err, len(s.bodies))
+	}
+}
+
+func TestUsageIsReportedOrUnknown(t *testing.T) {
+	for name, body := range map[string]string{
+		"missing usage": `{"answers":{"kind":{"type":"choice","choice":"current"},"yes":{"type":"noul","noul":0.5},"lvl":{"type":"score","score":1}}}`,
+		"null tokens":   `{"answers":{},"usage":{"input_tokens":null}}`,
+		"bad answer":    `{"answers":{"kind":{"type":"noul","noul":0.5}},"usage":{"input_tokens":7}}`,
+	} {
+		s := newServer(t, func(int, map[string]any, http.ResponseWriter) {})
+		s.Config.Handler = http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) { io.WriteString(w, body) })
+		var got []sdk.Usage
+		r := req
+		r.Used = func(u sdk.Usage) { got = append(got, u) }
+		newTest(t, s.URL).Classify(context.Background(), r)
+		if len(got) != 1 {
+			t.Errorf("%s: usage must be reported once: %+v", name, got)
+			continue
+		}
+		if name == "bad answer" && (got[0].Unknown || got[0].InputTokens != 7) {
+			t.Errorf("a rejected answer still reports its known usage: %+v", got[0])
+		}
+		if name != "bad answer" && !got[0].Unknown {
+			t.Errorf("%s: missing usage must be unknown, not zero: %+v", name, got[0])
+		}
 	}
 }

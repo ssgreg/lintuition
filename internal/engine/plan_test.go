@@ -77,3 +77,34 @@ func TestCostStopsTheNextQuestion(t *testing.T) {
 		t.Fatalf("the first call spent the budget; the second must not go: err %v calls %d cost %v sent %d", j.err, cl.calls, r.cost, r.sent)
 	}
 }
+
+// unknownCost reports usage it cannot price.
+type unknownCost struct{ calls int }
+
+func (u *unknownCost) Capabilities() sdk.Capabilities {
+	return sdk.Capabilities{Kinds: []sdk.Kind{sdk.Noul}, CostKnown: true}
+}
+
+func (u *unknownCost) Classify(_ context.Context, req sdk.Request) (sdk.Response, error) {
+	if err := req.Start(); err != nil {
+		return sdk.Response{}, err
+	}
+	u.calls++
+	req.Used(sdk.Usage{Unknown: true})
+	var resp sdk.Response
+	for _, q := range req.Questions {
+		y := 0.9
+		resp.Answers = append(resp.Answers, sdk.Answer{QuestionID: q.ID, Yes: &y})
+	}
+	return resp, nil
+}
+
+func TestUnknownCostStopsSpending(t *testing.T) {
+	cl := &unknownCost{}
+	r := newRunner(cl, false, config.Budget{MaxCostUSD: 1}, 3)
+	jobs := []*job{newJob(), newJob()}
+	r.do(context.Background(), jobs)
+	if cl.calls != 1 {
+		t.Fatalf("after a call of unknown cost no further call may go out under a cap: %d calls", cl.calls)
+	}
+}
