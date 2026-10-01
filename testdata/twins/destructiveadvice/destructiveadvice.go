@@ -22,3 +22,8 @@ func applySafe() error {
 func cleaned() error {
 	return errors.New("lock file was removed by another process")
 }
+
+// Defect: a destructive step in words no keyword list holds.
+func mountDefect() error {
+	return errors.New("data volume is unreadable; format it and restart the node") // want `advises a destructive step without saying what is lost`
+}

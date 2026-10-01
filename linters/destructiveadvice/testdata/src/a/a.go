@@ -22,7 +22,7 @@ func c2(err error) error {
 }
 
 func c3() error {
-	return errors.New("file not found") // 3 none: no destructive word
+	return errors.New("file not found") // 3 candidate: every constant text is asked
 }
 
 func c4() error {
@@ -50,13 +50,25 @@ func c9(ctx context.Context, l *logf.Logger) {
 }
 
 func c10() {
-	log.Printf("%s: %v", "a", 1) // 10 none: no words of advice
+	log.Printf("%s: %v", "a", 1) // 10 none: no words at all
 }
 
 func c11() error {
-	return fmt.Errorf("droplet count %d", 3) // 11 candidate: drop is a prefix; the classifier decides
+	return fmt.Errorf("droplet count %d", 3) // 11 candidate: the classifier decides
 }
 
 func c12(s fmt.Stringer) string {
 	return fmt.Sprintf("delete %s", s) // 12 none: Sprintf makes no error
+}
+
+func c13() error {
+	return errors.New("format the data volume and restart") // 13 candidate: format
+}
+
+func c14() error {
+	return errors.New("overwrite the database with an empty file") // 14 candidate: overwrite
+}
+
+func c15() error {
+	return errors.New("run mkfs.ext4 on the data volume to recover") // 15 candidate: mkfs
 }

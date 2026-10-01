@@ -55,12 +55,16 @@ func TestExtraction(t *testing.T) {
 	want := []string{
 		`1 error message "index is corrupt; delete the data directory and restart"`,
 		`2 error message "config invalid: %w; reset it with --reset"`,
+		`3 error message "file not found"`,
 		`4 unsupported: the error message is not a constant string`,
 		`5 log message "cache is stale, wipe it and restart"`,
 		`7 error message "run rm -rf /var/lib/app to recover"`,
 		`8 unsupported: the log message is not a constant string`,
 		`9 log message "removed 3 stale sessions"`,
 		`11 error message "droplet count %d"`,
+		`13 error message "format the data volume and restart"`,
+		`14 error message "overwrite the database with an empty file"`,
+		`15 error message "run mkfs.ext4 on the data volume to recover"`,
 	}
 	if strings.Join(got, "\n") != strings.Join(want, "\n") {
 		t.Fatalf("candidates:\n%s\n\nwant:\n%s", strings.Join(got, "\n"), strings.Join(want, "\n"))
@@ -101,16 +105,5 @@ func TestDecide(t *testing.T) {
 	}
 	if d := r.Decide(c, answers("destructive_advice", 0.9, f(0.1))); d.Message != `advises a destructive step without saying what is lost: "delete the data directory"` {
 		t.Errorf("message: %s", d.Message)
-	}
-}
-
-func TestDestructiveWord(t *testing.T) {
-	for text, want := range map[string]bool{
-		"delete the cache": true, "Reset your password": true, "run rm -rf x": true, "reinstall the agent": true,
-		"file not found": false, "firmware update": false, "remote host": false, "transform failed": false,
-	} {
-		if got := destructiveWord(text); got != want {
-			t.Errorf("destructiveWord(%q) = %v", text, got)
-		}
 	}
 }
