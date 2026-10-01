@@ -2,7 +2,7 @@ version: "2"
 
 linters:
   default: none
-  enable: [metric-type-vs-help, premature-success, table-case-vs-expectation]
+  enable: [metric-type-vs-help, premature-success, table-case-vs-expectation, sentinel-name-vs-text, error-needs-type, human-unit-contradiction, enum-comment-shift]
 
 semantic:
   classifier: fake
@@ -27,3 +27,28 @@ semantic:
         - {question: outcome, when: "passed=false", choice: unstated, probability: 0.9}
         - {question: outcome, when: "whether expired", choice: "false", probability: 0.95}
         - {question: outcome, when: "whether valid", choice: "true", probability: 0.95}
+        # sentinel-name-vs-text
+        - {linter: sentinel-name-vs-text, question: condition, when: "tenant record not found", choice: different, probability: 0.8}
+        - {linter: sentinel-name-vs-text, question: condition, when: "tenant storage quota exceeded", choice: same, probability: 0.9}
+        - {linter: sentinel-name-vs-text, question: condition, when: "backend hiccup", choice: insufficient, probability: 0.8}
+        - {linter: sentinel-name-vs-text, question: condition, when: "cached lease is outdated", choice: different, probability: 0.5}
+        # (the sentinel of error-needs-type's fixed twin)
+        - {linter: sentinel-name-vs-text, question: condition, when: "invoice does not exist", choice: same, probability: 0.9}
+        # error-needs-type
+        - {linter: error-needs-type, question: branchable, when: "invoice not found", yes: 0.9}
+        - {linter: error-needs-type, question: branchable, when: "invoice ledger invariant broken", yes: 0.1}
+        - {linter: error-needs-type, question: branchable, when: "invoice payload rejected", yes: 0.6}
+        # human-unit-contradiction
+        - {linter: human-unit-contradiction, question: unit, when: "compaction took %.0f ms", choice: milliseconds, probability: 0.9}
+        - {linter: human-unit-contradiction, question: unit, when: "compaction took %d ms", choice: milliseconds, probability: 0.95}
+        - {linter: human-unit-contradiction, question: unit, when: "compaction retry, backoff factor", choice: unspecified, probability: 0.9}
+        - {linter: human-unit-contradiction, question: unit, when: "compaction window %.0f", choice: minutes, probability: 0.6}
+        # enum-comment-shift
+        - {linter: enum-comment-shift, question: describes, when: "a replication job waiting for a free worker", choice: PhaseQueued, probability: 0.95}
+        - {linter: enum-comment-shift, question: describes, when: "every block has been copied and verified", choice: PhaseVerified, probability: 0.9}
+        - {linter: enum-comment-shift, question: describes, when: "replica without letting writes through", choice: ModeReadOnly, probability: 0.95}
+        - {linter: enum-comment-shift, question: describes, when: "replica for writes too", choice: ModeReadWrite, probability: 0.95}
+        - {linter: enum-comment-shift, question: describes, when: "Replica storage tiers, fastest first", choice: none, probability: 0.9}
+        - {linter: enum-comment-shift, question: describes, when: "replica tier kept for a while", choice: TierWarm, probability: 0.5}
+        # (the twin's own want comment is a line comment on a constant too: a note, no constant)
+        - {linter: enum-comment-shift, question: describes, when: "want `comment describes PhaseVerified", choice: none, probability: 0.9}
