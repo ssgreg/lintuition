@@ -26,6 +26,11 @@ linters:
     metric-type-vs-help:
       # Minimum probability of the classifier's answer for a finding. Default: 0.8.
       threshold: 0.8
+    sentinel-name-vs-text:
+      # Minimum probability of the answer either way. Default: 0.55.
+      threshold: 0.55
+      # How much more probable "different" must be than "same" for a finding. Default: 0.2.
+      margin: 0.2
   exclusions:
     # Generated files: lax (default; also loose "do not edit" markers), strict (the standard header only), disable.
     generated: lax

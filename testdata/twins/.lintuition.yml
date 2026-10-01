@@ -2,7 +2,7 @@ version: "2"
 
 linters:
   default: none
-  enable: [metric-type-vs-help, premature-success, table-case-vs-expectation]
+  enable: [metric-type-vs-help, premature-success, table-case-vs-expectation, sentinel-name-vs-text]
 
 semantic:
   classifier: fake
@@ -27,3 +27,8 @@ semantic:
         - {question: outcome, when: "passed=false", choice: unstated, probability: 0.9}
         - {question: outcome, when: "whether expired", choice: "false", probability: 0.95}
         - {question: outcome, when: "whether valid", choice: "true", probability: 0.95}
+        # sentinel-name-vs-text
+        - {linter: sentinel-name-vs-text, question: condition, when: "tenant record not found", choice: different, probability: 0.8}
+        - {linter: sentinel-name-vs-text, question: condition, when: "tenant storage quota exceeded", choice: same, probability: 0.9}
+        - {linter: sentinel-name-vs-text, question: condition, when: "backend hiccup", choice: insufficient, probability: 0.8}
+        - {linter: sentinel-name-vs-text, question: condition, when: "cached lease is outdated", choice: different, probability: 0.5}

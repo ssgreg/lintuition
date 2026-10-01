@@ -7,6 +7,7 @@ import (
 	"net/http/httptest"
 	"os"
 	"path/filepath"
+	"regexp"
 	"strings"
 	"sync"
 	"testing"
@@ -209,7 +210,9 @@ func TestPreviewOfflineAndCollisions(t *testing.T) {
 func TestEvalOffline(t *testing.T) {
 	twinsDir, _ := filepath.Abs("../testdata/twins")
 	code, out, errs := run("eval", "--runs", "2", twinsDir)
-	if code != 0 || !strings.Contains(out, "caught in every run 6, in some 0, in none 0; 0 unaccounted") {
+	// The count of marked cases grows with every linter's twins; every one must be caught in every run.
+	m := regexp.MustCompile(`(\d+) marked cases x 2 completed runs \(of 2 requested\): caught in every run (\d+), in some 0, in none 0; 0 unaccounted`).FindStringSubmatch(out)
+	if code != 0 || m == nil || m[1] != m[2] {
 		t.Fatalf("exit %d\n%s\n%s", code, out, errs)
 	}
 }
