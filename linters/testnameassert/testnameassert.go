@@ -309,7 +309,9 @@ func used(body *ast.BlockStmt, call *ast.CallExpr) bool {
 var (
 	testifyNoError = map[string]bool{"NoError": true, "NoErrorf": true, "Nil": true, "Nilf": true}
 	testifyError   = map[string]bool{
-		"Error": true, "Errorf": true, "ErrorIs": true, "ErrorIsf": true, "ErrorAs": true, "ErrorAsf": true,
+		// ErrorIs is left out: ErrorIs(t, err, nil) passes on no error, and a target may be nil at
+		// run time, so what it expects depends on a value not read here.
+		"Error": true, "Errorf": true, "ErrorAs": true, "ErrorAsf": true,
 		"ErrorContains": true, "ErrorContainsf": true, "EqualError": true, "EqualErrorf": true,
 		"NotNil": true, "NotNilf": true,
 	}
@@ -324,29 +326,72 @@ func isTestify(fn *types.Func) bool {
 	return p == "github.com/stretchr/testify/assert" || p == "github.com/stretchr/testify/require"
 }
 
-// fails reports whether a block fails the test outright: a statement t.Fatal, t.Errorf, t.Fail ...
-func fails(info *types.Info, b *ast.BlockStmt) bool {
+// isFailure reports whether a call fails the test: t.Fatal, t.Errorf, t.Fail ... on a testing type.
+func isFailure(info *types.Info, call *ast.CallExpr) bool {
+	fn := facts.Callee(info, call)
+	return fn != nil && fn.Pkg() != nil && fn.Pkg().Path() == "testing" && fn.Type().(*types.Signature).Recv() != nil && failures[fn.Name()]
+}
+
+// fails reports whether a block fails the test whenever it runs: a failure statement preceded only
+// by plain statements (t.Log, assignments, declarations), with no branch, return or loop that could
+// skip it. some reports a failure call anywhere in the block, outside closures, established or not.
+func fails(info *types.Info, b *ast.BlockStmt) (always, some bool) {
+	ast.Inspect(b, func(n ast.Node) bool {
+		switch n := n.(type) {
+		case *ast.FuncLit:
+			return false
+		case *ast.CallExpr:
+			if isFailure(info, n) {
+				some = true
+			}
+		}
+		return !some
+	})
 	for _, s := range b.List {
-		es, ok := s.(*ast.ExprStmt)
-		if !ok {
-			continue
-		}
-		call, ok := ast.Unparen(es.X).(*ast.CallExpr)
-		if !ok {
-			continue
-		}
-		fn := facts.Callee(info, call)
-		if fn != nil && fn.Pkg() != nil && fn.Pkg().Path() == "testing" && fn.Type().(*types.Signature).Recv() != nil && failures[fn.Name()] {
-			return true
+		switch s := s.(type) {
+		case *ast.ExprStmt:
+			if call, ok := ast.Unparen(s.X).(*ast.CallExpr); ok && isFailure(info, call) {
+				return true, some
+			}
+		case *ast.AssignStmt, *ast.DeclStmt, *ast.EmptyStmt:
+		default:
+			return false, some // a statement that may branch or leave before the failure
 		}
 	}
-	return false
+	return false, some
+}
+
+// activeClosures returns the function literals a test body is known to run: called on the spot
+// (func(){...}(), defer, go) or passed to t.Run. A closure only stored or passed elsewhere may
+// never run, so its assertions are not the test's.
+func activeClosures(info *types.Info, body *ast.BlockStmt) map[*ast.FuncLit]bool {
+	out := map[*ast.FuncLit]bool{}
+	ast.Inspect(body, func(n ast.Node) bool {
+		call, ok := n.(*ast.CallExpr)
+		if !ok {
+			return true
+		}
+		if fl, ok := ast.Unparen(call.Fun).(*ast.FuncLit); ok {
+			out[fl] = true
+		}
+		fn := facts.Callee(info, call)
+		if fn != nil && fn.Name() == "Run" && fn.Pkg() != nil && fn.Pkg().Path() == "testing" && fn.Type().(*types.Signature).Recv() != nil {
+			for _, a := range call.Args {
+				if fl, ok := ast.Unparen(a).(*ast.FuncLit); ok {
+					out[fl] = true
+				}
+			}
+		}
+		return true
+	})
+	return out
 }
 
 // expectation reads what the test asserts about the error: `if err != nil { t.Fatal }` expects no
 // error, `if err == nil { t.Fatal }` expects one, and testify's NoError / Error say it outright. A
 // failing check or a testify assertion that mentions the error in any other form makes it
-// unsupported, as do assertions both ways.
+// unsupported, as do a failure the block may skip, an assertion in a closure the test is not
+// known to run, and assertions both ways.
 func expectation(info *types.Info, body *ast.BlockStmt, e errExpr) (string, string) {
 	mentions := func(n ast.Node) bool {
 		found := false
@@ -360,10 +405,23 @@ func expectation(info *types.Info, body *ast.BlockStmt, e errExpr) (string, stri
 	}
 	seen := map[string]bool{}
 	unread := false
+	active := activeClosures(info, body)
 	ast.Inspect(body, func(n ast.Node) bool {
 		switch n := n.(type) {
+		case *ast.FuncLit:
+			if !active[n] {
+				if mentions(n) {
+					unread = true // an assertion that may never run
+				}
+				return false
+			}
 		case *ast.IfStmt:
-			if !fails(info, n.Body) || !mentions(n.Cond) {
+			always, some := fails(info, n.Body)
+			if !some || !mentions(n.Cond) {
+				return true
+			}
+			if !always {
+				unread = true // the failure may be skipped: if errors.Is(err, x) { return }
 				return true
 			}
 			be, ok := ast.Unparen(n.Cond).(*ast.BinaryExpr)

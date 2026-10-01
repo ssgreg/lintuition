@@ -1,6 +1,7 @@
 package c
 
 import (
+	"errors"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
@@ -155,7 +156,7 @@ func TestValidateTable(t *testing.T) { // 21 unsupported: wantErr is compared, n
 	}
 }
 
-func TestValidateRejectsShort(t *testing.T) { // 22 candidate: ErrorIs expects an error
+func TestValidateRejectsShort(t *testing.T) { // 22 unsupported: ErrorIs depends on its target
 	err := Validate("a")
 	require.ErrorIs(t, err, ErrEmpty)
 }
@@ -164,6 +165,60 @@ type suite struct{}
 
 func (suite) TestValidateRejectsEmpty(t *testing.T) { // 23 none: a method, not a test function
 	if err := Validate(""); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func TestValidateAcceptsName(t *testing.T) { // 24 unsupported: ErrorIs(err, nil) passes on no error
+	err := Validate("x")
+	require.ErrorIs(t, err, nil)
+}
+
+var errDenied = errors.New("denied")
+
+func TestValidateRejectsDenied(t *testing.T) { // 25 unsupported: the t.Fatal is skipped for errDenied
+	err := Validate("")
+	if err != nil {
+		if errors.Is(err, errDenied) {
+			return
+		}
+		t.Fatal(err)
+	}
+	t.Fatal("missing expected error")
+}
+
+func TestValidateRejectsStored(t *testing.T) { // 26 unsupported: the closure is never called
+	err := Validate("")
+	check := func() {
+		if err != nil {
+			t.Fatal(err)
+		}
+	}
+	_ = check
+}
+
+func TestValidateRejectsCalledLater(t *testing.T) { // 27 unsupported: a stored closure is not known to run
+	err := Validate("")
+	check := func() {
+		if err == nil {
+			t.Fatal("no error")
+		}
+	}
+	check()
+}
+
+func TestValidateRejectsDeferred(t *testing.T) { // 28 candidate: a deferred closure called on the spot runs
+	err := Validate("")
+	defer func() {
+		if err == nil {
+			t.Error("no error")
+		}
+	}()
+}
+
+func TestValidateAcceptsLogged(t *testing.T) { // 29 candidate: a log before the failure does not skip it
+	if err := Validate("x"); err != nil {
+		t.Logf("input %q", "x")
 		t.Fatal(err)
 	}
 }
