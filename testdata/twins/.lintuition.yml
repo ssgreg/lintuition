@@ -2,7 +2,7 @@ version: "2"
 
 linters:
   default: none
-  enable: [metric-type-vs-help, premature-success, table-case-vs-expectation, sentinel-name-vs-text]
+  enable: [metric-type-vs-help, premature-success, table-case-vs-expectation, sentinel-name-vs-text, error-needs-type]
 
 semantic:
   classifier: fake
@@ -32,3 +32,9 @@ semantic:
         - {linter: sentinel-name-vs-text, question: condition, when: "tenant storage quota exceeded", choice: same, probability: 0.9}
         - {linter: sentinel-name-vs-text, question: condition, when: "backend hiccup", choice: insufficient, probability: 0.8}
         - {linter: sentinel-name-vs-text, question: condition, when: "cached lease is outdated", choice: different, probability: 0.5}
+        # (the sentinel of error-needs-type's fixed twin)
+        - {linter: sentinel-name-vs-text, question: condition, when: "invoice does not exist", choice: same, probability: 0.9}
+        # error-needs-type
+        - {linter: error-needs-type, question: branchable, when: "invoice not found", yes: 0.9}
+        - {linter: error-needs-type, question: branchable, when: "invoice ledger invariant broken", yes: 0.1}
+        - {linter: error-needs-type, question: branchable, when: "invoice payload rejected", yes: 0.6}

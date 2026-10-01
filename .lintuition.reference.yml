@@ -23,6 +23,9 @@ linters:
   enable: []
   disable: []
   settings:
+    error-needs-type:
+      # Minimum probability of yes for a finding, and of no for a clean answer. Default: 0.8.
+      threshold: 0.8
     metric-type-vs-help:
       # Minimum probability of the classifier's answer for a finding. Default: 0.8.
       threshold: 0.8
