@@ -73,13 +73,26 @@ func TestExtraction(t *testing.T) {
 }
 
 func condition(choice string, p float64) map[string]sdk.Answer {
-	return map[string]sdk.Answer{"condition": {QuestionID: "condition", Choice: choice, Probabilities: map[string]float64{choice: p}}}
+	return answer(choice, p, 0.8)
+}
+
+// answer is a condition answer with the probability that the case name states the facts.
+func answer(choice string, p, stated float64) map[string]sdk.Answer {
+	return map[string]sdk.Answer{
+		"condition": {QuestionID: "condition", Choice: choice, Probabilities: map[string]float64{choice: p}},
+		"stated":    {QuestionID: "stated", Yes: &stated},
+	}
 }
 
 func TestDecide(t *testing.T) {
 	r := &rule{threshold: 0.8}
 	wantFalse := &sdk.Candidate{Local: map[string]string{"function": "IsExpired", "case_name": "deadline passed", "value": "false"}}
 	wantTrue := &sdk.Candidate{Local: map[string]string{"function": "IsExpired", "case_name": "deadline tomorrow", "value": "true"}}
+	onlyCondition := func(choice string, p float64) map[string]sdk.Answer {
+		a := condition(choice, p)
+		delete(a, "stated")
+		return a
+	}
 	for _, tc := range []struct {
 		c               *sdk.Candidate
 		answers         map[string]sdk.Answer
@@ -93,6 +106,23 @@ func TestDecide(t *testing.T) {
 		{wantTrue, condition("met", 0.95), false, false},
 		{wantTrue, condition("not_covered", 0.95), false, false},
 		{wantTrue, condition("unclear", 0.95), false, true},
+		// At the threshold the answer counts; just below it abstains.
+		{wantFalse, condition("met", 0.8), true, false},
+		{wantFalse, condition("met", 0.79), false, true},
+		// A contradiction in a name that only labels its input abstains; the gate is 0.7 sure of no.
+		{wantTrue, answer("not_met", 0.95, 0.2), false, true},
+		{wantTrue, answer("not_met", 0.95, 0.3), false, true},
+		{wantTrue, answer("not_met", 0.95, 0.31), true, false},
+		{wantFalse, answer("met", 0.95, 0.05), false, true},
+		// The gate never turns an agreeing or uncovered answer into an abstention.
+		{wantTrue, answer("met", 0.95, 0.05), false, false},
+		{wantTrue, answer("not_covered", 0.95, 0.05), false, false},
+		// A contradiction without the stated answer abstains; an agreeing one does not need it.
+		{wantTrue, onlyCondition("not_met", 0.95), false, true},
+		{wantTrue, onlyCondition("met", 0.95), false, false},
+		// A choice without its probability abstains, as does no answer at all.
+		{wantTrue, map[string]sdk.Answer{"condition": {QuestionID: "condition", Choice: "not_met", Probabilities: map[string]float64{"met": 0.9}}}, false, true},
+		{wantTrue, map[string]sdk.Answer{}, false, true},
 	} {
 		d := r.Decide(tc.c, tc.answers)
 		if d.Report != tc.report || (d.Abstained != "") != tc.abstain {
@@ -101,5 +131,27 @@ func TestDecide(t *testing.T) {
 	}
 	if d := r.Decide(wantFalse, condition("met", 0.9)); d.Message != `doc of IsExpired implies true for case "deadline passed", the test expects false` {
 		t.Errorf("message: %s", d.Message)
+	}
+	if d := r.Decide(wantTrue, answer("not_met", 0.95, 0.2)); d.Abstained != "the case name may not state the facts the doc's condition depends on (0.20)" {
+		t.Errorf("abstention: %s", d.Abstained)
+	}
+}
+
+// TestQuestionsAreFixed checks that the questions do not depend on the candidate, refer only to the
+// fields the payload sends, and are well formed.
+func TestQuestionsAreFixed(t *testing.T) {
+	r := &rule{threshold: 0.8}
+	a := r.Questions(&sdk.Candidate{Local: map[string]string{"case_name": "a"}})
+	b := r.Questions(&sdk.Candidate{Local: map[string]string{"case_name": "b"}})
+	if fmt.Sprint(a) != fmt.Sprint(b) || len(a) != 2 {
+		t.Fatalf("questions differ or are not two: %v / %v", a, b)
+	}
+	for _, q := range a {
+		if err := q.Validate(); err != nil {
+			t.Fatal(err)
+		}
+		if !strings.Contains(q.Text, "`doc`") || !strings.Contains(q.Text, "`situation`") {
+			t.Errorf("%s does not refer to doc and situation: %s", q.ID, q.Text)
+		}
 	}
 }

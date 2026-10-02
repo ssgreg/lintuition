@@ -116,12 +116,19 @@ semantic:
         - {linter: doc-vs-table, question: condition, when: '"situation":"three days late', choice: met, probability: 0.95}
         - {linter: doc-vs-table, question: condition, when: '"situation":"a week before the date', choice: not_met, probability: 0.95}
         - {linter: doc-vs-table, question: condition, when: '"situation":"invoice in another currency"', choice: not_covered, probability: 0.9}
+        - {linter: doc-vs-table, question: condition, when: '"situation":"a string with a tab character', choice: not_met, probability: 0.95}
+        - {linter: doc-vs-table, question: condition, when: '"situation":"upper end"', choice: not_met, probability: 0.85}
+        - {linter: doc-vs-table, question: condition, when: '"situation":"lower end"', choice: not_met, probability: 0.85}
+        - {linter: doc-vs-table, question: stated, when: '"situation":"upper end"', yes: 0.15}
+        - {linter: doc-vs-table, question: stated, when: '"situation":"lower end"', yes: 0.15}
+        - {linter: doc-vs-table, question: stated, yes: 0.8}
         # table-case-vs-expectation's rows are doc-vs-table candidates too: Expired has a doc
         - {linter: doc-vs-table, question: condition, when: 'passed.","situation":"expired when the deadline', choice: met, probability: 0.95}
         - {linter: doc-vs-table, question: condition, when: 'passed.","situation":"not expired before the deadline', choice: not_met, probability: 0.95}
         - {linter: doc-vs-table, question: condition, when: 'passed.","situation":"passed=false"', choice: not_met, probability: 0.9}
         # doc-vs-table's rows, for table-case-vs-expectation: their names say nothing about the result
         - {linter: table-case-vs-expectation, question: outcome, when: '"about":"the result of Due"', choice: unstated, probability: 0.9}
+        - {linter: table-case-vs-expectation, question: outcome, when: '"about":"the result of Printable"', choice: unstated, probability: 0.9}
         # suppression-rationale
         - {linter: suppression-rationale, question: about, when: "the file is small, so reading it whole", choice: elsewhere, probability: 0.9}
         - {linter: suppression-rationale, question: about, when: "a close error on a file opened read-only", choice: addresses, probability: 0.9}
