@@ -227,9 +227,10 @@ func implementsError(t types.Type) bool {
 // so the check fails closed.
 const maxCarrierNodes = 10000
 
-// carriesError reports a result type that may hold an error a doc could call "an error": an empty
-// interface (any), or an error, an empty interface or a type parameter reachable through an element,
-// a field or a function result. Named types are walked once:
+// carriesError reports a result type that may hold an error a doc could call "an error": a
+// non-error interface that an error could also implement (any, io.Reader, a Coded interface), a type
+// parameter, or either of them or an error reachable through an element, a field or a function
+// result. Named types are walked once:
 // every cycle in a type goes through one, so the walk visits each part of the type and is complete.
 func carriesError(t types.Type) bool {
 	seen := map[types.Type]bool{}
@@ -241,6 +242,9 @@ func carriesError(t types.Type) bool {
 			return true
 		}
 		t = types.Unalias(t)
+		if _, ok := t.(*types.TypeParam); ok {
+			return true // checked before Underlying, which is the constraint
+		}
 		if n, ok := t.(*types.Named); ok {
 			if seen[n] {
 				return false
@@ -251,13 +255,11 @@ func carriesError(t types.Type) bool {
 			return true
 		}
 		switch u := t.Underlying().(type) {
-		case *types.TypeParam:
-			return true
 		case *types.Interface:
-			// any holds whatever the function returns, an error included. A non-empty interface
-			// (io.Reader, Core) could hold a value that also implements error, but a doc that says the
-			// function returns an error does not mean that value; it is walked like any other type.
-			return u.NumMethods() == 0
+			// A non-error interface can hold a value that also implements error (any, or a Coded
+			// interface holding a coded error), so a doc that says it returns an error may be right.
+			// Only an interface whose own Error method has another signature cannot.
+			return !excludesError(u)
 		case *types.Pointer:
 			return walk(u.Elem(), false)
 		case *types.Slice:
@@ -283,10 +285,18 @@ func carriesError(t types.Type) bool {
 		}
 		return false
 	}
-	if _, ok := t.(*types.TypeParam); ok {
-		return true
-	}
 	return walk(t, true)
+}
+
+// excludesError reports an interface no error can implement: it has an Error method whose signature
+// is not func() string.
+func excludesError(it *types.Interface) bool {
+	for i := 0; i < it.NumMethods(); i++ {
+		if m := it.Method(i); m.Name() == "Error" {
+			return !types.Identical(m.Type(), errorIface.Method(0).Type())
+		}
+	}
+	return false
 }
 
 type rule struct{ threshold float64 }

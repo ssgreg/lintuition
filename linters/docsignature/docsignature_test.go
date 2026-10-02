@@ -83,7 +83,7 @@ func TestExtraction(t *testing.T) {
 		`33 result "the documented function returns the fixture path."`,
 		`40 unsupported`,
 		`41 unsupported`,
-		`42 error "the documented function returns a reader, or an error if the file is missing."`,
+		`42 unsupported`,
 		`43 unsupported`,
 		`44 unsupported`,
 		`45 unsupported`,
@@ -101,7 +101,13 @@ func TestExtraction(t *testing.T) {
 		`60 result "the documented function returns the number of completed operations."`,
 		`63 result "the documented function returns a value."`,
 		`64 unsupported`,
-		`65 error "the documented function returns the readers, or an error."`,
+		`65 unsupported`,
+		`66 unsupported`,
+		`67 error "the documented function returns an error value."`,
+		`68 unsupported`,
+		`69 unsupported`,
+		`70 unsupported`,
+		`71 unsupported`,
 	}
 	if strings.Join(got, "\n") != strings.Join(want, "\n") {
 		t.Fatalf("candidates:\n%s\n\nwant:\n%s", strings.Join(got, "\n"), strings.Join(want, "\n"))

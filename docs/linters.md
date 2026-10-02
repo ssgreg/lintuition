@@ -396,8 +396,10 @@ on, and a value that carries or formats an error.
 **Decides:** reports at 0.85 or above, clean at 0.15 or below, abstains in between (setting
 `threshold`).
 
-**Unsupported:** the error claim when a result may hold an error: `any` (its dynamic value may be an
-error), a type parameter, or an error, `any` or a type parameter reachable inside the result (`chan error`, `func() error`, `[]error`, a struct with an error field, at any
+**Unsupported:** the error claim when a result may hold an error: an interface other than `error`
+(`any`, `io.Reader`: its dynamic value may implement `error` too, unless the interface has an `Error`
+method of another signature), a type parameter, or an error, such an interface or a type parameter
+reachable inside the result (`chan error`, `func() error`, `[]error`, a struct with an error field, at any
 depth). The doc may mean that error.
 
 A doc that says only "returns" about something the function sends on a channel or prints

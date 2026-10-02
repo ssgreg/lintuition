@@ -133,7 +133,7 @@ func DynamicAlias(fail bool) AnyAlias { return Dynamic(fail) } // 41 unsupported
 type Reader interface{ Read() int }
 
 // Open2 returns a reader, or an error if the file is missing.
-func Open2() Reader { return nil } // 42 error: a non-empty interface is not treated as an error
+func Open2() Reader { return nil } // 42 unsupported: a value behind Reader may also implement error
 
 // Deep returns nested slices of error values.
 func Deep() [][][][][]error { return nil } // 43 unsupported: no depth limit
@@ -232,4 +232,42 @@ func Chain() *Cyc2 { return nil } // 59 error: a recursive type without an error
 func Empty2() interface{} { return nil } // 64 unsupported: interface{} is any
 
 // Readers returns the readers, or an error.
-func Readers() []Reader { return nil } // 65 error: a slice of a non-empty interface
+func Readers() []Reader { return nil } // 65 unsupported: a slice of such an interface
+
+type Coder interface{ Code() int }
+
+type codedError struct{}
+
+func (codedError) Code() int     { return 1 }
+func (codedError) Error() string { return "coded" }
+
+// Classify returns an error carrying a code when the input is bad.
+func Classify(bad bool) Coder { // 66 unsupported: Codex's probe, the doc is true
+	if bad {
+		return codedError{}
+	}
+	return nil
+}
+
+type Odd interface{ Error() int }
+
+// Weird returns an error value.
+func Weird() Odd { return nil } // 67 error: Error() int excludes every error
+
+// Nested returns the errors found.
+func Nested[T error]() []T { return nil } // 68 unsupported: a type parameter inside a slice
+
+type Box2[T any] struct{ V T }
+
+// InBox returns an error in a box.
+func InBox[T any]() Box2[T] { return Box2[T]{} } // 69 unsupported: a type parameter inside a struct
+
+type GenericHolder[T Coder] struct{ Value T }
+
+type HolderAlias[T Coder] = GenericHolder[T]
+
+// Held returns a holder for an error.
+func Held[T Coder]() GenericHolder[T] { return GenericHolder[T]{} } // 70 unsupported: a field of a constrained type parameter
+
+// HeldAlias returns a holder for an error.
+func HeldAlias[T Coder]() HolderAlias[T] { return HolderAlias[T]{} } // 71 unsupported: through a generic alias
