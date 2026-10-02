@@ -37,3 +37,15 @@ func TestHelperRejectsEmpty(t *testing.T) { // 18 none: not in a _test.go file
 		t.Fatal(err)
 	}
 }
+
+// Wrap prefixes err; a nil err stays nil.
+func Wrap(err error, prefix string) error { return err }
+
+// Join joins errs.
+func Join(errs ...error) error { return nil }
+
+// Collect takes a slice of errors, which is not an error argument.
+func Collect(errs []error) error { return nil }
+
+// Restore is a method that takes an error.
+func (s *Store) Restore(cause error) error { return nil }

@@ -4,6 +4,7 @@ import "testing"
 
 // table-case-vs-expectation: the row was copied and its want not flipped. doc-vs-table sees it too:
 // Expired's doc says the same thing as the case name.
+
 func TestExpired(t *testing.T) {
 	tests := []struct {
 		name   string
@@ -21,6 +22,7 @@ func TestExpired(t *testing.T) {
 }
 
 // doc-vs-table: Due's doc says late invoices are due; this row says otherwise.
+
 func TestDue(t *testing.T) {
 	tests := []struct {
 		name     string
@@ -37,6 +39,7 @@ func TestDue(t *testing.T) {
 }
 
 // test-name-vs-assertion: the name promises a rejection, the check requires success.
+
 func TestUnquoteRejectsUnbalancedQuote(t *testing.T) { // want `test name expects an error from Unquote, but the test fails when Unquote returns one`
 	_, err := Unquote(`"abc`)
 	if err != nil {
