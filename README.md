@@ -1,5 +1,10 @@
 # lintuition
 
+[![CI](https://github.com/ssgreg/lintuition/actions/workflows/ci.yml/badge.svg?branch=main)](https://github.com/ssgreg/lintuition/actions/workflows/ci.yml)
+[![Go Reference](https://pkg.go.dev/badge/github.com/ssgreg/lintuition.svg)](https://pkg.go.dev/github.com/ssgreg/lintuition)
+[![Release](https://img.shields.io/github/v/release/ssgreg/lintuition)](https://github.com/ssgreg/lintuition/releases)
+[![License: MIT](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
+
 **[System One](https://en.wikipedia.org/wiki/Thinking,_Fast_and_Slow) linters for your Go code.**
 
 lintuition finds places where code says one thing and does another: log messages, test names,
