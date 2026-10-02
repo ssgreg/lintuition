@@ -96,6 +96,10 @@ func Check(qs []sdk.Question, resp sdk.Response) (map[string]sdk.Answer, error) 
 	return out, nil
 }
 
+// roundingPerOption is how far above its true value one reported option probability may be: a
+// backend that rounds to two decimals is off by up to 0.005.
+const roundingPerOption = 0.005
+
 func checkAnswer(q sdk.Question, a sdk.Answer) error {
 	prob := func(p float64) bool { return !math.IsNaN(p) && p >= 0 && p <= 1 }
 	if a.Confidence != nil && !prob(*a.Confidence) {
@@ -113,6 +117,7 @@ func checkAnswer(q sdk.Question, a sdk.Answer) error {
 		if !domain[a.Choice] {
 			return errors.New("the choice is not one of the options")
 		}
+		sum := 0.0
 		for k, p := range a.Probabilities {
 			if !domain[k] {
 				return errors.New("a probability for an option that was not offered")
@@ -120,6 +125,14 @@ func checkAnswer(q sdk.Question, a sdk.Answer) error {
 			if !prob(p) {
 				return errors.New("an option probability is outside [0, 1]")
 			}
+			sum += p
+		}
+		// The options are mutually exclusive, so their probabilities add up to at most 1, give or
+		// take rounding of each one; more is a contradictory distribution that a rule adding
+		// options together would read as confidence. Less is allowed: a backend may report part of
+		// the mass.
+		if limit := 1 + roundingPerOption*float64(len(domain)) + 1e-9; sum > limit {
+			return fmt.Errorf("the option probabilities add up to %.3f, more than 1", sum)
 		}
 	case sdk.Noul:
 		if a.Yes == nil || a.Choice != "" || a.Score != nil || len(a.Probabilities) > 0 {

@@ -62,6 +62,32 @@ func TestCheck(t *testing.T) {
 	}
 }
 
+func TestCheckChoiceMass(t *testing.T) {
+	// Three options with unclear: up to 1.015 is rounding, more is a contradiction.
+	qs := []sdk.Question{{ID: "k", Kind: sdk.Choice, Text: "?", Options: []sdk.Option{{Key: "a"}, {Key: "b"}}}}
+	for _, tc := range []struct {
+		ps map[string]float64
+		ok bool
+	}{
+		{map[string]float64{"a": 0.6, "b": 0.4}, true},
+		{map[string]float64{"a": 0.6, "b": 0.3, "unclear": 0.1}, true},
+		{map[string]float64{"a": 0.6}, true},
+		{nil, true},
+		{map[string]float64{"a": 0.34, "b": 0.34, "unclear": 0.335}, true},
+		{map[string]float64{"a": 0.6, "b": 0.42}, false},
+		{map[string]float64{"a": 0.6, "b": 0.4, "unclear": 0.5}, false},
+		{map[string]float64{"a": 1, "b": 1}, false},
+	} {
+		_, err := Check(qs, sdk.Response{Answers: []sdk.Answer{{QuestionID: "k", Choice: "a", Probabilities: tc.ps}}})
+		if (err == nil) != tc.ok {
+			t.Errorf("%v: got %v", tc.ps, err)
+		}
+		if err != nil && !strings.Contains(err.Error(), "more than 1") {
+			t.Errorf("%v: %v", tc.ps, err)
+		}
+	}
+}
+
 func TestFactsMustBeStructural(t *testing.T) {
 	for _, v := range []any{`t.Errorf("DO_NOT_EXPORT")`, "a\nb", "x := 1", map[string]int{}} {
 		var p sdk.Payload
