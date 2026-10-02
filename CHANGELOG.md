@@ -1,5 +1,10 @@
 # Changelog
 
+## Unreleased
+
+- New linter `doc-vs-signature`: a doc comment that promises a returned result or error the
+  function's signature does not have.
+
 ## v0.1.0 (2026-10-02)
 
 First release.

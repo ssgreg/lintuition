@@ -30,3 +30,8 @@ const (
 	PhaseCopying // want `comment describes PhaseVerified, not PhaseCopying`
 	PhaseVerified
 )
+
+// doc-vs-signature: the function became a predicate, the doc still promises an error.
+
+// ValidName returns an error if the name is empty.
+func ValidName(name string) bool { return name != "" } // want `doc of ValidName says it returns an error, but ValidName has no error result`

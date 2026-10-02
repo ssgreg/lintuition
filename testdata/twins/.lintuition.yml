@@ -2,7 +2,7 @@ version: "2"
 
 linters:
   default: none
-  enable: [metric-type-vs-help, premature-success, table-case-vs-expectation, sentinel-name-vs-text, error-needs-type, human-unit-contradiction, enum-comment-shift, test-name-vs-assertion, doc-vs-table, suppression-rationale, log-sensitive-field, log-key-value-role, normal-event-at-error, severe-event-understated, destructive-remediation]
+  enable: [doc-vs-signature, metric-type-vs-help, premature-success, table-case-vs-expectation, sentinel-name-vs-text, error-needs-type, human-unit-contradiction, enum-comment-shift, test-name-vs-assertion, doc-vs-table, suppression-rationale, log-sensitive-field, log-key-value-role, normal-event-at-error, severe-event-understated, destructive-remediation]
 
 semantic:
   classifier: fake
@@ -136,3 +136,30 @@ semantic:
         - {linter: error-needs-type, question: branchable, when: "remove the --dry-run flag to apply the plan", yes: 0.1}
         - {linter: error-needs-type, question: branchable, when: "lock file was removed by another process", yes: 0.2}
         - {linter: error-needs-type, question: branchable, when: "data volume is unreadable; format it", yes: 0.2}
+        # doc-vs-signature
+        - {linter: doc-vs-signature, question: returns_result, when: "flushes the buffer and returns the number of bytes", yes: 0.95}
+        - {linter: doc-vs-signature, question: returns_error, when: "returns an error if the name is empty", yes: 0.95}
+        - {linter: doc-vs-signature, question: returns_result, when: "reports whether the queue has no items", yes: 0.95}
+        - {linter: doc-vs-signature, question: returns_result, when: "removes every item from the queue", yes: 0.05}
+        - {linter: doc-vs-signature, question: returns_result, when: "stores v and returns the old value", yes: 0.95}
+        - {linter: doc-vs-signature, question: returns_error, when: "parses s and returns an error on malformed input", yes: 0.95}
+        - {linter: doc-vs-signature, question: returns_error, when: "returns ErrClosed if the pool is closed", yes: 0.9}
+        - {linter: doc-vs-signature, question: returns_result, when: "returns any errors, and returns the entry to a pool", yes: 0.9}
+        - {linter: doc-vs-signature, question: returns_result, when: "returns all descriptions of the collector", yes: 0.9}
+        - {linter: doc-vs-signature, question: returns_result, when: "returns all observations through ch", yes: 0.05}
+        - {linter: doc-vs-signature, question: returns_result, when: "writes the state as JSON to w", yes: 0.05}
+        - {linter: doc-vs-signature, question: returns_result, when: "yields every item to yield", yes: 0.1}
+        - {linter: doc-vs-signature, question: returns_result, when: "blocks and returns when ctx is done", yes: 0.05}
+        - {linter: doc-vs-signature, question: returns_result, when: "returns c into the pool", yes: 0.05}
+        - {linter: doc-vs-signature, question: returns_result, when: "whenever check returns false", yes: 0.05}
+        - {linter: doc-vs-signature, question: returns_result, when: "it returns nothing", yes: 0.02}
+        - {linter: doc-vs-signature, question: returns_error, when: "logs an error when the counter overflows", yes: 0.05}
+        - {linter: doc-vs-signature, question: returns_error, when: "records the last error", yes: 0.05}
+        - {linter: doc-vs-signature, question: returns_error, when: "panics with an error if s is empty", yes: 0.05}
+        - {linter: doc-vs-signature, question: returns_error, when: "passes it an error for a broken one", yes: 0.05}
+        - {linter: doc-vs-signature, question: returns_error, when: "formats the error for display", yes: 0.05}
+        - {linter: doc-vs-signature, question: returns_error, when: "wraps the message of an error", yes: 0.1}
+        - {linter: doc-vs-signature, question: returns_error, when: "how many times Do returned an error", yes: 0.05}
+        - {linter: doc-vs-signature, question: returns_result, when: "returns once the queue is empty", yes: 0.5}
+        # (normal-event-at-error's twin: its doc mentions an error, the function returns a string)
+        - {linter: doc-vs-signature, question: returns_error, when: "a cache miss is the cache working as designed", yes: 0.05}
