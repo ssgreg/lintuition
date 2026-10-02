@@ -347,14 +347,21 @@ Line comments (`PhaseQueued Phase = iota // waiting for a free worker`) are read
 
 **Reads:** comments of constants in a parenthesised block of at least two.
 
-**Sends:** the comment, with the constant's own name replaced by "this constant" (a classifier trusts
-a name over the text around it), and the block's constant names as the options.
+**Sends:** the comment as written, and the block's constant names as the options.
 
 **Asks:** which constant the comment describes, or none (a heading or a note).
 
-**Decides:** reports a different constant at 0.8 or above.
+**Decides:** reports a different constant at 0.8 or above, when no other option gets more than
+0.2.
 
-**Unsupported:** several constants on one line, blocks of more than 20 constants.
+**Quiet on:** a comment that names its own constant (`// ModeFast skips the checksum.`, or "If trace
+is set" on `trace`). It is taken at its word and not asked, and that covers a comment over a group
+that names its constants. The cost: a description gone stale under the right name is not caught.
+
+**Unsupported:** several constants on one line, blocks of more than 20 constants, and a comment that
+differs from another comment of the block in one word at most ("block after ForStmt", "block after
+IfStmt"; or two limits that differ only in the number). What tells such comments apart is matched to
+a constant by the block's convention or by the value, and the classifier sees neither.
 
 ### doc-vs-signature
 
