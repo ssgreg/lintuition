@@ -2,6 +2,7 @@ package classify
 
 import (
 	"errors"
+	"fmt"
 	"math"
 	"strings"
 	"testing"
@@ -86,6 +87,12 @@ func TestCheckChoiceMass(t *testing.T) {
 		{map[string]float64{"a": 0.6, "b": 0.42}, false, nil},
 		{map[string]float64{"a": 0.6, "b": 0.4, "unclear": 0.5}, false, nil},
 		{map[string]float64{"a": 1, "b": 1}, false, nil},
+		// An entry below 0.005 cannot give back more than it holds: its true value is not negative.
+		{map[string]float64{"a": 0.509, "b": 0.504, "c": 0.001}, false, nil},
+		{map[string]float64{"a": 0.509, "b": 0.504, "c": 0.001, "d": 0}, false, nil},
+		{map[string]float64{"a": 0.506, "b": 0.505, "c": 0.001}, false, nil},
+		{map[string]float64{"a": 0.505, "b": 0.505, "c": 0.004}, true, map[string]float64{"a": 0.505 / 1.014, "b": 0.505 / 1.014, "c": 0.004 / 1.014}},
+		{map[string]float64{"a": 0.504, "b": 0.501, "c": 0.004, "d": 0}, true, map[string]float64{"a": 0.504 / 1.009, "b": 0.501 / 1.009, "c": 0.004 / 1.009, "d": 0}},
 	} {
 		in := map[string]float64{}
 		for k, v := range tc.ps {
@@ -120,6 +127,49 @@ func TestCheckChoiceMass(t *testing.T) {
 				t.Errorf("%v: Check changed the caller's map", tc.ps)
 			}
 		}
+	}
+}
+
+// TestCheckUnitMassIsStable: a distribution whose decimal sum is exactly 1 comes back unchanged
+// every time, whatever order the map is added in.
+func TestCheckUnitMassIsStable(t *testing.T) {
+	var opts []sdk.Option
+	ps := map[string]float64{"none": 0.01, "unclear": 0}
+	for i := range 20 {
+		k := fmt.Sprintf("C%02d", i)
+		opts = append(opts, sdk.Option{Key: k})
+		ps[k] = 0.01
+	}
+	ps["C00"] = 0.8
+	opts = append(opts, sdk.Option{Key: "none"})
+	qs := []sdk.Question{{ID: "k", Kind: sdk.Choice, Text: "?", Options: opts}}
+	for range 2000 {
+		got, err := Check(qs, sdk.Response{Answers: []sdk.Answer{{QuestionID: "k", Choice: "C00", Probabilities: ps}}})
+		if err != nil {
+			t.Fatal(err)
+		}
+		if p := got["k"].Probabilities["C00"]; p != 0.8 {
+			t.Fatalf("C00 came back as %v", p)
+		}
+	}
+}
+
+func TestMassIsOrderFree(t *testing.T) {
+	ps := map[string]float64{}
+	for i := range 50 {
+		ps[fmt.Sprint(i)] = 0.02
+	}
+	first := mass(ps, 0)
+	for range 500 {
+		if got := mass(ps, 0); got != first {
+			t.Fatalf("%v then %v", first, got)
+		}
+	}
+	if math.Abs(first-1) > 1e-15 {
+		t.Errorf("fifty 0.02 add up to %v", first)
+	}
+	if got := mass(map[string]float64{"a": 0.509, "b": 0.504, "c": 0.001}, 0.005); math.Abs(got-1.003) > 1e-12 {
+		t.Errorf("least mass %v, want 1.003", got)
 	}
 }
 
