@@ -53,3 +53,15 @@ func (q *Queue) Directive() { q.head = 0 } // 14 none: the doc is only a directi
 
 // Advance moves the head; m itself is left as it was.
 func (q *Queue) Advance() { q.head++ } // 15 candidate: a promise without any no-change keyword
+
+// Mixed rewinds q and schedules a later write to p, leaving both unchanged now.
+func (q *Queue) Mixed(p *Queue) func() { q.head = 0; return func() { p.head = 1 } } // 16 candidate for q, unsupported for p
+
+// Fresh leaves p unchanged.
+func Fresh(p *int) { p = new(int); *p = 42 } // 17 unsupported: p holds fresh storage when written
+
+// Both2 sets *p, then replaces p, leaving p unchanged.
+func Both2(p *int) { *p = 1; p = new(int); *p = 2 } // 18 candidate: the write before the rebind is certain
+
+// Restore leaves q unchanged at return.
+func (q *Queue) Restore() { old := q.head; q.head = 0; q.head = old } // 19 none: a proven save and restore

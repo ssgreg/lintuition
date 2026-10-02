@@ -65,6 +65,10 @@ func TestExtraction(t *testing.T) {
 		`13 q.head "the receiver q, a Queue" "the documented function rewinds q and clears s, without modifying anything else."`,
 		`13 s[0] "the parameter s, a Stack" "the documented function rewinds q and clears s, without modifying anything else."`,
 		`15 q.head "the receiver q, a Queue" "the documented function moves the head; m itself is left as it was."`,
+		`16 q.head "the receiver q, a Queue" "the documented function rewinds q and schedules a later write to p, leaving both unchanged now."`,
+		`16 unsupported`,
+		`17 unsupported`,
+		`18 *p "the parameter p" "the documented function sets *p, then replaces p, leaving p unchanged."`,
 	}
 	if strings.Join(got, "\n") != strings.Join(want, "\n") {
 		t.Fatalf("candidates:\n%s\n\nwant:\n%s", strings.Join(got, "\n"), strings.Join(want, "\n"))
@@ -83,7 +87,7 @@ func TestQuestions(t *testing.T) {
 }
 
 func TestDecide(t *testing.T) {
-	r := &rule{threshold: 0.75}
+	r := &rule{threshold: 0.7}
 	c := &sdk.Candidate{Local: map[string]string{"name": "Peek", "root": "q", "path": "q.head"}}
 	for _, tc := range []struct {
 		name            string
@@ -91,11 +95,11 @@ func TestDecide(t *testing.T) {
 		report, abstain bool
 	}{
 		{"promised", yes(0.95), true, false},
-		{"at the threshold", yes(0.75), true, false},
+		{"at the threshold", yes(0.7), true, false},
 		{"not promised", yes(0.05), false, false},
-		{"no at the threshold", yes(0.25), false, false},
-		{"weak yes abstains", yes(0.7), false, true},
-		{"weak no abstains", yes(0.3), false, true},
+		{"no at the threshold", yes(0.3), false, false},
+		{"weak yes abstains", yes(0.65), false, true},
+		{"weak no abstains", yes(0.35), false, true},
 		{"no probability", map[string]sdk.Answer{"promises_unchanged": {QuestionID: "promises_unchanged"}}, false, true},
 		{"missing answer", map[string]sdk.Answer{}, false, true},
 	} {
@@ -107,8 +111,8 @@ func TestDecide(t *testing.T) {
 	if d := r.Decide(c, yes(0.9)); d.Message != "doc of Peek promises to leave q unchanged, but Peek writes q.head" {
 		t.Errorf("message: %s", d.Message)
 	}
-	g := &sdk.Candidate{Local: map[string]string{"name": "Count", "root": "calls", "path": "calls", "global": "true"}}
-	if d := r.Decide(g, yes(0.9)); d.Message != "doc of Count promises it changes nothing, but Count writes calls" {
+	g := &sdk.Candidate{Local: map[string]string{"name": "Count", "root": "calls", "path": "calls"}}
+	if d := r.Decide(g, yes(0.9)); d.Message != "doc of Count promises to leave calls unchanged, but Count writes calls" {
 		t.Errorf("global message: %s", d.Message)
 	}
 }

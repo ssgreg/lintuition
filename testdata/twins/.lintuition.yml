@@ -173,5 +173,9 @@ semantic:
         - {linter: read-only-promise, question: promises_unchanged, when: "the capacity stays unchanged", yes: 0.1}
         - {linter: read-only-promise, question: promises_unchanged, when: "callers see no change", yes: 0.6}
         - {linter: read-only-promise, question: promises_unchanged, when: "on an empty queue it returns false and leaves the queue unchanged", yes: 0.1}
+        - {linter: read-only-promise, question: promises_unchanged, when: "it does not modify the flags of the command", yes: 0.1}
+        - {linter: read-only-promise, question: promises_unchanged, when: "returns the command's name and leaves the command untouched", yes: 0.95}
+        - {linter: read-only-promise, question: promises_unchanged, when: "except filling the internal cache", yes: 0.1}
+        - {linter: read-only-promise, question: promises_unchanged, when: "compares n with Limit and leaves Limit unchanged", yes: 0.95}
         # (other linters' twins whose functions write state: their docs promise nothing about it)
         - {linter: read-only-promise, question: promises_unchanged, yes: 0.05}

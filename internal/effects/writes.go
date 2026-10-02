@@ -2,14 +2,21 @@
 // effects model of the promise linters: a doc that says a function does not modify something is
 // checked against the writes found here.
 //
-// The model is direct and conservative. It counts a write only when the written place is reached
-// from a receiver, a parameter or a package-level variable by a path the caller shares: a pointer
-// dereference (explicit, or implicit in a field selection on a pointer), a map index or a slice
-// index. Assigning a field of a struct received by value writes the function's own copy and is not
-// a write here; neither is assigning the parameter itself, nor a place saved to a local and later
-// assigned back from it (old := s.result; ...; s.result = old). Writes through a local alias (p := r;
-// p.n = 1), through a callee, or by calling a mutating method are not followed. Writes inside a
-// function literal are reported apart, because when the literal runs is not known.
+// The model is direct and conservative. It counts a write when the written place is reached from a
+// receiver, a parameter or a package-level variable by a path the caller shares: a pointer
+// dereference (explicit, or implicit in a field selection on a pointer), a map or slice element,
+// the backing store of a map or slice the caller passed (delete, clear, copy into it), or a
+// sync/atomic store. Assigning a field of a struct received by value, or taking the address of
+// one, touches the function's own copy and is not a write; neither is assigning the parameter
+// itself. Writes through a local alias (p := r; p.n = 1), through a callee, or by a method value
+// stored in a variable are not followed.
+//
+// Some writes are reported with a qualifier instead of being dropped or trusted: one inside a
+// function literal (when it runs is not known), one after its root was reassigned (the root may now
+// hold fresh storage), one through a generic index whose constraint does not settle the shape, and
+// one undone by a proven save and restore (old := s.result; ...; s.result = old, both at the top
+// level of the body, with no return in between and the saved value left alone). A restored write
+// still happened, and a callback could have seen it; the caller's state at return is unchanged.
 package effects
 
 import (
@@ -31,17 +38,26 @@ const (
 	Global
 )
 
-// Write is one write the caller can see.
+// Write is one write to state the caller can see.
 type Write struct {
 	Pos  token.Pos
 	Kind RootKind
 	// Root is the name of the receiver, parameter or package-level variable.
 	Root string
-	// Path is the written place as identifiers and selectors (q.head, m[...], *p), for messages.
+	// Path is the written place as written in the source (q.head, m[k], *p), for messages.
 	Path string
 	// InClosure is set for a write inside a function literal.
 	InClosure bool
+	// Uncertain, when set, says why the write may not reach the caller's state.
+	Uncertain string
+	// Restored is set for a write a proven save and restore undoes before the function returns.
+	Restored bool
+
+	root types.Object
 }
+
+// Direct reports a write that is certain, outside a closure, and not undone before return.
+func (w Write) Direct() bool { return !w.InClosure && w.Uncertain == "" && !w.Restored }
 
 // Writes returns the caller-visible writes of a function declaration's body, in source order.
 func Writes(info *types.Info, fd *ast.FuncDecl) []Write {
@@ -65,26 +81,26 @@ func Writes(info *types.Info, fd *ast.FuncDecl) []Write {
 			}
 		}
 	}
-	w := &walker{info: info, roots: roots, saved: map[types.Object]string{}, restored: map[string]bool{}}
+	w := &walker{info: info, roots: roots, rebound: map[types.Object]token.Pos{}}
 	w.walk(fd.Body, false)
-	var out []Write
-	for _, x := range w.out {
-		if !w.restored[x.Path] {
-			out = append(out, x)
+	for _, r := range restorations(info, fd.Body, w.rebound) {
+		for i := range w.out {
+			x := &w.out[i]
+			if x.root == r.root && x.Path == r.path && x.Pos > r.from && x.Pos <= r.to && !x.InClosure {
+				x.Restored = true
+			}
 		}
 	}
-	return out
+	return w.out
 }
 
 type walker struct {
 	info  *types.Info
 	roots map[types.Object]RootKind
 	out   []Write
-	// saved maps a local variable to the place it was set from (old := s.result); restored holds
-	// the places later assigned back from such a local (s.result = old). A place saved and restored
-	// is a temporary change the caller does not see, so its writes are dropped.
-	saved    map[types.Object]string
-	restored map[string]bool
+	// rebound holds where a root variable was first assigned in the body: from there on it may hold
+	// fresh storage, so later writes through it are uncertain.
+	rebound map[types.Object]token.Pos
 }
 
 func (w *walker) walk(n ast.Node, inClosure bool) {
@@ -94,21 +110,23 @@ func (w *walker) walk(n ast.Node, inClosure bool) {
 			w.walk(n.Body, true)
 			return false
 		case *ast.AssignStmt:
-			if n.Tok == token.DEFINE || n.Tok == token.ASSIGN {
-				w.saveRestore(n)
-			}
 			if n.Tok != token.DEFINE {
 				for _, l := range n.Lhs {
-					w.lvalue(l, inClosure)
+					w.place(l, inClosure, asLvalue)
+				}
+				for _, l := range n.Lhs {
+					w.rebind(l)
 				}
 			}
 		case *ast.IncDecStmt:
-			w.lvalue(n.X, inClosure)
+			w.place(n.X, inClosure, asLvalue)
+			w.rebind(n.X)
 		case *ast.RangeStmt:
 			if n.Tok == token.ASSIGN {
 				for _, l := range []ast.Expr{n.Key, n.Value} {
 					if l != nil {
-						w.lvalue(l, inClosure)
+						w.place(l, inClosure, asLvalue)
+						w.rebind(l)
 					}
 				}
 			}
@@ -119,36 +137,23 @@ func (w *walker) walk(n ast.Node, inClosure bool) {
 	})
 }
 
-// saveRestore records old := P (a local set from a place) and P = old (the place set back from it),
-// pairwise for tuple assignments.
-func (w *walker) saveRestore(n *ast.AssignStmt) {
-	if len(n.Lhs) != len(n.Rhs) {
+// rebind records an assignment to a root variable itself (p = new(int), xs = append(...)).
+func (w *walker) rebind(e ast.Expr) {
+	id, ok := ast.Unparen(e).(*ast.Ident)
+	if !ok {
 		return
 	}
-	for i, l := range n.Lhs {
-		r := n.Rhs[i]
-		if id, ok := l.(*ast.Ident); ok {
-			if o := w.info.Defs[id]; o != nil {
-				w.saved[o] = types.ExprString(r)
-				continue
-			}
-			if o := w.info.Uses[id]; o != nil && n.Tok == token.ASSIGN {
-				if _, isRoot := w.roots[o]; !isRoot {
-					w.saved[o] = types.ExprString(r)
-				}
-			}
-		}
-		if id, ok := r.(*ast.Ident); ok && n.Tok == token.ASSIGN {
-			if from, ok := w.saved[w.info.Uses[id]]; ok && from == types.ExprString(l) {
-				w.restored[from] = true
-			}
+	o := w.info.Uses[id]
+	if _, isRoot := w.roots[o]; isRoot {
+		if _, seen := w.rebound[o]; !seen {
+			w.rebound[o] = id.End()
 		}
 	}
 }
 
-// call records the writes of builtins and sync/atomic: delete and clear of a shared map or slice,
-// copy into one, an atomic store or add through an address, and the Store, Add, Swap and
-// CompareAndSwap methods of the sync/atomic types.
+// call records the writes of builtins and sync/atomic: delete and clear of a map or slice, copy
+// into a slice, and an atomic store, add, swap or compare-and-swap, whether through a package
+// function, a bound method or a method expression.
 func (w *walker) call(c *ast.CallExpr, inClosure bool) {
 	switch fun := ast.Unparen(c.Fun).(type) {
 	case *ast.Ident:
@@ -158,25 +163,42 @@ func (w *walker) call(c *ast.CallExpr, inClosure bool) {
 		}
 		switch b.Name() {
 		case "delete", "clear", "copy":
-			// The argument itself is shared: a map or a slice the caller holds too.
-			w.place(c.Args[0], inClosure, true)
+			w.place(c.Args[0], inClosure, asBacking)
 		}
 	case *ast.SelectorExpr:
 		fn, ok := w.info.Uses[fun.Sel].(*types.Func)
 		if !ok || fn.Pkg() == nil || fn.Pkg().Path() != "sync/atomic" || !atomicWrite(fn.Name()) {
 			return
 		}
-		if sig, ok := fn.Type().(*types.Signature); ok && sig.Recv() != nil {
-			// r.n.Add(1): the atomic value is the receiver expression, addressed implicitly.
-			w.place(fun.X, inClosure, true)
+		if sel, ok := w.info.Selections[fun]; ok {
+			switch sel.Kind() {
+			case types.MethodVal: // p.Add(1), s.n.Add(1)
+				w.pointee(fun.X, inClosure)
+			case types.MethodExpr: // (*atomic.Int64).Add(p, 1)
+				if len(c.Args) > 0 {
+					w.pointee(c.Args[0], inClosure)
+				}
+			}
 			return
 		}
-		if len(c.Args) > 0 {
-			if u, ok := ast.Unparen(c.Args[0]).(*ast.UnaryExpr); ok && u.Op == token.AND {
-				w.place(u.X, inClosure, true)
-			}
+		if len(c.Args) > 0 { // atomic.AddInt64(&s.n, 1), atomic.AddInt64(p, 1)
+			w.pointee(c.Args[0], inClosure)
 		}
 	}
+}
+
+// pointee records a write of what e points to: the place x for &x, *e for a pointer value, and e
+// itself for an addressable value whose pointer method is called.
+func (w *walker) pointee(e ast.Expr, inClosure bool) {
+	if u, ok := ast.Unparen(e).(*ast.UnaryExpr); ok && u.Op == token.AND {
+		w.place(u.X, inClosure, asLvalue)
+		return
+	}
+	if isPointer(w.info.TypeOf(e)) {
+		w.place(e, inClosure, asPointee)
+		return
+	}
+	w.place(e, inClosure, asLvalue)
 }
 
 func atomicWrite(name string) bool {
@@ -188,14 +210,29 @@ func atomicWrite(name string) bool {
 	return false
 }
 
-func (w *walker) lvalue(e ast.Expr, inClosure bool) { w.place(e, inClosure, false) }
+// How a place is written.
+type mode int
 
-// place records a write of the place e when it is reached from a root by a shared path. addressed
-// says the place is written through its address (an atomic, a builtin on a map or a slice), which
-// shares it even when no step of the path does.
-func (w *walker) place(e ast.Expr, inClosure, addressed bool) {
-	shared := addressed
+const (
+	// asLvalue: the place itself is assigned.
+	asLvalue mode = iota
+	// asBacking: the place is a map or slice whose elements are written (delete, clear, copy); its
+	// backing store is the caller's when the value came from the caller, unless it is a view of a
+	// local array.
+	asBacking
+	// asPointee: the place is a pointer value and what it points to is written.
+	asPointee
+)
+
+// place records a write of the place e when it is reached from a root by a shared path.
+func (w *walker) place(e ast.Expr, inClosure bool, m mode) {
+	shared := m == asPointee
 	steps := 0
+	if m == asPointee {
+		steps = 1
+	}
+	arrayView := false
+	uncertain := ""
 	cur := e
 	for {
 		switch x := ast.Unparen(cur).(type) {
@@ -211,13 +248,23 @@ func (w *walker) place(e ast.Expr, inClosure, addressed bool) {
 				}
 				kind, shared = Global, true
 			}
+			if m == asBacking && !arrayView {
+				shared = true // the map or slice value refers to the caller's backing store
+			}
 			if !shared {
 				return // the function's own copy
 			}
-			if kind != Global && steps == 0 && !addressed {
+			if kind != Global && steps == 0 && m == asLvalue {
 				return // the parameter variable itself
 			}
-			w.out = append(w.out, Write{Pos: e.Pos(), Kind: kind, Root: x.Name, Path: types.ExprString(e), InClosure: inClosure})
+			if at, ok := w.rebound[obj]; ok && e.Pos() >= at && uncertain == "" {
+				uncertain = "the root was reassigned before this write and may hold fresh storage"
+			}
+			path := types.ExprString(e)
+			if m == asPointee {
+				path = "*" + path
+			}
+			w.out = append(w.out, Write{Pos: e.Pos(), Kind: kind, Root: x.Name, Path: path, InClosure: inClosure, Uncertain: uncertain, root: obj})
 			return
 		case *ast.SelectorExpr:
 			sel, ok := w.info.Selections[x]
@@ -229,13 +276,23 @@ func (w *walker) place(e ast.Expr, inClosure, addressed bool) {
 			}
 			cur = x.X
 		case *ast.IndexExpr:
-			switch u := w.info.TypeOf(x.X).Underlying().(type) {
-			case *types.Map, *types.Slice:
+			switch shape(w.info.TypeOf(x.X)) {
+			case shapeSlice, shapeMap, shapePtrArray:
 				shared = true
-			case *types.Pointer:
-				if _, ok := u.Elem().Underlying().(*types.Array); ok {
-					shared = true
-				}
+			case shapeUnknown:
+				shared = true // possibly; reported as uncertain, not dropped
+				uncertain = "a generic index whose constraint does not settle whether it is a slice, a map or an array"
+			}
+			cur = x.X
+		case *ast.SliceExpr:
+			switch shape(w.info.TypeOf(x.X)) {
+			case shapeArray:
+				arrayView = true // a view of an array value: shared only if the array is reached so
+			case shapePtrArray:
+				shared = true
+			case shapeUnknown:
+				shared = true
+				uncertain = "a generic slice expression whose constraint does not settle the shape"
 			}
 			cur = x.X
 		case *ast.StarExpr:
@@ -248,10 +305,222 @@ func (w *walker) place(e ast.Expr, inClosure, addressed bool) {
 	}
 }
 
+type typeShape int
+
+const (
+	shapeOther typeShape = iota
+	shapeSlice
+	shapeMap
+	shapeArray
+	shapePtrArray
+	shapeUnknown
+)
+
+// shape is the shape of an indexed or sliced operand, through a type parameter's constraint: every
+// term of the type set must agree, or the shape is unknown.
+func shape(t types.Type) typeShape {
+	if t == nil {
+		return shapeOther
+	}
+	if tp, ok := types.Unalias(t).(*types.TypeParam); ok {
+		iface, _ := tp.Constraint().Underlying().(*types.Interface)
+		if iface == nil {
+			return shapeUnknown
+		}
+		var got typeShape = -1
+		for i := 0; i < iface.NumEmbeddeds(); i++ {
+			terms := []types.Type{iface.EmbeddedType(i)}
+			if u, ok := iface.EmbeddedType(i).(*types.Union); ok {
+				terms = terms[:0]
+				for j := 0; j < u.Len(); j++ {
+					terms = append(terms, u.Term(j).Type())
+				}
+			}
+			for _, term := range terms {
+				s := shape(term)
+				if got == -1 {
+					got = s
+				} else if got != s {
+					return shapeUnknown
+				}
+			}
+		}
+		if got == -1 || got == shapeOther {
+			return shapeUnknown
+		}
+		return got
+	}
+	switch u := t.Underlying().(type) {
+	case *types.Slice:
+		return shapeSlice
+	case *types.Map:
+		return shapeMap
+	case *types.Array:
+		return shapeArray
+	case *types.Pointer:
+		if _, ok := u.Elem().Underlying().(*types.Array); ok {
+			return shapePtrArray
+		}
+	}
+	return shapeOther
+}
+
 func isPointer(t types.Type) bool {
 	if t == nil {
 		return false
 	}
 	_, ok := t.Underlying().(*types.Pointer)
 	return ok
+}
+
+// restoration is a proven save and restore: writes of path through root between from and to are
+// undone by the assignment that ends at to.
+type restoration struct {
+	root     types.Object
+	path     string
+	from, to token.Pos
+}
+
+// restorations finds old := P ... P = old pairs among the top-level statements of a body, where P is
+// a stable place (identifiers, field selections and dereferences, no index), nothing in between
+// returns, jumps or writes old, and P's root is not reassigned in between. Only that shape is
+// trusted: a restore in a branch, after an early return, or of a modified value proves nothing.
+func restorations(info *types.Info, body *ast.BlockStmt, rebound map[types.Object]token.Pos) []restoration {
+	var out []restoration
+	stmts := body.List
+	for i, s := range stmts {
+		save, ok := s.(*ast.AssignStmt)
+		if !ok || save.Tok != token.DEFINE || len(save.Lhs) != len(save.Rhs) {
+			continue
+		}
+		for k, l := range save.Lhs {
+			id, ok := l.(*ast.Ident)
+			if !ok {
+				continue
+			}
+			old := info.Defs[id]
+			root, ok := stableRoot(info, save.Rhs[k])
+			if old == nil || !ok {
+				continue
+			}
+			path := types.ExprString(save.Rhs[k])
+			for j := i + 1; j < len(stmts); j++ {
+				if !restores(info, stmts[j], old, root, path) {
+					continue
+				}
+				between := stmts[i+1 : j]
+				if !leavesAlone(info, between, old) {
+					break
+				}
+				if at, ok := rebound[root]; ok && at > save.End() && at < stmts[j].Pos() {
+					break
+				}
+				out = append(out, restoration{root: root, path: path, from: save.End(), to: stmts[j].End()})
+				break
+			}
+		}
+	}
+	return out
+}
+
+// stableRoot returns the root object of a place made of identifiers, field selections and
+// dereferences only, whose spelling therefore names one location throughout the body.
+func stableRoot(info *types.Info, e ast.Expr) (types.Object, bool) {
+	for {
+		switch x := ast.Unparen(e).(type) {
+		case *ast.Ident:
+			o, ok := info.Uses[x].(*types.Var)
+			return o, ok
+		case *ast.SelectorExpr:
+			sel, ok := info.Selections[x]
+			if !ok || sel.Kind() != types.FieldVal {
+				return nil, false
+			}
+			e = x.X
+		case *ast.StarExpr:
+			e = x.X
+		default:
+			return nil, false
+		}
+	}
+}
+
+// restores reports a top-level P = old assignment.
+func restores(info *types.Info, s ast.Stmt, old, root types.Object, path string) bool {
+	a, ok := s.(*ast.AssignStmt)
+	if !ok || a.Tok != token.ASSIGN || len(a.Lhs) != len(a.Rhs) {
+		return false
+	}
+	for m, l := range a.Lhs {
+		id, ok := ast.Unparen(a.Rhs[m]).(*ast.Ident)
+		if !ok || info.Uses[id] != old || types.ExprString(l) != path {
+			continue
+		}
+		if r, ok := stableRoot(info, l); ok && r == root {
+			return true
+		}
+	}
+	return false
+}
+
+// leavesAlone reports statements that neither return nor jump out, and neither assign old, take its
+// address nor change it with ++ or --, closures included.
+func leavesAlone(info *types.Info, stmts []ast.Stmt, old types.Object) bool {
+	ok := true
+	isOld := func(e ast.Expr) bool {
+		id, isID := ast.Unparen(e).(*ast.Ident)
+		return isID && info.Uses[id] == old
+	}
+	for _, s := range stmts {
+		ast.Inspect(s, func(n ast.Node) bool {
+			switch n := n.(type) {
+			case *ast.FuncLit:
+				ast.Inspect(n.Body, func(m ast.Node) bool {
+					switch m := m.(type) {
+					case *ast.AssignStmt:
+						for _, l := range m.Lhs {
+							if isOld(l) {
+								ok = false
+							}
+						}
+					case *ast.UnaryExpr:
+						if m.Op == token.AND && isOld(m.X) {
+							ok = false
+						}
+					case *ast.IncDecStmt:
+						if isOld(m.X) {
+							ok = false
+						}
+					}
+					return true
+				})
+				return false
+			case *ast.ReturnStmt:
+				ok = false
+			case *ast.BranchStmt:
+				if n.Tok == token.GOTO || n.Label != nil {
+					ok = false
+				}
+			case *ast.AssignStmt:
+				for _, l := range n.Lhs {
+					if isOld(l) {
+						ok = false
+					}
+				}
+			case *ast.UnaryExpr:
+				if n.Op == token.AND && isOld(n.X) {
+					ok = false
+				}
+			case *ast.IncDecStmt:
+				if isOld(n.X) {
+					ok = false
+				}
+			}
+			return ok
+		})
+		if !ok {
+			return false
+		}
+	}
+	return true
 }

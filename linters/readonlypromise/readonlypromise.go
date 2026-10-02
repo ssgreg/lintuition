@@ -7,15 +7,18 @@
 // Code finds the writes through internal/effects: a write the caller sees, reached from the
 // receiver, a parameter or a package-level variable. For each written root the classifier reads the
 // doc, with the function's own name masked, and a description of the root built from identifiers
-// ("the receiver q, a Queue"), and says whether the doc promises to leave it unchanged. One yes/no
-// question per root, rather than one choice among all of them: offered every root at once, the
-// classifier spread its answer over them and no option reached the threshold.
+// ("the receiver q, a Queue"), and says whether the doc promises to leave it, as a whole, unchanged.
+// One yes/no question per root, rather than one choice among all of them: offered every root at
+// once, the classifier spread its answer over them and no option reached the threshold. A promise
+// about part of a root (its flags, its size) does not count: which fields that part covers is not
+// known, so matching it to a write would be a guess.
 //
 // Every documented function whose body has a direct write is asked, without a filter on the doc's
 // words: a filter of no-change phrases missed "is left as it was" and "does not reorder", and on 14
 // public repositories asking every such function found the same two findings while the classifier
-// answered a clear no for docs that promise nothing. A body whose only writes are inside a function
-// literal is unsupported: when the literal runs is not known.
+// answered a clear no for docs that promise nothing. A root whose only writes are inside a function
+// literal, or are uncertain (after the root was reassigned), is unsupported for that root; a write a
+// proven save and restore undoes is left out.
 package readonlypromise
 
 import (
@@ -36,9 +39,9 @@ const Name = "read-only-promise"
 // Settings configure the linter.
 type Settings struct {
 	// Threshold is the minimum probability of yes for a finding, and of no for a clean answer; in
-	// between the rule abstains. The default 0.75 is lower than the other promise linters' 0.85:
-	// on this repository's twins, a held-out set and 14 public repositories, docs that plainly
-	// promised no change scored 0.77 to 0.95 and docs that did not scored at most 0.56. It is tuned
+	// between the rule abstains. The default 0.7 is lower than the other promise linters' 0.85: on
+	// this repository's twins, two held-out sets and 14 public repositories, most docs that plainly
+	// promised no change scored 0.72 to 0.93 and docs that did not scored at most 0.52. It is tuned
 	// on those sets, not validated on a labelled one.
 	Threshold *float64 `yaml:"threshold"`
 }
@@ -60,7 +63,7 @@ func init() {
 		Analyzer:    Analyzer,
 		NewSettings: func() any { return &Settings{} },
 		New: func(s any) (sdk.Rule, error) {
-			t, err := sdk.Threshold(s.(*Settings).Threshold, 0.75)
+			t, err := sdk.Threshold(s.(*Settings).Threshold, 0.7)
 			if err != nil {
 				return nil, err
 			}
@@ -88,37 +91,52 @@ func run(pass *analysis.Pass) (any, error) {
 				continue
 			}
 			// One candidate per written root: the receiver, each parameter, package-level state. Each
-			// asks one question, whether the doc promises to leave that root unchanged.
-			seen := map[string]bool{}
-			direct := false
+			// asks one question, whether the doc promises to leave that root unchanged. A root whose
+			// writes are all uncertain or inside a closure is unsupported; a write a proven save and
+			// restore undoes is not a change at return and is left out.
+			type rootState struct {
+				root, path, reason string
+				direct             bool
+			}
+			var order []string
+			states := map[string]*rootState{}
 			for _, w := range ws {
-				if w.InClosure {
+				if w.Restored {
 					continue
 				}
-				direct = true
 				target := describe(pass.TypesInfo, fd, w)
-				if seen[target] {
-					continue
+				st, ok := states[target]
+				if !ok {
+					st = &rootState{root: w.Root}
+					states[target] = st
+					order = append(order, target)
 				}
-				seen[target] = true
+				switch {
+				case w.Direct():
+					if !st.direct {
+						st.direct, st.path = true, w.Path
+					}
+				case st.reason == "" && w.InClosure:
+					st.reason = "the only writes to " + w.Root + " are inside a function literal; when it runs is not known"
+				case st.reason == "":
+					st.reason = "the only writes to " + w.Root + " are uncertain: " + w.Uncertain
+				}
+			}
+			for _, target := range order {
+				st := states[target]
 				c := &sdk.Candidate{
 					Pos:     pass.Fset.Position(fd.Name.Pos()),
-					Subject: fd.Name.Name + " " + w.Root,
-					Local:   map[string]string{"name": fd.Name.Name, "root": w.Root, "path": w.Path},
+					Subject: fd.Name.Name + " " + target,
 				}
-				if w.Kind == effects.Global {
-					c.Local["global"] = "true"
+				if !st.direct {
+					c.Unsupported = st.reason
+					out = append(out, c)
+					continue
 				}
+				c.Local = map[string]string{"name": fd.Name.Name, "root": st.root, "path": st.path}
 				c.Payload.AddProse("doc", sdk.Mask(text, fd.Name.Name, self))
 				c.Payload.Fact("target", target)
 				out = append(out, c)
-			}
-			if !direct {
-				out = append(out, &sdk.Candidate{
-					Pos:         pass.Fset.Position(fd.Name.Pos()),
-					Subject:     fd.Name.Name,
-					Unsupported: "the only writes are inside a function literal; when it runs is not known",
-				})
 			}
 		}
 	}
@@ -193,7 +211,7 @@ func (r *rule) Questions(*sdk.Candidate) []sdk.Question {
 	return []sdk.Question{{
 		ID:   "promises_unchanged",
 		Kind: sdk.Noul,
-		Text: "Does `doc` promise that the documented function leaves `target` unchanged? A promise that the function changes nothing, is read-only, is pure or has no side effects covers every target. These do not count: a promise about something else, one that holds only in some cases (such as on failure), a promise about what later changes to a returned copy do, or a description of what the function changes.",
+		Text: "Does `doc` promise that the documented function leaves `target` unchanged? A promise that the function changes nothing, is read-only, is pure or has no side effects covers every target. These do not count: a promise that names only some part of it, such as its flags, its size or its order; a promise about something else; one that holds only in some cases (such as on failure); a promise about what later changes to a returned copy do; a description of what the function changes.",
 	}}
 }
 
@@ -209,8 +227,5 @@ func (r *rule) Decide(c *sdk.Candidate, answers map[string]sdk.Answer) sdk.Decis
 		return sdk.Abstain(fmt.Sprintf("yes at %.2f is neither ruled out nor established (threshold %.2f)", *y, r.threshold))
 	}
 	name := c.Local["name"]
-	if c.Local["global"] != "" {
-		return sdk.Report("doc of %s promises it changes nothing, but %s writes %s", name, name, c.Local["path"])
-	}
 	return sdk.Report("doc of %s promises to leave %s unchanged, but %s writes %s", name, c.Local["root"], name, c.Local["path"])
 }

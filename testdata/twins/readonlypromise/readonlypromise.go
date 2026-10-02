@@ -25,7 +25,7 @@ func (q *Queue) Front() int { return q.items[q.head] }
 var calls int
 
 // Score is pure: the same input gives the same result.
-func Score(n int) int { calls++; return n * 2 } // want `doc of Score promises it changes nothing, but Score writes calls`
+func Score(n int) int { calls++; return n * 2 } // want `doc of Score promises to leave calls unchanged, but Score writes calls`
 
 // Fixed twin.
 
@@ -106,3 +106,47 @@ func (q *Queue) TryPop() bool {
 	q.items = q.items[1:]
 	return true
 }
+
+type Command struct {
+	flags  map[string]string
+	lflags map[string]string // a cache of the local flags
+	name   string
+}
+
+// Negative: a promise about part of the receiver (its flags) while a separate cache is filled.
+
+// LocalFlags returns the local flags; it does not modify the flags of the command.
+func (c *Command) LocalFlags() map[string]string {
+	if c.lflags == nil {
+		c.lflags = map[string]string{}
+	}
+	return c.lflags
+}
+
+// Defect: the same narrow promise, but a flag really changes. Not caught: a promise about part of
+// the receiver is out of this linter's scope, so this documents the limit rather than a finding.
+
+// Defaults returns the flags; it does not modify the flags of the command.
+func (c *Command) Defaults() map[string]string { c.flags["v"] = "1"; return c.flags }
+
+// Defect: a whole-receiver promise and a write.
+
+// Name returns the command's name and leaves the command untouched.
+func (c *Command) Name() string { c.name = "root"; return c.name } // want `doc of Name promises to leave c unchanged, but Name writes c.name`
+
+// Negative: a logically read-only getter with its cache exception stated.
+
+// Cached returns the local flags. It changes nothing except filling the internal cache on first use.
+func (c *Command) Cached() map[string]string {
+	if c.lflags == nil {
+		c.lflags = map[string]string{}
+	}
+	return c.lflags
+}
+
+// Defect: a promise about one package variable, not about everything.
+
+var Limit = 10
+
+// Check compares n with Limit and leaves Limit unchanged.
+func Check(n int) bool { Limit--; return n < Limit } // want `doc of Check promises to leave Limit unchanged, but Check writes Limit`
