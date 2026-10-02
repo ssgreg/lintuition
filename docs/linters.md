@@ -494,6 +494,10 @@ is the input: `TestWrapNilError` hands Wrap a nil error.
 **Decides:** reports when the name's answer differs from what the check requires. Threshold 0.9. A
 name that only describes the input or the setup is clean.
 
+**Misses:** a stale doc that contradicts the test name can override a clear name. When the name says
+Unquote accepts a bare word, the doc says it is refused and the check demands an error, the
+classifier follows the doc and the defect is not reported (0 of 3 runs on the twins).
+
 **Unsupported, strict again:** two functions match the name; the function is called more than once;
 the error is discarded or written again; `ErrorIs` (its target can be nil); anything in the failing
 branch that might end the test first (`t.Skip`, `return`, `panic`, a helper call); calls inside the
