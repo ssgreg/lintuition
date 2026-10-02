@@ -1,6 +1,12 @@
 # lintuition
 
-**A Go linter for code that says one thing and does another.**
+**[System One](https://en.wikipedia.org/wiki/Thinking,_Fast_and_Slow) linters for your Go code.**
+
+lintuition finds places where code says one thing and does another: log messages, test names,
+comments or metric Help that contradict the surrounding code.
+
+It runs built-in linters and lets you add your own. A model interprets the wording; each linter
+checks it against facts extracted by Go analysis.
 
 This function logs success before it knows whether the save worked:
 
@@ -15,9 +21,7 @@ if err := store.SaveConfig(cfg); err != nil {
 logs.go:15:2: success logged before SaveConfig has returned: "config saved to disk" (premature-success)
 ```
 
-The compiler is fine with it, and so is golangci-lint. lintuition reads the words people write in Go
-code (log messages, test names, comments, metric Help) and checks them against what the code around
-them does.
+The compiler is fine with it, and so is golangci-lint.
 
 A unit that does not match the value:
 
@@ -38,7 +42,7 @@ func TestUnquoteRejectsUnbalancedQuote(t *testing.T) {
 // test name expects an error from Unquote, but the test fails when Unquote returns one
 ```
 
-[More examples](#more-examples) below, and [15 linters](#linters) in all.
+[More examples](#more-examples) below, and [the full list of linters](#linters).
 
 ## What it asks, sends and costs
 
@@ -91,7 +95,8 @@ build; remove `run.issues-exit-code: 0` to make findings fail it.
 No Jev key? A local model through Ollama, or Claude Code and Codex under your own login, work too:
 see [classifiers](docs/classifiers.md).
 
-> Status: early development (pre-v0.1). The interfaces and the config may change.
+> Status: v0.x. Until v1.0, a minor release may change the config, the command line and the `sdk`
+> API; [CHANGELOG.md](CHANGELOG.md) says what changed.
 
 ## More examples
 
