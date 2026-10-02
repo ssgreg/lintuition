@@ -4,6 +4,10 @@
 
 - New linter `doc-vs-signature`: a doc comment that promises a returned result or error the
   function's signature does not have.
+- `severe-event-understated` stops reading expected events as lost work: an absent optional file,
+  a requested stop or cancel, the program's own recovery. It now sends the log level and the
+  branch the log sits in (an error checked with `errors.Is` or `os.IsNotExist`, a done context, a
+  received signal), and its question has an answer for each of those cases.
 
 ## v0.1.0 (2026-10-02)
 

@@ -226,14 +226,21 @@ slog.Info("events for the last hour are lost, the write to disk was refused")
 
 **Reads:** debug and info logs with a constant message of at least two words.
 
-**Sends:** the message.
+**Sends:** the message, its level, and what the code has established where it logs, read from the
+enclosing branches through go/types: an error it checked for (`errors.Is(err, fs.ErrNotExist)`,
+`os.IsNotExist(err)`, `err == context.Canceled`, also under a guard that returns on every other
+error), a context that is done, or a signal that arrived. A debug "notify failed" reads as lost
+work until you see it sits in the branch where shutdown cancelled the context; the branch fact is
+what lets the classifier see that.
 
-**Asks two questions:** what consequence the message states (routine progress, a temporary
-inconvenience, or unintended loss), and whether it describes something done on purpose (a requested
-deletion, sampling).
+**Asks two questions:** what consequence the message states: routine progress, an expected absence
+(no saved state on the first start), a requested stop, the program's own recovery, a temporary
+inconvenience, or an unintended loss; and whether what went away was meant to go (a requested
+deletion, sampling as configured).
 
-**Decides:** reports when the loss is unintended (threshold 0.85) and "on purpose" is unlikely (0.3
-or below). Between 0.3 and 0.7 on the second question it abstains.
+**Decides:** reports when the loss is unintended (threshold 0.85) and "meant" is unlikely (0.3 or
+below); between 0.3 and 0.7 on the second question it abstains. The answers other than a loss are
+one outcome here, so their probabilities are added before the threshold.
 
 ### destructive-remediation
 
