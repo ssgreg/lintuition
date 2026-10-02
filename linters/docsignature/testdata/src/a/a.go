@@ -1,6 +1,9 @@
 package a
 
-import "context"
+import (
+	"context"
+	"errors"
+)
 
 type Buffer struct{ n int }
 
@@ -74,6 +77,8 @@ func All() []error { return nil } // 18 unsupported: []error
 // Value returns an error description.
 func Value() MyErr { return MyErr{} } // 19 error: the value MyErr does not implement error, *MyErr does
 
+type Sizer interface{ Size() int }
+
 type Store interface {
 	// Flush writes pending data and returns the count.
 	Flush() // 20 result: an interface method with no results
@@ -84,7 +89,7 @@ type Store interface {
 	// Put returns an error on a full store.
 	Put(k, v string) error // 22 none: has an error result
 
-	Coded // 23 none: embedded
+	Sizer // 23 none: embedded
 }
 
 // Open opens the file.
@@ -111,3 +116,120 @@ func (e *FlagError) Error() string { return e.flag } // 34 none: the Error metho
 
 // Flag returns the flag for which the error occurred.
 func (e FlagError) Flag() string { return e.flag } // 35 none: a method of an error type, value receiver
+
+// Dynamic returns an error on failure, otherwise the decoded value.
+func Dynamic(fail bool) any { // 40 unsupported: an any result may hold an error
+	if fail {
+		return errors.New("bad")
+	}
+	return 12
+}
+
+type AnyAlias = any
+
+// DynamicAlias returns an error on failure, otherwise the decoded value.
+func DynamicAlias(fail bool) AnyAlias { return Dynamic(fail) } // 41 unsupported: an alias of any
+
+type Reader interface{ Read() int }
+
+// Open2 returns a reader, or an error if the file is missing.
+func Open2() Reader { return nil } // 42 error: a non-empty interface is not treated as an error
+
+// Deep returns nested slices of error values.
+func Deep() [][][][][]error { return nil } // 43 unsupported: no depth limit
+
+type Leaf struct{ Err error }
+type Inner struct{ Long *Leaf }
+type LongFirst struct {
+	Deep  *Inner
+	Short *Leaf
+}
+type ShortFirst struct {
+	Short *Leaf
+	Deep  *Inner
+}
+
+// OrderedLong returns a holder for an error.
+func OrderedLong() LongFirst { return LongFirst{} } // 44 unsupported: the long path first
+
+// OrderedShort returns a holder for an error.
+func OrderedShort() ShortFirst { return ShortFirst{} } // 45 unsupported: the short path first
+
+type Holder[T any] = struct{ Value T }
+
+// AliasGeneric returns a holder for an error.
+func AliasGeneric() Holder[error] { return Holder[error]{} } // 46 unsupported: a generic alias holding error
+
+// Constrained returns an error.
+func Constrained[T error]() T { var v T; return v } // 47 unsupported: a type parameter constrained by error
+
+type Generic[T any] interface {
+	// Read returns an error.
+	Read() T // 48 unsupported: an interface method returning a type parameter
+}
+
+type Paren (interface {
+	// FlushParen returns the number of bytes written.
+	FlushParen() // 49 result: a parenthesised interface
+})
+
+type ParenAlias = (interface {
+	// FlushAlias returns the number of bytes written.
+	FlushAlias() // 50 result: a parenthesised interface alias
+})
+
+type ErrorView interface {
+	error
+	// Code returns the code identifying the error.
+	Code() int // 51 none: a method of an error interface
+}
+
+type ConcreteError struct{}
+
+func (ConcreteError) Error() string { return "error" }
+
+// Code returns the code identifying the error.
+func (ConcreteError) Code() int { return 1 } // 52 none: the concrete twin of 51
+
+func LocalTypes() {
+	type Local interface {
+		// FlushLocal returns the number of bytes written.
+		FlushLocal() // 53 result: a local interface
+	}
+	var _ Local
+}
+
+type Cycle struct {
+	Next *Cycle
+	Err  error
+}
+
+// Cyclic returns a list containing an error.
+func Cyclic() *Cycle { return nil } // 54 unsupported: a recursive type with an error field
+
+// ErrorMap returns a mapping of error values to counts.
+func ErrorMap() map[error]int { return nil } // 55 unsupported: an error map key
+
+// ErrorArray returns an array of error values.
+func ErrorArray() [2]error { return [2]error{} } // 56 unsupported: an array of errors
+
+type ConcreteAlias = *ConcreteError
+
+// ConcreteAliasResult returns an error.
+func ConcreteAliasResult() ConcreteAlias { return nil } // 57 none: an alias of an error pointer
+
+// CallbackInput returns an error.
+func CallbackInput() func(error) { return nil } // 58 error: a callback that takes an error returns none
+
+type NoErr struct{ N int }
+
+type Cyc2 struct{ Next *Cyc2 }
+
+// Chain returns the chain or an error.
+func Chain() *Cyc2 { return nil } // 59 error: a recursive type without an error is walked to the end
+
+// Empty2 returns an error on failure.
+func Empty2() interface{} { return nil } // 64 unsupported: interface{} is any
+
+// Readers returns the readers, or an error.
+func Readers() []Reader { return nil } // 65 error: a slice of a non-empty interface

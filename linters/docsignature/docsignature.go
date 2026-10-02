@@ -14,7 +14,7 @@
 // makes neither claim checkable and is not a candidate.
 //
 // To keep the classifier to docs that can make the claim, a doc is asked about only when it uses a
-// return word (return, returns, reports whether, yields) or an error word (error, errors, err,
+// return word (return, returns, yields, reports whether, tells the caller whether, gives back) or an error word (error, errors, err,
 // ErrX). A result that carries an error inside it (chan error, func() error, a struct with an error
 // field, a type parameter) is unsupported for the error claim: the doc may mean that error.
 package docsignature
@@ -25,6 +25,8 @@ import (
 	"go/types"
 	"regexp"
 	"strings"
+	"unicode"
+	"unicode/utf8"
 
 	"golang.org/x/tools/go/analysis"
 
@@ -81,7 +83,7 @@ const (
 const self = "the documented function"
 
 var (
-	returnWords = regexp.MustCompile(`(?i)\b(return|returns|returned|returning|yields?)\b|\breports whether\b`)
+	returnWords = regexp.MustCompile(`(?i)\b(return|returns|returned|returning|yields?)\b|\b(reports|tells (the )?(caller|callers)) (whether|if)\b|\b(gives|hands) back\b`)
 	// ErrX and errX are case-sensitive: errgroup is not an error word.
 	errorWords = regexp.MustCompile(`(?i:\berr(?:or|ors)?\b)|\bErr[A-Z0-9_]\w*|\berr[A-Z]\w*`)
 	errorIface = types.Universe.Lookup("error").Type().Underlying().(*types.Interface)
@@ -91,66 +93,69 @@ func run(pass *analysis.Pass) (any, error) {
 	var out []*sdk.Candidate
 	for _, f := range pass.Files {
 		for _, d := range f.Decls {
-			switch d := d.(type) {
-			case *ast.FuncDecl:
-				if isTestingFunc(pass, d) {
+			fd, ok := d.(*ast.FuncDecl)
+			if !ok || isTestingFunc(pass, fd) {
+				continue
+			}
+			if obj, ok := pass.TypesInfo.Defs[fd.Name].(*types.Func); ok {
+				sig := obj.Type().(*types.Signature)
+				if sig.Recv() != nil && isErrorType(sig.Recv().Type()) {
 					continue
 				}
-				if obj, ok := pass.TypesInfo.Defs[d.Name].(*types.Func); ok {
-					sig := obj.Type().(*types.Signature)
-					if onErrorType(sig) {
-						continue
-					}
-					out = appendCandidate(out, pass, d.Doc, d.Name, sig)
-				}
-			case *ast.GenDecl:
-				for _, s := range d.Specs {
-					ts, ok := s.(*ast.TypeSpec)
-					if !ok {
-						continue
-					}
-					it, ok := ts.Type.(*ast.InterfaceType)
-					if !ok {
-						continue
-					}
-					for _, m := range it.Methods.List {
-						if len(m.Names) != 1 {
-							continue // an embedded interface or constraint term
-						}
-						if obj, ok := pass.TypesInfo.Defs[m.Names[0]].(*types.Func); ok {
-							out = appendCandidate(out, pass, m.Doc, m.Names[0], obj.Type().(*types.Signature))
-						}
-					}
-				}
+				out = appendCandidate(out, pass, fd.Doc, fd.Name, sig)
 			}
 		}
+		// Interface declarations anywhere in the file, local ones and parenthesised ones included.
+		ast.Inspect(f, func(n ast.Node) bool {
+			ts, ok := n.(*ast.TypeSpec)
+			if !ok {
+				return true
+			}
+			it, ok := ast.Unparen(ts.Type).(*ast.InterfaceType)
+			if !ok {
+				return true
+			}
+			if tn, ok := pass.TypesInfo.Defs[ts.Name].(*types.TypeName); ok && isErrorType(tn.Type()) {
+				return true // an error interface: its methods' docs say "error" about the receiver
+			}
+			for _, m := range it.Methods.List {
+				if len(m.Names) != 1 {
+					continue // an embedded interface or constraint term
+				}
+				if obj, ok := pass.TypesInfo.Defs[m.Names[0]].(*types.Func); ok {
+					out = appendCandidate(out, pass, m.Doc, m.Names[0], obj.Type().(*types.Signature))
+				}
+			}
+			return true
+		})
 	}
 	return out, nil
 }
 
-// onErrorType reports a method of a type that implements error, Error() string among them: its doc
-// says "error" about the receiver ("Error implements error", "GetFlag returns the flag for which
-// the error occurred"), not about a result.
-func onErrorType(sig *types.Signature) bool {
-	recv := sig.Recv()
-	if recv == nil {
-		return false
-	}
-	t := recv.Type()
+// isErrorType reports a type whose value or pointer implements error. Its methods, Error() string
+// among them, say "error" about the receiver ("Error implements error", "GetFlag returns the flag
+// for which the error occurred"), not about a result.
+func isErrorType(t types.Type) bool {
 	if p, ok := t.(*types.Pointer); ok {
 		t = p.Elem()
 	}
-	return implementsError(t) || implementsError(types.NewPointer(t))
+	t = types.Unalias(t)
+	return implementsError(t) || !types.IsInterface(t) && implementsError(types.NewPointer(t))
 }
 
-// isTestingFunc reports a Test, Benchmark, Fuzz or Example function in a _test.go file: its doc
-// describes what it checks, and the results it mentions are another function's.
+// isTestingFunc reports a Test, Benchmark, Fuzz or Example function in a _test.go file, named by the
+// go test rule (the prefix alone, or followed by a rune that is not lower case: TestX, Test_x, not
+// Testify): its doc describes what it checks, and the results it mentions are another function's.
 func isTestingFunc(pass *analysis.Pass, fd *ast.FuncDecl) bool {
 	if fd.Recv != nil || !strings.HasSuffix(pass.Fset.Position(fd.Pos()).Filename, "_test.go") {
 		return false
 	}
 	for _, p := range []string{"Test", "Benchmark", "Fuzz", "Example"} {
-		if strings.HasPrefix(fd.Name.Name, p) {
+		rest, ok := strings.CutPrefix(fd.Name.Name, p)
+		if !ok {
+			continue
+		}
+		if r, _ := utf8.DecodeRuneInString(rest); rest == "" || !unicode.IsLower(r) {
 			return true
 		}
 	}
@@ -188,8 +193,8 @@ func appendCandidate(out []*sdk.Candidate, pass *analysis.Pass, doc *ast.Comment
 	}
 	if claim == claimError {
 		for i := 0; i < res.Len(); i++ {
-			if carriesError(res.At(i).Type(), map[types.Type]bool{}, 0) {
-				c.Unsupported = "a result carries an error inside it; the doc may mean that error"
+			if carriesError(res.At(i).Type()) {
+				c.Unsupported = "a result may hold an error (an interface, a type parameter, an error inside it); the doc may mean that error"
 				return append(out, c)
 			}
 		}
@@ -218,47 +223,70 @@ func implementsError(t types.Type) bool {
 	return types.Implements(t, errorIface)
 }
 
-// carriesError reports a type that holds an error somewhere a doc could call "an error": an element,
-// a field, a function result, or a type parameter that may be one.
-func carriesError(t types.Type, seen map[types.Type]bool, depth int) bool {
-	if depth > 4 || seen[t] {
+// maxCarrierNodes bounds the walk over a result type; a type too large to walk counts as a carrier,
+// so the check fails closed.
+const maxCarrierNodes = 10000
+
+// carriesError reports a result type that may hold an error a doc could call "an error": an empty
+// interface (any), or an error, an empty interface or a type parameter reachable through an element,
+// a field or a function result. Named types are walked once:
+// every cycle in a type goes through one, so the walk visits each part of the type and is complete.
+func carriesError(t types.Type) bool {
+	seen := map[types.Type]bool{}
+	nodes := 0
+	var walk func(t types.Type, root bool) bool
+	walk = func(t types.Type, root bool) bool {
+		nodes++
+		if nodes > maxCarrierNodes {
+			return true
+		}
+		t = types.Unalias(t)
+		if n, ok := t.(*types.Named); ok {
+			if seen[n] {
+				return false
+			}
+			seen[n] = true
+		}
+		if !root && implementsError(t) {
+			return true
+		}
+		switch u := t.Underlying().(type) {
+		case *types.TypeParam:
+			return true
+		case *types.Interface:
+			// any holds whatever the function returns, an error included. A non-empty interface
+			// (io.Reader, Core) could hold a value that also implements error, but a doc that says the
+			// function returns an error does not mean that value; it is walked like any other type.
+			return u.NumMethods() == 0
+		case *types.Pointer:
+			return walk(u.Elem(), false)
+		case *types.Slice:
+			return walk(u.Elem(), false)
+		case *types.Array:
+			return walk(u.Elem(), false)
+		case *types.Chan:
+			return walk(u.Elem(), false)
+		case *types.Map:
+			return walk(u.Key(), false) || walk(u.Elem(), false)
+		case *types.Signature:
+			for i := 0; i < u.Results().Len(); i++ {
+				if walk(u.Results().At(i).Type(), false) {
+					return true
+				}
+			}
+		case *types.Struct:
+			for i := 0; i < u.NumFields(); i++ {
+				if walk(u.Field(i).Type(), false) {
+					return true
+				}
+			}
+		}
 		return false
 	}
-	seen[t] = true
-	if depth > 0 && implementsError(t) {
+	if _, ok := t.(*types.TypeParam); ok {
 		return true
 	}
-	switch u := t.(type) {
-	case *types.TypeParam:
-		return true
-	case *types.Alias:
-		return carriesError(types.Unalias(u), seen, depth)
-	case *types.Named:
-		return carriesError(u.Underlying(), seen, depth)
-	case *types.Pointer:
-		return carriesError(u.Elem(), seen, depth+1)
-	case *types.Slice:
-		return carriesError(u.Elem(), seen, depth+1)
-	case *types.Array:
-		return carriesError(u.Elem(), seen, depth+1)
-	case *types.Chan:
-		return carriesError(u.Elem(), seen, depth+1)
-	case *types.Map:
-		return carriesError(u.Key(), seen, depth+1) || carriesError(u.Elem(), seen, depth+1)
-	case *types.Signature:
-		for i := 0; i < u.Results().Len(); i++ {
-			if carriesError(u.Results().At(i).Type(), seen, depth+1) {
-				return true
-			}
-		}
-	case *types.Struct:
-		for i := 0; i < u.NumFields(); i++ {
-			if carriesError(u.Field(i).Type(), seen, depth+1) {
-				return true
-			}
-		}
-	}
-	return false
+	return walk(t, true)
 }
 
 type rule struct{ threshold float64 }
@@ -268,7 +296,7 @@ func (r *rule) Questions(c *sdk.Candidate) []sdk.Question {
 		return []sdk.Question{{
 			ID:   "returns_result",
 			Kind: sdk.Noul,
-			Text: "Does any sentence of `doc` state that the documented function gives something back to its caller, as in \"returns the number of bytes written\", \"returns any errors\" or \"reports whether the name is valid\"? One such sentence is enough. Sentences that only say when or how it returns, that it returns something into a pool or to an owner, what it does, or what another function or a request returns do not count.",
+			Text: "Does any sentence of `doc` state that the documented function gives something back to its caller, as in \"returns the number of bytes written\", \"returns any errors\" or \"reports whether the name is valid\"? One such sentence is enough. These do not count: when or how it returns; returning something into a pool or to an owner; a value delivered another way, such as sent on a channel, passed to a callback or written to a writer or to output; what it does; what another function or a request returns; a statement that it returns nothing.",
 		}}
 	}
 	return []sdk.Question{{

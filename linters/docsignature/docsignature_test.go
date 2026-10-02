@@ -2,8 +2,11 @@ package docsignature
 
 import (
 	"fmt"
+	"go/ast"
+	"go/parser"
 	"go/token"
 	"os"
+	"path/filepath"
 	"sort"
 	"strings"
 	"testing"
@@ -78,6 +81,27 @@ func TestExtraction(t *testing.T) {
 		`21 error "the documented function returns the value or an error."`,
 		`26 error "the documented function logs an error when the counter overflows."`,
 		`33 result "the documented function returns the fixture path."`,
+		`40 unsupported`,
+		`41 unsupported`,
+		`42 error "the documented function returns a reader, or an error if the file is missing."`,
+		`43 unsupported`,
+		`44 unsupported`,
+		`45 unsupported`,
+		`46 unsupported`,
+		`47 unsupported`,
+		`48 unsupported`,
+		`49 result "the documented function returns the number of bytes written."`,
+		`50 result "the documented function returns the number of bytes written."`,
+		`53 result "the documented function returns the number of bytes written."`,
+		`54 unsupported`,
+		`55 unsupported`,
+		`56 unsupported`,
+		`58 error "the documented function returns an error."`,
+		`59 error "the documented function returns the chain or an error."`,
+		`60 result "the documented function returns the number of completed operations."`,
+		`63 result "the documented function returns a value."`,
+		`64 unsupported`,
+		`65 error "the documented function returns the readers, or an error."`,
 	}
 	if strings.Join(got, "\n") != strings.Join(want, "\n") {
 		t.Fatalf("candidates:\n%s\n\nwant:\n%s", strings.Join(got, "\n"), strings.Join(want, "\n"))
@@ -147,6 +171,13 @@ func TestWords(t *testing.T) {
 		{"Next yields the next item.", true, false},
 		{"The returned value is cached.", true, false},
 		{"Returning early is fine.", true, false},
+		{"Lookup gives back the value.", true, false},
+		{"Pop hands back the head.", true, false},
+		{"Evict tells the caller whether it was present.", true, false},
+		{"Has tells callers if the key exists.", true, false},
+		{"Check reports if the name is valid.", true, false},
+		{"It reports progress to the logger.", false, false},
+		{"It tells the user to retry.", false, false},
 		{"Close closes it.", false, false},
 		{"It logs an error.", false, true},
 		{"Errors are collected.", false, true},
@@ -163,6 +194,32 @@ func TestWords(t *testing.T) {
 		}
 		if got := errorWords.MatchString(tc.text); got != tc.errWords {
 			t.Errorf("error words in %q: %v", tc.text, got)
+		}
+	}
+}
+
+// TestFixtureDocsCarryNoHints checks that the twins' and the showcase's explanations ("Defect: ...",
+// "doc-vs-signature: ...") are not part of any doc this linter sends: they would tell the classifier
+// the answer and make a live evaluation measure the hint instead of the doc.
+func TestFixtureDocsCarryNoHints(t *testing.T) {
+	files, _ := filepath.Glob("../../testdata/twins/docsignature/*.go")
+	files = append(files, "../../examples/showcase/errors.go")
+	fset := token.NewFileSet()
+	for _, name := range files {
+		f, err := parser.ParseFile(fset, name, nil, parser.ParseComments)
+		if err != nil {
+			t.Fatal(err)
+		}
+		for _, d := range f.Decls {
+			fd, ok := d.(*ast.FuncDecl)
+			if !ok || fd.Doc == nil {
+				continue
+			}
+			for _, hint := range []string{"Defect", "Fixed twin", "Negative", "doc-vs-signature", "want"} {
+				if strings.Contains(fd.Doc.Text(), hint) {
+					t.Errorf("%s: the doc of %s carries %q", name, fd.Name.Name, hint)
+				}
+			}
 		}
 	}
 }

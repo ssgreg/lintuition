@@ -373,32 +373,37 @@ func (b *Buffer) Sync() { ... }
 `go/types`: whether there are results, and whether one of them is or implements `error`. Two claims
 can be checked:
 
-- a function with no results whose doc uses a return word (return, returns, reports whether,
-  yields);
+- a function with no results whose doc uses a return word (return, returns, yields, reports
+  whether, tells the caller whether, gives back);
 - a function with results but no error among them whose doc uses an error word (error, errors, err,
   `ErrX`, `errX`).
 
 A function that already returns an error has nothing to check here. Test, benchmark, fuzz and
-example functions in `_test.go` files are skipped (their docs describe other functions), and so are
-methods of error types (their docs say "error" about the receiver).
+example functions in `_test.go` files are skipped (their docs describe other functions; `Testify`
+is not one), and so are methods of error types and of interfaces that embed `error` (their docs say
+"error" about the receiver). Interfaces are read wherever they are declared, inside a function or
+in parentheses too.
 
 **Sends:** only the doc, with the function's own name replaced by "the documented function". No
 signature, no types.
 
 **Asks:** one yes/no question: does any sentence of the doc say the function gives back a value
 (for a function with no results), or that one of its results is an error (for a function with results
-but no error)? Returning "into a pool", saying when the function returns, an error it logs or
-passes on, and a value that carries or formats an error do not count.
+but no error)? These do not count: returning "into a pool", saying when the function returns, a
+value it says it sends on a channel, passes to a callback or writes out, an error it logs or passes
+on, and a value that carries or formats an error.
 
 **Decides:** reports at 0.85 or above, clean at 0.15 or below, abstains in between (setting
 `threshold`).
 
-**Unsupported:** the error claim when a result carries an error inside it: `chan error`,
-`func() error`, `[]error`, a struct with an error field, a type parameter. The doc may mean that
-error.
+**Unsupported:** the error claim when a result may hold an error: `any` (its dynamic value may be an
+error), a type parameter, or an error, `any` or a type parameter reachable inside the result (`chan error`, `func() error`, `[]error`, a struct with an error field, at any
+depth). The doc may mean that error.
 
-A doc that says "returns" about something the function sends on a channel or prints is reported
-too: the doc is wrong about how the result reaches the caller, and the fix is the verb.
+A doc that says only "returns" about something the function sends on a channel or prints
+("Describe returns all descriptions" on a method that sends them on `ch`) is reported too. That is a
+wording finding rather than a stale contract: the doc is wrong about how the values reach the caller,
+and the fix is the verb. A doc that names the delivery ("returns them through ch") is clean.
 
 ---
 
