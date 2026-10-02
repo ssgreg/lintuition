@@ -210,11 +210,37 @@ log.Error("cache miss, loading from the database")
 **Reads:** error and fatal level logs with a constant message. Messages that name a failure as a
 word ("failed", "cannot", "unable", "invalid") are skipped; "failover" and "failback" are asked about.
 
-**Sends:** the message.
+**Sends:** the message, whether the call logs a value of type error (a field such as
+`zap.Error(err)` or slog's `"err", err`, a printf argument, logrus `WithError`, zerolog `Err`), or
+the package-level error it logs by name (`"err", context.Canceled`), and the checks the code made
+on that error on the way to the log call, read through go/types from the enclosing branches:
+`err != nil` gives "not nil", `errors.Is(err, context.Canceled)` "is context.Canceled",
+`!errors.Is(err, net.ErrClosed)` "is not net.ErrClosed", also `err == io.EOF`, `os.IsNotExist(err)`,
+a switch case, and a guard that returns on the other case; at most six, nearest first. In a
+structured log the message often only names the operation, `"closing the listener"`, and the error
+says that it failed; without the error the classifier reads such a message as routine.
 
-**Asks:** whether the event is routine, a recoverable degradation, or a failure.
+A check counts only for the very variable that is logged, only if nothing in its branch can
+rebind it (an assignment, `&err`, a closure that sets it, a `goto`), never across a function literal,
+and not for a case reached by `fallthrough`. A check that depends on more than the binding
+(`errors.Is`, `==`, `os.IsNotExist`) is also dropped when the branch writes a field, an element, a
+pointer target or a package-level variable, since that can change the wrapped cause or the
+compared sentinel. A call that changes them is not seen, so the checks are what the code tested on
+the way, not a proof of the error's value at the log.
 
-**Decides:** reports "routine". Threshold 0.9.
+**Asks:** whether the event is routine (including an operation that stopped on an error the code
+checked to be an expected one: a cancellation, a closed connection, the end of input), a
+recoverable degradation, or a failure. When the call carries an error the code did not single out
+and did not find nil, it also asks, about the message alone, whether it only names an action
+("closing the listener") or says what happened ("cache miss", "retry scheduled").
+
+**Decides:** reports "routine" at threshold 0.9. One override comes first: when the message names
+an action at 0.7 or above and the code checked the error is not nil without singling it out, the
+line is taken as a failure report and is clean, whatever the first answer said. That is a recall
+trade-off, not a proof: it removes the zap-style false findings, and it also misses a routine
+event that happens to be worded as an action with an unexpected error attached. When nothing shows
+the error is set, the same answer abstains instead. A known-nil error or an identified one gets no
+override.
 
 ### severe-event-understated
 
