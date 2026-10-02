@@ -12,9 +12,10 @@
 // gosec, staticcheck and revive report many unrelated things under one name, and a reason usually
 // answers the one rule that fired: "G304: a constant file name under the build directory". Their
 // one-line description cannot carry that, so a reason that names a rule (a gosec G-number, a
-// staticcheck SA, S, ST or QF number, a revive rule name before a colon) is compared with that
-// rule's own title from the linter's documentation instead. A reason that names a rule the table
-// does not describe, or several rules, is unsupported.
+// staticcheck SA, S, ST or QF number as a word of its own, a revive rule list in revive's disable
+// syntax or before a colon) is compared with that rule's own title from the linter's documentation
+// instead. A reason that names a rule the table does not describe, or several rules, is
+// unsupported.
 //
 // A directive is read as lintuition and golangci-lint read it: `//nolint:<linters> // <reason>`.
 // The reason is the whole rest of the comment, a second `//` included: a line comment runs to the
@@ -103,47 +104,92 @@ var (
 )
 
 // ruleTables are the linters whose reasons name the rule they answer, with each rule's description
-// and the pattern of a rule ID in a reason.
+// and how a reason cites rules. A cited rule missing from the description table is unsupported,
+// never replaced by a rule whose name it starts with.
 var ruleTables = map[string]struct {
 	rules map[string]string
-	id    func(reason string) []string
+	cite  func(reason string) []string
 }{
-	"gosec":       {gosecRules, matchAll(regexp.MustCompile(`\bG[0-9]{3}\b`))},
-	"staticcheck": {staticcheckRules, matchAll(regexp.MustCompile(`\b(?:SA|ST|QF|S)[0-9]{4}\b`))},
-	"revive":      {reviveRules, reviveRule},
+	"gosec":       {gosecRules, citeIDs(regexp.MustCompile(`^G[0-9]{3}$`))},
+	"staticcheck": {staticcheckRules, citeIDs(regexp.MustCompile(`^(?:SA|ST|QF|S)[0-9]{4}$`))},
+	"revive":      {reviveRules, citeRevive},
 }
 
-func matchAll(re *regexp.Regexp) func(string) []string {
-	return func(reason string) []string { return re.FindAllString(reason, -1) }
-}
-
-// A revive rule name in a reason: first, before a colon, as revive prints its findings
-// ("var-naming: ..."), or after revive's own disable syntax ("disable-line:unused-receiver"). A rule
-// name anywhere else is an ordinary word ("range", "defer") and is not read as one.
-var reviveRuleRE = regexp.MustCompile(`^(?:(?:revive:)?disable(?:-next)?-line:([a-z]+(?:-[a-z]+)*)\b|([a-z]+(?:-[a-z]+)*):)`)
-
-func reviveRule(reason string) []string {
-	m := reviveRuleRE.FindStringSubmatch(reason)
-	switch {
-	case m == nil:
-		return nil
-	case m[1] != "":
-		return []string{m[1]}
-	case reviveRules[m[2]] != "":
-		return []string{m[2]}
+// citeIDs returns the IDs a reason cites as words of their own: a whitespace-separated word that,
+// without surrounding brackets, quotes and sentence punctuation, is an ID or a list of IDs joined
+// by "," or "/" ("G304:", "(G204)", "G304/G703"). An ID inside a larger word is not a citation:
+// "G304.json" is a file, "BUG-G304" a ticket, "éG304" a word.
+func citeIDs(id *regexp.Regexp) func(string) []string {
+	return func(reason string) []string {
+		var out []string
+		for _, w := range strings.Fields(reason) {
+			w = strings.TrimRight(strings.TrimLeft(w, `(["'`), `)]"':,.;!?`)
+			parts := strings.FieldsFunc(w, func(r rune) bool { return r == ',' || r == '/' })
+			all := len(parts) > 0
+			for _, p := range parts {
+				all = all && id.MatchString(p)
+			}
+			if all {
+				out = append(out, parts...)
+			}
+		}
+		return out
 	}
-	return nil // a leading word with a colon that names no revive rule ("note: ...")
 }
 
-// citedRule returns the one rule a reason names, and false when it names several distinct ones. An
-// empty rule means the reason names none, or the linter has no rule table.
+var (
+	// revive's disable syntax, as revive reads it: the whole non-blank field after the colon is a
+	// comma-separated rule list.
+	reviveDisableRE = regexp.MustCompile(`^(?:revive:disable(?:-next-line|-line)?|disable(?:-next-line|-line)):(\S*)`)
+	// A heading: a rule name, or a comma-separated list of them, before a colon and a blank, as
+	// revive prints its findings ("var-naming: ...").
+	reviveHeadingRE = regexp.MustCompile(`^([a-z]+(?:-[a-z0-9]+)*(?:,[a-z]+(?:-[a-z0-9]+)*)*):(?:\s|$)`)
+	reviveNameRE    = regexp.MustCompile(`^[a-z]+(?:-[a-z0-9]+)*$`)
+)
+
+// citeRevive returns the revive rules a reason cites, at the start of the reason or of a clause
+// after "//". The disable syntax always cites: a malformed field is returned whole, so it is
+// unsupported rather than cut down to a known prefix. A heading cites when one of its names is a
+// revive rule (described or not) or has a hyphen as revive's rule names do; a single unknown word
+// ("note:", "todo:") is ordinary prose.
+func citeRevive(reason string) []string {
+	var out []string
+	for _, clause := range strings.Split(reason, "//") {
+		clause = strings.TrimSpace(clause)
+		if m := reviveDisableRE.FindStringSubmatch(clause); m != nil {
+			names := strings.Split(m[1], ",")
+			for _, n := range names {
+				if !reviveNameRE.MatchString(n) {
+					return []string{m[1]} // malformed: cited, and described by nothing
+				}
+			}
+			out = append(out, names...)
+			continue
+		}
+		m := reviveHeadingRE.FindStringSubmatch(clause)
+		if m == nil {
+			continue
+		}
+		names := strings.Split(m[1], ",")
+		for _, n := range names {
+			if _, known := reviveRules[n]; known || reviveUndescribed[n] || strings.Contains(n, "-") {
+				out = append(out, names...)
+				break
+			}
+		}
+	}
+	return out
+}
+
+// citedRule returns the one rule a reason cites, and false when it cites several distinct ones. An
+// empty rule means the reason cites none, or the linter has no rule table.
 func citedRule(linter, reason string) (string, bool) {
 	t, ok := ruleTables[linter]
 	if !ok {
 		return "", true
 	}
 	var rule string
-	for _, id := range t.id(reason) {
+	for _, id := range t.cite(reason) {
 		if rule != "" && id != rule {
 			return "", false
 		}
@@ -231,9 +277,7 @@ func candidate(pass *analysis.Pass, c *ast.Comment) *sdk.Candidate {
 	cand.Payload.Fact("linter", linter)
 	if rule != "" {
 		cand.Payload.Fact("rule", rule)
-		cand.Local["reported"] = linter + " " + rule
-	} else {
-		cand.Local["reported"] = linter
+		cand.Local["rule"] = rule
 	}
 	cand.Payload.Fact("suppressed", desc)
 	cand.Payload.AddProse("rationale", reason)
@@ -283,5 +327,9 @@ func (r *rule) Decide(c *sdk.Candidate, answers map[string]sdk.Answer) sdk.Decis
 	if a.Choice != "elsewhere" {
 		return sdk.Clean()
 	}
-	return sdk.Report("nolint rationale is about something other than what %s reports: %q", c.Local["reported"], c.Local["rationale"])
+	if r := c.Local["rule"]; r != "" {
+		// The rule is the one the reason names; nothing here knows which rule actually fired.
+		return sdk.Report("nolint rationale is about something other than %s %s, the rule it names: %q", c.Local["linter"], r, c.Local["rationale"])
+	}
+	return sdk.Report("nolint rationale is about something other than what %s reports: %q", c.Local["linter"], c.Local["rationale"])
 }

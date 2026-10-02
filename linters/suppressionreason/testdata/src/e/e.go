@@ -205,3 +205,94 @@ func c30() {
 func c31() {
 	_ = f.Close() //nolint:errcheck // G104 already covers it; a close error on a read-only file loses nothing
 }
+
+// revive's disable syntax with two rules: several rules, unsupported.
+
+func c32() {
+	_ = f.Close() //nolint:revive // disable-line:unused-receiver,unused-parameter the plugin ABI fixes both
+}
+
+// The same rule listed twice is one rule.
+
+func c33() {
+	_ = f.Close() //nolint:revive // disable-line:unused-receiver,unused-receiver the plugin ABI fixes it
+}
+
+// A known rule listed with an unknown one: the unknown one is not dropped.
+
+func c34() {
+	_ = f.Close() //nolint:revive // revive:disable-next-line:unused-receiver,brand-new-check the plugin ABI fixes both
+}
+
+// An unknown name that starts with a known one is not cut down to it.
+
+func c35() {
+	_ = f.Close() //nolint:revive // disable-line:range-extra2 the loop shape is fixed
+}
+
+// A malformed rule field after the disable syntax is cited and described by nothing.
+
+func c36() {
+	_ = f.Close() //nolint:revive // disable-line:Unused_Receiver the plugin ABI fixes it
+}
+
+// revive's block disable syntax.
+
+func c37() {
+	_ = f.Close() //nolint:revive // revive:disable:unused-receiver the plugin ABI needs the receiver
+}
+
+// A heading naming two rules: several rules, unsupported.
+
+func c38() {
+	_ = f.Close() //nolint:revive // var-naming,exported: both names come from the schema
+}
+
+// A heading naming a revive rule whose title cannot be sent: unsupported, in both forms.
+
+func c39() {
+	_ = f.Close() //nolint:revive // use-any: the empty interface keeps the old signature
+	_ = f.Close() //nolint:revive // disable-line:use-any the empty interface keeps the old signature
+}
+
+// A hyphenated heading revive does not have reads as a rule name: unsupported.
+
+func c40() {
+	_ = f.Close() //nolint:revive // brand-new-check: the loop shape is fixed
+}
+
+// A heading in a later clause counts: two different rules.
+
+func c41() {
+	_ = f.Close() //nolint:revive // exported: kept for callers // var-naming: the field of the schema
+}
+
+// A single unknown word before a colon, and a known name without a colon after it, are prose.
+
+func c42() {
+	_ = f.Close() //nolint:revive // todo: the schema decides this name
+	_ = f.Close() //nolint:revive // exported:the colon has no blank after it
+}
+
+// IDs inside larger words are not citations: a file name, a ticket, a Unicode word, a path.
+
+func c43(path string) {
+	_ = os.WriteFile(path, nil, 0o644) //nolint:gosec // the fixture G304.golden is readable by every test on purpose
+	_ = f.Close()                      //nolint:staticcheck // the file SA1019.txt is the fixture for this test
+	_ = f.Close()                      //nolint:gosec // the mode follows ticket SEC-G306 on shared fixtures
+	_ = f.Close()                      //nolint:gosec // the name éG304 comes from the generator
+	_ = f.Close()                      //nolint:gosec // written under testdata/G304/ by the generator
+}
+
+// A cited rule next to a ticket that only looks like one: one rule.
+
+func c44() {
+	_ = f.Close() //nolint:gosec // G306: public fixtures, see ticket SEC-G304
+}
+
+// Sentence punctuation and brackets around an ID still cite it.
+
+func c45() {
+	_ = f.Close() //nolint:staticcheck // kept until the next major release, see SA1019.
+	_ = f.Close() //nolint:gosec // a constant mode ["G306"] for public fixtures
+}

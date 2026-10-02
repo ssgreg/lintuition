@@ -506,9 +506,14 @@ data, _ := os.ReadFile(p) //nolint:errcheck // the file is small, so reading it 
 errcheck reports an unchecked error; the reason is about file size.
 
 **Reads:** `//nolint:<linter> // <reason>` directives naming one linter. For gosec, staticcheck and
-revive it also reads which rule the reason names: a gosec ID (`G304`), a staticcheck ID (`SA1019`,
-`S1000`, `ST1003`, `QF1001`), or a revive rule name first in the reason before a colon
-(`var-naming: ...`) or after revive's disable syntax (`disable-line:unused-receiver`).
+revive it also reads which rule the reason names. A gosec ID (`G304`) or staticcheck ID (`SA1019`,
+`S1000`, `ST1003`, `QF1001`) counts as a word of its own, with brackets and sentence punctuation
+around it (`(G204)`, `G304:`); inside a larger word it does not (`G304.json`, `BUG-G304`). A revive
+rule list counts at the start of the reason or of a `//` clause: after revive's disable syntax
+(`disable-line:unused-receiver,unused-parameter`, read whole and split at commas), or as a heading
+before a colon (`var-naming: ...`). A heading cites when one of its names is a revive rule or has a
+hyphen, as revive's rule names do; a single unknown word (`note:`) is prose. The message names the
+rule as the one the reason names: nothing here knows which rule actually fired.
 
 **Sends:** a fixed description of what was reported, and the reason. When the reason names a rule,
 the description is that rule's own title from the linter's documentation (gosec's RULES.md,

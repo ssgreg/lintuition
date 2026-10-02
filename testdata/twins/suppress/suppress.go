@@ -87,7 +87,7 @@ func Cleanup(f *os.File) {
 // file's size.
 
 func loadManifest(path string) []byte {
-	b, _ := os.ReadFile(path) //nolint:gosec // G304: the file is only a few bytes long // want `nolint rationale is about something other than what gosec G304 reports`
+	b, _ := os.ReadFile(path) //nolint:gosec // G304: the file is only a few bytes long // want `nolint rationale is about something other than gosec G304, the rule it names`
 	return b
 }
 
@@ -101,7 +101,7 @@ func loadManifestFixed(dir string) []byte {
 // Defect: G204 (command execution) answered with speed.
 
 func runHook(name string) *exec.Cmd {
-	return exec.Command(name) //nolint:gosec // G204: this runs on every request and has to stay fast // want `nolint rationale is about something other than what gosec G204 reports`
+	return exec.Command(name) //nolint:gosec // G204: this runs on every request and has to stay fast // want `nolint rationale is about something other than gosec G204, the rule it names`
 }
 
 // Negative: the same rule answered without naming it, through the general gosec description.
@@ -113,7 +113,7 @@ func runFormatter() *exec.Cmd {
 // Defect: G306 (file permissions) answered with the code's age.
 
 func writeStamp(path string, b []byte) {
-	_ = os.WriteFile(path, b, 0o644) //nolint:gosec // G306: legacy code from the first release // want `nolint rationale is about something other than what gosec G306 reports`
+	_ = os.WriteFile(path, b, 0o644) //nolint:gosec // G306: legacy code from the first release // want `nolint rationale is about something other than gosec G306, the rule it names`
 }
 
 // Fixed twin: the reason is about who may read the file.
@@ -131,7 +131,7 @@ func readSpool(path string) []byte {
 
 // Defect: revive's exported rule answered with speed.
 
-//nolint:revive // exported: the loop over the cache is cheap // want `nolint rationale is about something other than what revive exported reports`
+//nolint:revive // exported: the loop over the cache is cheap // want `nolint rationale is about something other than revive exported, the rule it names`
 type CacheStats struct{ Hits int }
 
 // Negative: revive's var-naming rule, answered.
@@ -156,4 +156,11 @@ func readTwo(path string) []byte {
 func readNew(path string) []byte {
 	b, _ := os.ReadFile(path) //nolint:gosec // G999: a check from a newer release
 	return b
+}
+
+// Negative: an ID inside a file name is not a citation, so the reason is read against gosec as a
+// whole, and it answers the file mode.
+
+func writeGolden(path string, b []byte) {
+	_ = os.WriteFile(path, b, 0o644) //nolint:gosec // the G304.golden fixture is meant to be readable by every test
 }

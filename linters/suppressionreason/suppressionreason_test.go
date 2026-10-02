@@ -105,6 +105,27 @@ func TestExtraction(t *testing.T) {
 		`29 revive "the range loop needs the index"` + revive,
 		`30 unsupported: no description of what revive rule no-such-rule reports`,
 		`31 errcheck "G104 already covers it; a close error on a read-only file loses nothing"` + errcheck,
+		`32 unsupported: the reason names several revive rules; which one it addresses is not established`,
+		`33 revive rule=unused-receiver "disable-line:unused-receiver,unused-receiver the plugin ABI fixes it" suppressed="Suggests to rename or remove unused method receivers"`,
+		`34 unsupported: the reason names several revive rules; which one it addresses is not established`,
+		`35 unsupported: no description of what revive rule range-extra2 reports`,
+		`36 unsupported: no description of what revive rule Unused_Receiver reports`,
+		`37 revive rule=unused-receiver "revive:disable:unused-receiver the plugin ABI needs the receiver" suppressed="Suggests to rename or remove unused method receivers"`,
+		`38 unsupported: the reason names several revive rules; which one it addresses is not established`,
+		`39 unsupported: no description of what revive rule use-any reports`,
+		`39 unsupported: no description of what revive rule use-any reports`,
+		`40 unsupported: no description of what revive rule brand-new-check reports`,
+		`41 unsupported: the reason names several revive rules; which one it addresses is not established`,
+		`42 revive "todo: the schema decides this name"` + revive,
+		`42 revive "exported:the colon has no blank after it"` + revive,
+		`43 gosec "the fixture G304.golden is readable by every test on purpose"` + gosec,
+		`43 staticcheck "the file SA1019.txt is the fixture for this test"` + staticcheck,
+		`43 gosec "the mode follows ticket SEC-G306 on shared fixtures"` + gosec,
+		`43 gosec "the name éG304 comes from the generator"` + gosec,
+		`43 gosec "written under testdata/G304/ by the generator"` + gosec,
+		`44 gosec rule=G306 "G306: public fixtures, see ticket SEC-G304" suppressed="Poor file permissions used when writing to a file"`,
+		`45 staticcheck rule=SA1019 "kept until the next major release, see SA1019." suppressed="Using a deprecated function, variable, constant or field"`,
+		`45 gosec rule=G306 "a constant mode [\"G306\"] for public fixtures" suppressed="Poor file permissions used when writing to a file"`,
 	}
 	if strings.Join(got, "\n") != strings.Join(want, "\n") {
 		t.Fatalf("candidates:\n%s\n\nwant:\n%s", strings.Join(got, "\n"), strings.Join(want, "\n"))
@@ -167,8 +188,19 @@ func TestCitedRule(t *testing.T) {
 		{"revive", "disable-next-line:unused-receiver", "unused-receiver", true},
 		{"revive", "revive:disable-line:unknown-thing", "unknown-thing", true},
 		{"revive", "todo: rename later", "", true},
-		{"revive", " exported: a leading space", "", true},
+		{"revive", "exported: retained API // var-naming: the wire field", "", false},
 		{"revive", "see exported: not first", "", true},
+		{"gosec", "the fixture G304.json is public", "", true},
+		{"gosec", "see BUG-G304 and testdata/G304/x", "", true},
+		{"gosec", "G306: public, see BUG-G304", "G306", true},
+		{"gosec", "a constant name (G204).", "G204", true},
+		{"gosec", "G304,G703: one path", "", false},
+		{"revive", "disable-line:unused-receiver,unused-parameter both", "", false},
+		{"revive", "disable-line:range-extra2 x", "range-extra2", true},
+		{"revive", "disable-line:Bad_Name x", "Bad_Name", true},
+		{"revive", "use-any: an undescribed rule is still cited", "use-any", true},
+		{"revive", "brand-new-check: a hyphenated heading reads as a rule", "brand-new-check", true},
+		{"revive", "exported,var-naming: two rules", "", false},
 		{"errcheck", "G104: errcheck has no rule table", "", true},
 		{"lll", "SA1019", "", true},
 		// The reason as the analyzer sees it: a twin's want mark is already cut.
@@ -214,7 +246,7 @@ func about(choice string, p float64) map[string]sdk.Answer {
 
 func TestDecide(t *testing.T) {
 	r := &rule{threshold: 0.9}
-	c := &sdk.Candidate{Local: map[string]string{"linter": "errcheck", "reported": "errcheck", "rationale": "the file is small"}}
+	c := &sdk.Candidate{Local: map[string]string{"linter": "errcheck", "rationale": "the file is small"}}
 	for _, tc := range []struct {
 		name            string
 		answers         map[string]sdk.Answer
@@ -240,8 +272,8 @@ func TestDecide(t *testing.T) {
 		t.Errorf("message: %s", d.Message)
 	}
 	// A reason that names a rule is reported against that rule.
-	g := &sdk.Candidate{Local: map[string]string{"linter": "gosec", "reported": "gosec G304", "rationale": "G304: legacy code"}}
-	if d := r.Decide(g, about("elsewhere", 0.95)); d.Message != `nolint rationale is about something other than what gosec G304 reports: "G304: legacy code"` {
+	g := &sdk.Candidate{Local: map[string]string{"linter": "gosec", "rule": "G304", "rationale": "G304: legacy code"}}
+	if d := r.Decide(g, about("elsewhere", 0.95)); d.Message != `nolint rationale is about something other than gosec G304, the rule it names: "G304: legacy code"` {
 		t.Errorf("message: %s", d.Message)
 	}
 }

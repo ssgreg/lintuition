@@ -321,3 +321,15 @@ var reviveRules = map[string]string{
 	"var-naming":                      "Naming rules",
 	"waitgroup-by-value":              "Warns on functions taking sync.WaitGroup as a by-value parameter",
 }
+
+// reviveUndescribed are the revive v1.15.0 rules whose README description cannot be sent as a fact.
+// A reason that cites one is unsupported, not read as prose against the general description.
+var reviveUndescribed = map[string]bool{
+	"enforce-map-style":   true,
+	"enforce-slice-style": true,
+	"increment-decrement": true,
+	"redundant-build-tag": true,
+	"time-equal":          true,
+	"use-any":             true,
+	"use-waitgroup-go":    true,
+}
