@@ -371,8 +371,10 @@ func (c *Classifier) answer(q sdk.Question, cr completionResponse) (sdk.Answer, 
 		mass[i] /= total
 	}
 	// The option probabilities are conditional on the model answering with an option; how much of
-	// its probability did is kept as the confidence, so 0.6 of mass renormalized to 1.0 shows.
-	share := total
+	// its probability did is kept as the confidence, so 0.6 of mass renormalized to 1.0 shows. A
+	// certain answer's exp(logprob) can come out a hair above 1 in floating point (1.00000003);
+	// the check above has already refused anything beyond that tolerance, so clamp.
+	share := math.Min(total, 1)
 	a := sdk.Answer{QuestionID: q.ID, Confidence: &share, ConfidenceMeaning: sdk.ConfidenceOptionMass}
 	switch q.Kind {
 	case sdk.Choice:

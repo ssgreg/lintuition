@@ -229,3 +229,28 @@ func TestNonAnswerHintsReasoningEffort(t *testing.T) {
 		t.Errorf("error: %v", err)
 	}
 }
+
+// TestCertainAnswerRounding: a logprob of -0.0 on the letter plus tiny alternatives sums a hair
+// above 1 in floating point; the answer must still be accepted with a confidence of at most 1.
+func TestCertainAnswerRounding(t *testing.T) {
+	s := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		json.NewEncoder(w).Encode(map[string]any{
+			"choices": []any{map[string]any{"logprobs": map[string]any{"content": []any{map[string]any{"top_logprobs": []any{
+				map[string]any{"token": "A", "logprob": 0.0},
+				map[string]any{"token": "B", "logprob": math.Log(4e-8)},
+			}}}}}},
+			"usage": map[string]any{"prompt_tokens": 10},
+		})
+	}))
+	t.Cleanup(s.Close)
+	c := newTest(t, s.URL)
+	resp, err := c.Classify(context.Background(), sdk.Request{State: req.State, Questions: req.Questions[:1]})
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, a := range resp.Answers {
+		if a.Confidence == nil || *a.Confidence > 1 {
+			t.Errorf("confidence %v", a.Confidence)
+		}
+	}
+}
