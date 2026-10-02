@@ -258,36 +258,6 @@ return of one call, or an if whose init is one, and no call in the receiver or a
 first. It is left out after a fatal or panic log and where the code runs the call maybe, later or
 never (a branch, a func literal, `defer`, `go`, `&&`).
 
-**Asks two questions:** what consequence the message states (routine progress, a temporary
-inconvenience, or unintended loss), and whether it describes something done on purpose (a requested
-deletion, sampling).
-
-**Decides:** reports when the loss is unintended (threshold 0.85) and "on purpose" is unlikely (0.3
-or below). Between 0.3 and 0.7 on the second question it abstains.
-
-### destructive-remediation
-
-**Finds:** a message that tells its reader to delete, wipe, reset, format or reinstall something, and
-does not say what will be lost.
-
-```go
-return errors.New("state is corrupted, delete the data directory and restart")
-```
-
-**Reads:** constant texts of error constructors, and of log calls at warn, error, fatal or panic
-level or with no level (`log.Printf`). Debug and info logs are left out to cut the false positives
-of a program narrating its own steps ("purge temp files" logged right before the purge). That is a
-coverage limit, chosen on purpose: a destructive instruction logged at debug or info is not read.
-
-**Sends:** the text, the kind (error or log message), the log level, and, when code can establish
-it, the function the program calls right after the log call (`Store.Drop`, `os.RemoveAll`), so a
-warning followed by the deletion it names reads as the program's own step. That fact is sent only
-when the next statement is a call, an assignment or return of one call, or an if whose init is one,
-and evaluating the call's receiver and arguments cannot fail or block first: names, constants,
-`&name` and selectors that dereference no pointer, but no calls, indexes, `*p`, receives or
-arithmetic. It is left out after a fatal or panic log and for anything that runs maybe, later or
-never (a branch, a func literal, `defer`, `go`, `&&`).
-
 **Asks two questions:** whether the text gives destructive advice, safe advice, names an action the
 program itself is doing or must do, or gives no advice; and whether it says what would be lost or
 how to keep it.
