@@ -14,8 +14,8 @@
 // Some writes are reported with a qualifier instead of being dropped or trusted: one inside a
 // function literal (when it runs is not known), one after its root was reassigned (the root may now
 // hold fresh storage), one through a generic index whose constraint does not settle the shape, and
-// one undone by a proven save and restore (old := s.result; ...; s.result = old, both at the top
-// level of the body, with no return in between and the saved value left alone). A restored write
+// one undone by a proven save and restore (old := s.result; ...; s.result = old, in the narrow shape
+// restorations describes). A restored write
 // still happened, and a callback could have seen it; the caller's state at return is unchanged.
 package effects
 
