@@ -115,6 +115,31 @@ func ShadowRestore(p *int)                  { *p = 1; { p := new(int); old := *p
 func (s *S) ProperRestore()                 { old := s.N; s.N = 0; s.N++; s.N = old }
 
 var gcount int64
+
+type Small struct{ N int }
+type ArrayStruct struct{ A [2]int }
+type Node struct {
+	Next *Node
+	V    int
+}
+
+func changePointer(p **int)                    {}
+func touch(n *Node)                            {}
+func ShortFreshPointer(p *int)                 { p, ok := new(int), true; _ = ok; *p = 42 }
+func ShortFreshSlice(xs []int)                 { xs, ok := append([]int(nil), xs...), true; _ = ok; xs[0] = 1 }
+func ShadowDefine(p *int)                      { { p := new(int); *p = 1 }; *p = 2 }
+func ArrayViewIndex(a [2]int)                  { a[:][0] = 42 }
+func StructArrayView(s ArrayStruct)            { s.A[:][0] = 42 }
+func PtrArrayViewIndex(a *[2]int)              { a[:][0] = 42 }
+func ArrayOfPtrsView(a [2]*int)                { *a[:][0] = 42 }
+func ChangedSavedField(p *Small)               { old := *p; *p = Small{N: 1}; old.N = 2; *p = old }
+func ChangedSavedElem(p *[2]int)               { old := *p; p[0] = 1; old[0] = 2; *p = old }
+func PanicBetween(p *int)                      { old := *p; *p = 1; panic("stop"); *p = old }
+func EscapedRootRestore(p *int)                { old := *p; *p = 1; changePointer(&p); *p = old }
+func DeepRestoreCall(s *Node)                  { old := s.Next.V; s.Next.V = 1; touch(s); s.Next.V = old }
+func DeepRestoreNoCall(s *Node)                { old := s.Next.V; s.Next.V = 1; s.Next.V = old }
+func (s *S) ShallowRestoreCall()               { old := s.N; s.N = 0; s.helper(); s.N = old }
+func (s *S) helper()                           {}
 `
 
 func TestWrites(t *testing.T) {
@@ -170,6 +195,23 @@ func TestWrites(t *testing.T) {
 		"Named":              "",
 		"SaveRestore":        "receiver q.head (restored); receiver q.head (restored)",
 		"SaveRestoreTuple":   "receiver q.head (restored); receiver q.items (restored); receiver q.head (restored); receiver q.items (restored)",
+		"ShortFreshPointer":  "param *p (uncertain)",
+		"ShortFreshSlice":    "param xs[0] (uncertain)",
+		"ShadowDefine":       "param *p",
+		"ArrayViewIndex":     "",
+		"StructArrayView":    "",
+		"PtrArrayViewIndex":  "param a[:][0]",
+		"ArrayOfPtrsView":    "param *a[:][0]",
+		"ChangedSavedField":  "param *p; param *p",
+		"ChangedSavedElem":   "param p[0]; param *p",
+		"PanicBetween":       "param *p; param *p",
+		"EscapedRootRestore": "param *p; param *p",
+		"DeepRestoreCall":    "param s.Next.V; param s.Next.V",
+		"DeepRestoreNoCall":  "param s.Next.V (restored); param s.Next.V (restored)",
+		"ShallowRestoreCall": "receiver s.N (restored); receiver s.N (restored)",
+		"changePointer":      "",
+		"touch":              "",
+		"helper":             "",
 		"FreshPointer":       "param *p (uncertain)",
 		"FreshSlice":         "param xs[0] (uncertain)",
 		"WriteBeforeRebind":  "param *p; param *p (uncertain)",

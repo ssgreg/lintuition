@@ -110,6 +110,14 @@ func (w *walker) walk(n ast.Node, inClosure bool) {
 			w.walk(n.Body, true)
 			return false
 		case *ast.AssignStmt:
+			if n.Tok == token.DEFINE {
+				// p, ok := new(int), true reuses p: a name without a new object is an assignment.
+				for _, l := range n.Lhs {
+					if id, ok := l.(*ast.Ident); ok && w.info.Defs[id] == nil {
+						w.rebind(id)
+					}
+				}
+			}
 			if n.Tok != token.DEFINE {
 				for _, l := range n.Lhs {
 					w.place(l, inClosure, asLvalue)
@@ -277,7 +285,13 @@ func (w *walker) place(e ast.Expr, inClosure bool, m mode) {
 			cur = x.X
 		case *ast.IndexExpr:
 			switch shape(w.info.TypeOf(x.X)) {
-			case shapeSlice, shapeMap, shapePtrArray:
+			case shapeSlice:
+				// A slice element is shared, unless the slice is a view of an array value: then it is
+				// that array's element, shared only if the array is reached through something shared.
+				if !arrayValueView(w.info, x.X) {
+					shared = true
+				}
+			case shapeMap, shapePtrArray:
 				shared = true
 			case shapeUnknown:
 				shared = true // possibly; reported as uncertain, not dropped
@@ -302,6 +316,24 @@ func (w *walker) place(e ast.Expr, inClosure bool, m mode) {
 			return // a call result, a composite literal: not a place the caller holds
 		}
 		steps++
+	}
+}
+
+// arrayValueView reports a slice expression whose backing store is an array value: a[:], a[1:][:2].
+func arrayValueView(info *types.Info, e ast.Expr) bool {
+	for {
+		x, ok := ast.Unparen(e).(*ast.SliceExpr)
+		if !ok {
+			return false
+		}
+		switch shape(info.TypeOf(x.X)) {
+		case shapeArray:
+			return true
+		case shapeSlice:
+			e = x.X
+		default:
+			return false
+		}
 	}
 }
 
@@ -381,10 +413,20 @@ type restoration struct {
 	from, to token.Pos
 }
 
-// restorations finds old := P ... P = old pairs among the top-level statements of a body, where P is
-// a stable place (identifiers, field selections and dereferences, no index), nothing in between
-// returns, jumps or writes old, and P's root is not reassigned in between. Only that shape is
-// trusted: a restore in a branch, after an early return, or of a modified value proves nothing.
+// restorations finds old := P ... P = old pairs among the top-level statements of a body. Only one
+// shape is trusted:
+//
+//   - P is a place made of identifiers, field selections and dereferences, no index, so its
+//     spelling names one location; if the path dereferences anything beyond the root variable
+//     itself (*s.next, s.next.n), no call may run in between, since a callee could repoint it;
+//   - the root's address is never taken in the body, so no callee can reassign it;
+//   - between the two, nothing returns, jumps out or calls panic, and old is left alone, its fields
+//     and elements included;
+//   - the root is not reassigned in between.
+//
+// A restore in a branch, after an early return, or of a changed value proves nothing. A panic from
+// inside a callee is not considered: the restore is taken to run when the statements in between
+// complete.
 func restorations(info *types.Info, body *ast.BlockStmt, rebound map[types.Object]token.Pos) []restoration {
 	var out []restoration
 	stmts := body.List
@@ -399,8 +441,8 @@ func restorations(info *types.Info, body *ast.BlockStmt, rebound map[types.Objec
 				continue
 			}
 			old := info.Defs[id]
-			root, ok := stableRoot(info, save.Rhs[k])
-			if old == nil || !ok {
+			root, deep, ok := stableRoot(info, save.Rhs[k])
+			if old == nil || !ok || addressTaken(info, body, root) {
 				continue
 			}
 			path := types.ExprString(save.Rhs[k])
@@ -408,8 +450,7 @@ func restorations(info *types.Info, body *ast.BlockStmt, rebound map[types.Objec
 				if !restores(info, stmts[j], old, root, path) {
 					continue
 				}
-				between := stmts[i+1 : j]
-				if !leavesAlone(info, between, old) {
+				if !leavesAlone(info, stmts[i+1:j], old, deep) {
 					break
 				}
 				if at, ok := rebound[root]; ok && at > save.End() && at < stmts[j].Pos() {
@@ -424,25 +465,46 @@ func restorations(info *types.Info, body *ast.BlockStmt, rebound map[types.Objec
 }
 
 // stableRoot returns the root object of a place made of identifiers, field selections and
-// dereferences only, whose spelling therefore names one location throughout the body.
-func stableRoot(info *types.Info, e ast.Expr) (types.Object, bool) {
+// dereferences only, and whether the path dereferences anything beyond the root variable itself.
+func stableRoot(info *types.Info, e ast.Expr) (types.Object, bool, bool) {
+	deep := false
 	for {
 		switch x := ast.Unparen(e).(type) {
 		case *ast.Ident:
 			o, ok := info.Uses[x].(*types.Var)
-			return o, ok
+			return o, deep, ok
 		case *ast.SelectorExpr:
 			sel, ok := info.Selections[x]
 			if !ok || sel.Kind() != types.FieldVal {
-				return nil, false
+				return nil, false, false
+			}
+			if _, onRoot := ast.Unparen(x.X).(*ast.Ident); !onRoot && (sel.Indirect() || isPointer(info.TypeOf(x.X))) {
+				deep = true
 			}
 			e = x.X
 		case *ast.StarExpr:
+			if _, onRoot := ast.Unparen(x.X).(*ast.Ident); !onRoot {
+				deep = true
+			}
 			e = x.X
 		default:
-			return nil, false
+			return nil, false, false
 		}
 	}
+}
+
+// addressTaken reports &root anywhere in the body, closures included.
+func addressTaken(info *types.Info, body *ast.BlockStmt, root types.Object) bool {
+	found := false
+	ast.Inspect(body, func(n ast.Node) bool {
+		if u, ok := n.(*ast.UnaryExpr); ok && u.Op == token.AND {
+			if id, ok := ast.Unparen(u.X).(*ast.Ident); ok && info.Uses[id] == root {
+				found = true
+			}
+		}
+		return !found
+	})
+	return found
 }
 
 // restores reports a top-level P = old assignment.
@@ -456,44 +518,70 @@ func restores(info *types.Info, s ast.Stmt, old, root types.Object, path string)
 		if !ok || info.Uses[id] != old || types.ExprString(l) != path {
 			continue
 		}
-		if r, ok := stableRoot(info, l); ok && r == root {
+		if r, _, ok := stableRoot(info, l); ok && r == root {
 			return true
 		}
 	}
 	return false
 }
 
-// leavesAlone reports statements that neither return nor jump out, and neither assign old, take its
-// address nor change it with ++ or --, closures included.
-func leavesAlone(info *types.Info, stmts []ast.Stmt, old types.Object) bool {
+// rootedAt reports a place whose path starts at obj: obj, obj.f, obj[i], *obj and their mixes.
+func rootedAt(info *types.Info, e ast.Expr, obj types.Object) bool {
+	for {
+		switch x := ast.Unparen(e).(type) {
+		case *ast.Ident:
+			return info.Uses[x] == obj
+		case *ast.SelectorExpr:
+			e = x.X
+		case *ast.IndexExpr:
+			e = x.X
+		case *ast.SliceExpr:
+			e = x.X
+		case *ast.StarExpr:
+			e = x.X
+		default:
+			return false
+		}
+	}
+}
+
+// leavesAlone reports statements that neither return, jump out nor call panic, that leave old and
+// its fields and elements alone, closures included, and, when deep is set, that make no call.
+func leavesAlone(info *types.Info, stmts []ast.Stmt, old types.Object, deep bool) bool {
 	ok := true
-	isOld := func(e ast.Expr) bool {
-		id, isID := ast.Unparen(e).(*ast.Ident)
-		return isID && info.Uses[id] == old
+	touchesOld := func(n ast.Node) {
+		switch n := n.(type) {
+		case *ast.AssignStmt:
+			for _, l := range n.Lhs {
+				if rootedAt(info, l, old) {
+					ok = false
+				}
+			}
+		case *ast.UnaryExpr:
+			if n.Op == token.AND && rootedAt(info, n.X, old) {
+				ok = false
+			}
+		case *ast.IncDecStmt:
+			if rootedAt(info, n.X, old) {
+				ok = false
+			}
+		case *ast.RangeStmt:
+			for _, l := range []ast.Expr{n.Key, n.Value} {
+				if l != nil && n.Tok == token.ASSIGN && rootedAt(info, l, old) {
+					ok = false
+				}
+			}
+		}
 	}
 	for _, s := range stmts {
 		ast.Inspect(s, func(n ast.Node) bool {
+			if !ok {
+				return false
+			}
+			touchesOld(n)
 			switch n := n.(type) {
 			case *ast.FuncLit:
-				ast.Inspect(n.Body, func(m ast.Node) bool {
-					switch m := m.(type) {
-					case *ast.AssignStmt:
-						for _, l := range m.Lhs {
-							if isOld(l) {
-								ok = false
-							}
-						}
-					case *ast.UnaryExpr:
-						if m.Op == token.AND && isOld(m.X) {
-							ok = false
-						}
-					case *ast.IncDecStmt:
-						if isOld(m.X) {
-							ok = false
-						}
-					}
-					return true
-				})
+				ast.Inspect(n.Body, func(m ast.Node) bool { touchesOld(m); return ok })
 				return false
 			case *ast.ReturnStmt:
 				ok = false
@@ -501,18 +589,19 @@ func leavesAlone(info *types.Info, stmts []ast.Stmt, old types.Object) bool {
 				if n.Tok == token.GOTO || n.Label != nil {
 					ok = false
 				}
-			case *ast.AssignStmt:
-				for _, l := range n.Lhs {
-					if isOld(l) {
-						ok = false
+			case *ast.CallExpr:
+				if id, isID := ast.Unparen(n.Fun).(*ast.Ident); isID {
+					if b, isB := info.Uses[id].(*types.Builtin); isB {
+						if b.Name() == "panic" {
+							ok = false
+						}
+						return ok
 					}
 				}
-			case *ast.UnaryExpr:
-				if n.Op == token.AND && isOld(n.X) {
-					ok = false
+				if tv, isT := info.Types[n.Fun]; isT && tv.IsType() {
+					return ok // a conversion
 				}
-			case *ast.IncDecStmt:
-				if isOld(n.X) {
+				if deep {
 					ok = false
 				}
 			}

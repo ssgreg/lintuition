@@ -428,9 +428,10 @@ add, swap or compare-and-swap. Not counted:
   `v V` change the function's own copy), and a view of an array value (`copy(a[:], src)`);
 - assigning the parameter itself (`xs = append(xs, x)`);
 - a write a proven save and restore undoes: `old := s.result` and later `s.result = old`, both at the
-  top level of the body, with no return in between, `old` left alone and no index in the path. A
-  restore in a branch, after an early return or of a changed value proves nothing, and the writes
-  stand;
+  top level of the body, with no return or `panic` in between, `old` and its fields left alone, no
+  index in the path, the root's address never taken, and no call in between when the path
+  dereferences more than the root (`*s.next`). A restore in a branch, after an early return or of a
+  changed value proves nothing, and the writes stand;
 - writes through a local alias (`p := q; p.head = 1`), a callee or a stored method value, which are
   not followed.
 
