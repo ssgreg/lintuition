@@ -152,6 +152,9 @@ func ReadSaved(p *[2]int) int                   { old := *p; *p = [2]int{}; n :=
 func PromotedEmbedded(s *Wrap)                  { old := s.N; s.N = 1; replace(s); s.N = old }
 func PromotedEmbeddedNoCall(s *Wrap)            { old := s.N; s.N = 1; s.N = old }
 func replace(s *Wrap)                           {}
+func ClosureClearSaved(p *[2]int)               { old := *p; p[0] = 1; func() { clear(old[:]) }(); *p = old }
+func ClosureMethodSaved(p *Arr3)                { old := *p; p[0] = 1; func() { old.Reset() }(); *p = old }
+func ClosureReadSaved(p *[2]int) int            { old := *p; *p = [2]int{}; n := func() int { return len(old) }(); *p = old; return n }
 `
 
 func TestWrites(t *testing.T) {
@@ -232,6 +235,9 @@ func TestWrites(t *testing.T) {
 		"PromotedEmbeddedNoCall": "param s.N (restored); param s.N (restored)",
 		"replace":                "",
 		"Reset":                  "receiver *a",
+		"ClosureClearSaved":      "param p[0]; param *p",
+		"ClosureMethodSaved":     "param p[0]; param *p",
+		"ClosureReadSaved":       "param *p (restored); param *p (restored)",
 		"FreshPointer":           "param *p (uncertain)",
 		"FreshSlice":             "param xs[0] (uncertain)",
 		"WriteBeforeRebind":      "param *p; param *p (uncertain)",

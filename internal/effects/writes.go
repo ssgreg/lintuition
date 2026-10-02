@@ -613,6 +613,31 @@ func leavesAlone(info *types.Info, stmts []ast.Stmt, old types.Object, deep bool
 					ok = false
 				}
 			}
+		case *ast.CallExpr:
+			// A call that can reach old's storage may change it: a slice of it, its address, a
+			// pointer, map or slice in it, or a method called on it (clear(old[:]), old.Reset()).
+			for _, a := range n.Args {
+				if rootedAt(info, a, old) && mayShare(info, a) {
+					ok = false
+				}
+			}
+			if sel, isSel := ast.Unparen(n.Fun).(*ast.SelectorExpr); isSel && rootedAt(info, sel.X, old) {
+				ok = false
+			}
+			if id, isID := ast.Unparen(n.Fun).(*ast.Ident); isID {
+				if b, isB := info.Uses[id].(*types.Builtin); isB {
+					if b.Name() == "panic" {
+						ok = false
+					}
+					return
+				}
+			}
+			if tv, isT := info.Types[n.Fun]; isT && tv.IsType() {
+				return // a conversion
+			}
+			if deep {
+				ok = false
+			}
 		}
 	}
 	for _, s := range stmts {
@@ -623,40 +648,14 @@ func leavesAlone(info *types.Info, stmts []ast.Stmt, old types.Object, deep bool
 			touchesOld(n)
 			switch n := n.(type) {
 			case *ast.FuncLit:
+				// A literal may run in between: every check applies inside it, but its own return
+				// and jumps do not leave the outer body.
 				ast.Inspect(n.Body, func(m ast.Node) bool { touchesOld(m); return ok })
 				return false
 			case *ast.ReturnStmt:
 				ok = false
 			case *ast.BranchStmt:
 				if n.Tok == token.GOTO || n.Label != nil {
-					ok = false
-				}
-			case *ast.CallExpr:
-				// A call that can reach old's storage may change it: a slice of it, its address, a
-				// pointer, map or slice in it, or a method called on it (clear(old[:]), old.Reset()).
-				for _, a := range n.Args {
-					if rootedAt(info, a, old) && mayShare(info, a) {
-						ok = false
-					}
-				}
-				if sel, isSel := ast.Unparen(n.Fun).(*ast.SelectorExpr); isSel && rootedAt(info, sel.X, old) {
-					ok = false
-				}
-				if !ok {
-					return false
-				}
-				if id, isID := ast.Unparen(n.Fun).(*ast.Ident); isID {
-					if b, isB := info.Uses[id].(*types.Builtin); isB {
-						if b.Name() == "panic" {
-							ok = false
-						}
-						return ok
-					}
-				}
-				if tv, isT := info.Types[n.Fun]; isT && tv.IsType() {
-					return ok // a conversion
-				}
-				if deep {
 					ok = false
 				}
 			}
