@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+- `openai`: `reasoning-effort`, so a model that thinks first (qwen3.x, gemma4 on Ollama) answers
+  with its first token; a confident answer no longer fails on a confidence a rounding error above 1.
 - New linter `doc-vs-signature`: a doc comment that promises a returned result or error the
   function's signature does not have.
 
