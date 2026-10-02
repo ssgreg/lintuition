@@ -8,8 +8,9 @@
 // bound to the function the way table-case-vs-expectation binds it (internal/tables): the loop
 // over the table compares a generic want (want, expected, ok, ...), as is, with the single bool
 // result of one call. The classifier reads the doc, with the function's own name masked, and the
-// case name, and says whether the doc's condition for true is met in that situation; Go code
-// compares its answer with the want.
+// case name, and says whether the doc's condition for true is met in that situation and whether
+// the case name states the facts that condition depends on; Go code compares the first answer with
+// the want, and a contradiction found in a name that only labels its input abstains.
 //
 // The doc is read from the package's own syntax: a function tested from an external _test
 // package, whose doc this pass cannot see, is unsupported. A function without a doc says nothing
@@ -56,7 +57,7 @@ func init() {
 		Name:        Name,
 		Doc:         "a table test case whose boolean want contradicts the tested function's doc",
 		Standard:    true,
-		Version:     "1",
+		Version:     "2",
 		Analyzer:    Analyzer,
 		NewSettings: func() any { return &Settings{} },
 		New: func(s any) (sdk.Rule, error) {
@@ -127,6 +128,13 @@ func candidate(pass *analysis.Pass, docs map[*types.Func]*ast.FuncDecl, row tabl
 	return c
 }
 
+// statedMin is the probability that the case name states the facts the doc's condition depends on
+// at or below which a contradicting answer abstains: the classifier is then at least 0.7 sure the
+// name leaves them out. A short label ("ASCII high", "Errata") names the input without saying what
+// it is, and the condition answer is a guess about the input; the probability of that guess is no
+// lower than for a name that states the facts.
+const statedMin = 0.3
+
 type rule struct{ threshold float64 }
 
 func (r *rule) Questions(*sdk.Candidate) []sdk.Question {
@@ -139,6 +147,10 @@ func (r *rule) Questions(*sdk.Candidate) []sdk.Question {
 			{Key: "not_met", Description: "The situation does not meet the doc's condition for true."},
 			{Key: "not_covered", Description: "The doc does not say enough to decide."},
 		},
+	}, {
+		ID:   "stated",
+		Kind: sdk.Noul,
+		Text: "Does `situation` describe the test case in enough detail to tell whether the condition in `doc` holds, without guessing details it leaves out?",
 	}}
 }
 
@@ -166,6 +178,13 @@ func (r *rule) Decide(c *sdk.Candidate, answers map[string]sdk.Answer) sdk.Decis
 	}
 	if implied == c.Local["value"] {
 		return sdk.Clean()
+	}
+	stated := answers["stated"].Yes
+	if stated == nil {
+		return sdk.Abstain("the classifier did not say whether the case name states the facts")
+	}
+	if *stated <= statedMin {
+		return sdk.Abstain(fmt.Sprintf("the case name may not state the facts the doc's condition depends on (%.2f)", *stated))
 	}
 	return sdk.Report("doc of %s implies %s for case %q, the test expects %s", c.Local["function"], implied, c.Local["case_name"], c.Local["value"])
 }

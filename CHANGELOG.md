@@ -4,6 +4,9 @@
 
 - New linter `doc-vs-signature`: a doc comment that promises a returned result or error the
   function's signature does not have.
+- `doc-vs-table` no longer reports a row whose case name only labels its input: a second question
+  asks whether the name states the facts the doc's condition depends on, and a contradiction found
+  in a name that does not abstains. Version 2.
 
 ## v0.1.0 (2026-10-02)
 
