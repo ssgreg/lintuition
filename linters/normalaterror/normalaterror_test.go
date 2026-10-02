@@ -141,6 +141,9 @@ func TestExtraction(t *testing.T) {
 		`69 error "reading stream" error=attached check="not nil, is not context.DeadlineExceeded, is not context.Canceled, is not io.ErrUnexpectedEOF, is not io.ErrClosedPipe, is not io.ErrShortBuffer" failed`,
 		`70 error "decoding frame" error=attached check="not nil" failed`,
 		`71 error "deferred rewrite" error=attached unproven`,
+		`72 error "closing the listener" error=attached check="not nil, is not context.DeadlineExceeded, is not io.EOF, is not io.ErrUnexpectedEOF, is not io.ErrClosedPipe, is context.Canceled" identified`,
+		`73 error "closing the listener" error=attached check="not nil, is not context.DeadlineExceeded, is not io.EOF, is not io.ErrUnexpectedEOF, is not io.ErrClosedPipe, is context.Canceled" identified`,
+		`74 error "config reload" error=attached check="is not context.DeadlineExceeded, is not context.Canceled, is not io.EOF, is not io.ErrUnexpectedEOF, is not io.ErrClosedPipe, nil" nil`,
 	}
 	if strings.Join(got, "\n") != strings.Join(want, "\n") {
 		t.Fatalf("candidates:\n%s\n\nwant:\n%s", strings.Join(got, "\n"), strings.Join(want, "\n"))
@@ -316,6 +319,10 @@ func TestExtractedDecisions(t *testing.T) {
 		"18": "abstain", // no check: not shown to be set
 		"47": "abstain", // only what it is not
 		"1":  "report",  // no error at all
+		"69": "clean",   // not nil and a long chain of exclusions, cut to six
+		"72": "report",  // context.Canceled beyond the cut: still identified
+		"73": "report",  // the same with six checks
+		"74": "report",  // nil beyond the cut: still nil
 	} {
 		c := byCase[n]
 		if c == nil {
@@ -408,6 +415,38 @@ func control(err error) {
 	for k, v := range want {
 		if got[k] != v {
 			t.Errorf("%s: got %q, want %q", k, got[k], v)
+		}
+	}
+}
+
+// TestBounded checks the cut: at most maxChecks, nearest first, and never the checks the state
+// is read from while an exclusion is kept instead.
+func TestBounded(t *testing.T) {
+	ex := func(n int) []string {
+		var out []string
+		for i := 0; i < n; i++ {
+			out = append(out, fmt.Sprintf("is not pkg.E%d", i))
+		}
+		return out
+	}
+	for _, tc := range []struct {
+		name string
+		in   []string
+		want string
+	}{
+		{"short lists are sent whole", append([]string{"not nil"}, ex(5)...), "not nil, is not pkg.E0, is not pkg.E1, is not pkg.E2, is not pkg.E3, is not pkg.E4"},
+		{"exclusions are cut, nearest first", append([]string{"not nil"}, ex(7)...), "not nil, is not pkg.E0, is not pkg.E1, is not pkg.E2, is not pkg.E3, is not pkg.E4"},
+		{"an outer identity is kept", append(append([]string{"not nil"}, ex(6)...), "is context.Canceled"), "not nil, is not pkg.E0, is not pkg.E1, is not pkg.E2, is not pkg.E3, is context.Canceled"},
+		{"an outer os predicate is kept", append(ex(7), "os.IsNotExist"), "is not pkg.E0, is not pkg.E1, is not pkg.E2, is not pkg.E3, is not pkg.E4, os.IsNotExist"},
+		{"an outer nil is kept", append(ex(7), "nil"), "is not pkg.E0, is not pkg.E1, is not pkg.E2, is not pkg.E3, is not pkg.E4, nil"},
+		{"an outer not nil is kept", append(ex(7), "not nil"), "is not pkg.E0, is not pkg.E1, is not pkg.E2, is not pkg.E3, is not pkg.E4, not nil"},
+	} {
+		got := bounded(tc.in)
+		if strings.Join(got, ", ") != tc.want {
+			t.Errorf("%s: got %q", tc.name, strings.Join(got, ", "))
+		}
+		if errorState(tc.in) != errorState(got) && len(got) <= maxChecks {
+			t.Errorf("%s: the cut changes the state from %s to %s", tc.name, errorState(tc.in), errorState(got))
 		}
 	}
 }

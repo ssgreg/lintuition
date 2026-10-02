@@ -135,6 +135,18 @@ func tail(read func() error) {
 	}
 }
 
+// Defect: the same long chain, inside a branch that already found the cancellation. The cut of
+// the checks sent must not lose it.
+
+func tailCanceledDefect(read func() error) {
+	if err := read(); errors.Is(err, context.Canceled) {
+		if err != nil && !errors.Is(err, context.DeadlineExceeded) && !errors.Is(err, io.EOF) &&
+			!errors.Is(err, io.ErrUnexpectedEOF) && !errors.Is(err, io.ErrClosedPipe) && !errors.Is(err, io.ErrShortBuffer) {
+			slog.Error("tailing the access log was stopped by its caller", "err", err) // want `routine event logged at error level`
+		}
+	}
+}
+
 // Negative: a degradation is a fair thing to report at error level.
 
 func quota(err error) {

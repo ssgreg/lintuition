@@ -458,3 +458,30 @@ func c71(l *zap.Logger, w *wrapper) {
 		l.Error("deferred rewrite", zap.Error(err)) // 71 candidate: a write in a literal in the region counts too
 	}
 }
+
+func c72(err error) {
+	if err == context.Canceled {
+		if err != nil && !errors.Is(err, context.DeadlineExceeded) && !errors.Is(err, io.EOF) &&
+			!errors.Is(err, io.ErrUnexpectedEOF) && !errors.Is(err, io.ErrClosedPipe) && !errors.Is(err, io.ErrShortBuffer) {
+			slog.Error("closing the listener", "err", err) // 72 candidate: the identity beyond the cut is kept and still decides
+		}
+	}
+}
+
+func c73(err error) {
+	if err == context.Canceled {
+		if err != nil && !errors.Is(err, context.DeadlineExceeded) && !errors.Is(err, io.EOF) &&
+			!errors.Is(err, io.ErrUnexpectedEOF) && !errors.Is(err, io.ErrClosedPipe) {
+			slog.Error("closing the listener", "err", err) // 73 candidate: six checks, nothing cut
+		}
+	}
+}
+
+func c74(err error) {
+	if err == nil {
+		if !errors.Is(err, context.DeadlineExceeded) && !errors.Is(err, context.Canceled) && !errors.Is(err, io.EOF) &&
+			!errors.Is(err, io.ErrUnexpectedEOF) && !errors.Is(err, io.ErrClosedPipe) && !errors.Is(err, io.ErrShortBuffer) {
+			slog.Error("config reload", "err", err) // 74 candidate: nil beyond the cut is kept and still decides
+		}
+	}
+}

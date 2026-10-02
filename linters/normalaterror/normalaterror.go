@@ -121,20 +121,58 @@ func candidate(pass *analysis.Pass, call *ast.CallExpr, stack []ast.Node) *sdk.C
 	c.Local["error"] = errorUnproven
 	if v := checkedVar(pass.TypesInfo, errs, outermostBody(stack)); v != nil {
 		cs := errorChecks(pass.TypesInfo, v, stack)
-		if len(cs) > maxChecks {
-			cs = cs[:maxChecks]
-		}
-		if len(cs) > 0 {
-			c.Payload.Fact("error_check", cs)
-		}
+		// The state comes from every check; only what is sent is bounded.
 		c.Local["error"] = errorState(cs)
+		if sent := bounded(cs); len(sent) > 0 {
+			c.Payload.Fact("error_check", sent)
+		}
 	}
 	return c
 }
 
-// maxChecks bounds the checks sent, nearest first: a long chain of !errors.Is exclusions says no
-// more after a few.
+// maxChecks bounds the checks sent: a long chain of !errors.Is exclusions says no more after a
+// few.
 const maxChecks = 6
+
+// bounded picks at most maxChecks checks to send, keeping their order (nearest first). The checks
+// the state is read from (nil, not nil, a positive identity) go in before any exclusion, so the
+// cut never drops what decides the state: an outer errors.Is(err, context.Canceled) is not pushed
+// out by a near chain of !errors.Is.
+func bounded(checks []string) []string {
+	if len(checks) <= maxChecks {
+		return checks
+	}
+	keep := make([]bool, len(checks))
+	n := 0
+	for pass := 0; pass < 2; pass++ {
+		for i, c := range checks {
+			if n == maxChecks {
+				break
+			}
+			if !keep[i] && (pass == 1 || decisive(c)) {
+				keep[i] = true
+				n++
+			}
+		}
+	}
+	var out []string
+	for i, c := range checks {
+		if keep[i] {
+			out = append(out, c)
+		}
+	}
+	return out
+}
+
+// decisive reports whether a check is one errorState reads.
+func decisive(c string) bool {
+	return c == "nil" || c == "not nil" || identity(c)
+}
+
+// identity reports whether a check says which error it is, not only which it is not.
+func identity(c string) bool {
+	return (strings.HasPrefix(c, "is ") && !strings.HasPrefix(c, "is not ")) || strings.HasPrefix(c, "os.Is")
+}
 
 // What the code knows about the error a log call carries, in Local["error"]:
 //   - identified: it checked which error it is (errors.Is(err, context.Canceled), err == io.EOF,
@@ -156,7 +194,7 @@ func errorState(checks []string) string {
 		switch {
 		case c == "nil":
 			return errorNil
-		case (strings.HasPrefix(c, "is ") && !strings.HasPrefix(c, "is not ")) || strings.HasPrefix(c, "os.Is"):
+		case identity(c):
 			state = errorIdentified
 		case c == "not nil" && state == errorUnproven:
 			state = errorFailed
