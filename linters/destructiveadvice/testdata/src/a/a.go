@@ -244,7 +244,7 @@ func c45(ctx context.Context, l *logf.Logger, s *store) (int, error) {
 }
 
 func c46(ctx context.Context, l *logf.Logger, h *holder) error {
-	l.Warn(ctx, "the cache entries are stale and get dropped") // 46 candidate: a receiver through a pointer field may be nil, no next call
+	l.Warn(ctx, "the cache entries are stale and get dropped") // 46 candidate: a receiver through a pointer field, the call site is named
 	return (h.s.Drop("x"))
 }
 
@@ -299,42 +299,42 @@ var defaultPath = "/tmp/x"
 const prefix = "/tmp/"
 
 func c52(ctx context.Context, l *logf.Logger, paths []string, i int) {
-	l.Warn(ctx, "erase the build cache") // 52 candidate: an index argument may panic first
+	l.Warn(ctx, "erase the build cache") // 52 candidate: an index argument, the call site is named even though the index may panic
 	_ = dropPath(paths[i])
 }
 
 func c53(ctx context.Context, l *logf.Logger, p *string) {
-	l.Warn(ctx, "erase the build cache") // 53 candidate: a dereferenced argument may panic first
+	l.Warn(ctx, "erase the build cache") // 53 candidate: a dereferenced argument, the call site is named
 	_ = dropPath(*p)
 }
 
 func c54(ctx context.Context, l *logf.Logger, ch <-chan string) {
-	l.Warn(ctx, "erase the build cache") // 54 candidate: a receive argument may block first
+	l.Warn(ctx, "erase the build cache") // 54 candidate: a receive argument, the call site is named
 	_ = dropPath(<-ch)
 }
 
 func c55(ctx context.Context, l *logf.Logger, b *box) {
-	l.Warn(ctx, "erase the build cache") // 55 candidate: the receiver is reached through a pointer that may be nil
+	l.Warn(ctx, "erase the build cache") // 55 candidate: a receiver through a pointer that may be nil, the call site is named
 	_ = b.s.Drop("x")
 }
 
 func c56(ctx context.Context, l *logf.Logger, b *box) {
-	l.Warn(ctx, "erase the build cache") // 56 candidate: an argument field through a pointer
+	l.Warn(ctx, "erase the build cache") // 56 candidate: an argument field through a pointer, the call site is named
 	_ = dropPath(b.name)
 }
 
 func c57(ctx context.Context, l *logf.Logger, v *valueStore) {
-	l.Warn(ctx, "erase the build cache") // 57 candidate: a value method through a pointer dereferences it first
+	l.Warn(ctx, "erase the build cache") // 57 candidate: a value method through a pointer, the call site is named
 	_ = v.Drop()
 }
 
 func c58(ctx context.Context, l *logf.Logger, a, b int) {
-	l.Warn(ctx, "erase the build cache") // 58 candidate: arithmetic in an argument may panic first
+	l.Warn(ctx, "erase the build cache") // 58 candidate: arithmetic in an argument, the call site is named
 	_ = dropN(a / b)
 }
 
 func c59(ctx context.Context, l *logf.Logger, s *store) {
-	l.Warn(ctx, "erase the build cache") // 59 candidate: a method expression
+	l.Warn(ctx, "erase the build cache") // 59 candidate: a method expression names its method
 	_ = (*store).Drop(s, "x")
 }
 
