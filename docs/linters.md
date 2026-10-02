@@ -244,18 +244,32 @@ does not say what will be lost.
 return errors.New("state is corrupted, delete the data directory and restart")
 ```
 
-**Reads:** constant texts of error constructors and log calls at any level.
+**Reads:** constant texts of error constructors, and of log calls at warn, error, fatal or panic
+level or with no level (`log.Printf`). Debug and info logs are left out to cut the false positives
+of a program narrating its own steps ("purge temp files" logged right before the purge). That is a
+coverage limit, chosen on purpose: a destructive instruction logged at debug or info is not read.
 
-**Sends:** the text.
+**Sends:** the text, the kind (error or log message), the log level, and the function called by
+the statement after the log call (`Store.Drop`, `os.RemoveAll`), so a warning followed by the
+deletion it names reads as the program's own step. This names a call site; it does not prove the
+call runs, since an operand that panics or blocks first (`paths[i]`, `*p`, a nil receiver chain,
+`<-ch`) is not modelled. The fact is sent only when the next statement is a call, an assignment or
+return of one call, or an if whose init is one, and no call in the receiver or arguments comes
+first. It is left out after a fatal or panic log and where the code runs the call maybe, later or
+never (a branch, a func literal, `defer`, `go`, `&&`).
 
-**Asks two questions:** whether the text gives destructive advice, safe advice or no advice; and
-whether it says what would be lost or how to keep it.
+**Asks two questions:** whether the text gives destructive advice, safe advice, names an action the
+program itself is doing or must do, or gives no advice; and whether it says what would be lost or
+how to keep it.
 
 **Decides:** reports destructive advice (threshold 0.85) that says nothing about the loss (0.3 or
-below on the second question); abstains in between.
+below on the second question); abstains in between. Safe advice, the program's own action and no
+advice are one outcome: a text is clean when their probabilities together reach the threshold, so
+a text the classifier splits between "no advice" and "own action" is still clean.
 
-This one asks about every constant message, since a keyword filter missed "format" and "mkfs". It is
-the chattiest linter: cheap with Jev, noticeably dearer with an agent backend. Keep a money cap.
+This one asks about every constant message it reads, since a keyword filter missed "format" and
+"mkfs". It is the chattiest linter: cheap with Jev, noticeably dearer with an agent backend. Keep a
+money cap.
 
 ---
 

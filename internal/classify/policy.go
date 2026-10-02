@@ -68,7 +68,8 @@ func State(p sdk.Payload, policy string) (map[string]any, error) {
 }
 
 // Check validates a response against the questions it answers and returns the answers by question ID.
-// A missing, duplicate, unknown or out-of-domain answer is an error, never a guess.
+// A missing, duplicate, unknown or out-of-domain answer is an error, never a guess. A choice whose
+// probabilities add up to more than 1 within rounding is returned normalized to 1.
 func Check(qs []sdk.Question, resp sdk.Response) (map[string]sdk.Answer, error) {
 	byID := map[string]sdk.Question{}
 	for _, q := range qs {
@@ -86,7 +87,7 @@ func Check(qs []sdk.Question, resp sdk.Response) (map[string]sdk.Answer, error) 
 		if err := checkAnswer(q, a); err != nil {
 			return nil, fmt.Errorf("question %q: %w", q.ID, err)
 		}
-		out[a.QuestionID] = a
+		out[a.QuestionID] = normalized(a)
 	}
 	for _, q := range qs {
 		if _, ok := out[q.ID]; !ok {
@@ -94,6 +95,54 @@ func Check(qs []sdk.Question, resp sdk.Response) (map[string]sdk.Answer, error) 
 		}
 	}
 	return out, nil
+}
+
+// roundingPerOption is how far above its true value one reported option probability may be: a
+// backend that rounds to two decimals is off by up to 0.005.
+const roundingPerOption = 0.005
+
+// normalized returns a with its option probabilities divided by their sum when rounding put the sum
+// above 1 by more than massNoise, so a rule that adds options never counts the excess as
+// confidence. A sum of 1 or less is left as it is: missing mass is not handed to any option. The
+// caller's map is not changed.
+func normalized(a sdk.Answer) sdk.Answer {
+	sum := mass(a.Probabilities, 0)
+	if sum <= 1+massNoise {
+		return a
+	}
+	ps := make(map[string]float64, len(a.Probabilities))
+	for k, p := range a.Probabilities {
+		ps[k] = p / sum
+	}
+	a.Probabilities = ps
+	return a
+}
+
+// massNoise is how far a sum of probabilities may stray from its decimal value through
+// floating-point addition alone; a sum within it of 1 is 1. Excess from a backend's rounding is
+// orders of magnitude larger, so the two are not confused.
+const massNoise = 1e-9
+
+// mass adds max(0, p-less) over the probabilities in key order with compensated (Neumaier)
+// summation, so the same map always gives the same sum, and the exact one up to massNoise.
+func mass(ps map[string]float64, less float64) float64 {
+	keys := make([]string, 0, len(ps))
+	for k := range ps {
+		keys = append(keys, k)
+	}
+	sort.Strings(keys)
+	var sum, c float64
+	for _, k := range keys {
+		v := math.Max(0, ps[k]-less)
+		t := sum + v
+		if math.Abs(sum) >= math.Abs(v) {
+			c += (sum - t) + v
+		} else {
+			c += (v - t) + sum
+		}
+		sum = t
+	}
+	return sum + c
 }
 
 func checkAnswer(q sdk.Question, a sdk.Answer) error {
@@ -120,6 +169,14 @@ func checkAnswer(q sdk.Question, a sdk.Answer) error {
 			if !prob(p) {
 				return errors.New("an option probability is outside [0, 1]")
 			}
+		}
+		// The options are mutually exclusive, so their true probabilities add up to at most 1. A
+		// reported value is at most roundingPerOption above its true value and a true value is
+		// not negative, so the least the true values can add up to is the sum of
+		// max(0, p-roundingPerOption). More than 1 even then is a contradiction, not rounding.
+		// Less than 1 is allowed: a backend may report part of the mass.
+		if least := mass(a.Probabilities, roundingPerOption); least > 1+massNoise {
+			return fmt.Errorf("the option probabilities add up to %.3f, more than rounding explains", mass(a.Probabilities, 0))
 		}
 	case sdk.Noul:
 		if a.Yes == nil || a.Choice != "" || a.Score != nil || len(a.Probabilities) > 0 {
