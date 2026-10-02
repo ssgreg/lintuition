@@ -339,3 +339,65 @@ func TestValidateAcceptsCallText(t *testing.T) { // 42 unsupported: Error() on a
 		t.Fatal(errFn().Error())
 	}
 }
+
+// TestValidateAcceptsDocumented checks that a plain token passes; TestValidateAcceptsDocumentedToo
+// is a different name and stays.
+func TestValidateAcceptsDocumented(t *testing.T) { // 43 candidate: the doc is sent, the test's own name masked
+	if err := Validate("x"); err != nil {
+		t.Fatal(err)
+	}
+}
+
+// Every mention is masked: see TestValidateAcceptsSpaced (TestValidateAcceptsSpaced).
+func TestValidateAcceptsSpaced(t *testing.T) { // 44 candidate: every mention of the name is masked
+	if err := Validate("x"); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func TestWrapNilError(t *testing.T) { // 45 candidate: a nil error passed to an error parameter
+	var err error
+	if got := Wrap(err, "p"); got != nil {
+		t.Fatal(got)
+	}
+}
+
+func TestJoinNothing(t *testing.T) { // 46 candidate: ...error given no argument passes no error
+	if err := Join(); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func TestCollectEmpty(t *testing.T) { // 47 candidate: a []error parameter is not an error
+	if err := Collect(nil); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func TestStore_RestoreKeepsCause(t *testing.T) { // 48 candidate: a method that takes an error
+	var s Store
+	if err := s.Restore(ErrEmpty); err == nil {
+		t.Fatal("no error")
+	}
+}
+
+// A note for the reader of this file, kept apart by a blank line.
+
+func TestValidateAcceptsUndocumented(t *testing.T) { // 49 candidate: a comment above a blank line is not the doc
+	if err := Validate("x"); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func TestJoinOne(t *testing.T) { // 50 candidate: an argument to ...error is an error value
+	if err := Join(ErrEmpty); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func TestJoinSpread(t *testing.T) { // 51 candidate: a slice spread into ...error is not an error value
+	errs := []error{ErrEmpty}
+	if err := Join(errs...); err != nil {
+		t.Fatal(err)
+	}
+}

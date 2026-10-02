@@ -2,8 +2,11 @@ package testnameassert
 
 import (
 	"fmt"
+	"go/ast"
+	"go/parser"
 	"go/token"
 	"os"
+	"path/filepath"
 	"sort"
 	"strings"
 	"testing"
@@ -47,10 +50,17 @@ func TestExtraction(t *testing.T) {
 			got = append(got, n+" unsupported: "+c.Unsupported)
 			continue
 		}
-		if len(c.Payload.Source) > 0 || len(c.Payload.Prose) != 1 || len(c.Payload.Facts) != 1 {
+		if len(c.Payload.Source) > 0 || len(c.Payload.Prose) != 2 || len(c.Payload.Facts) != 2 {
 			t.Errorf("case %s: payload %+v", n, c.Payload)
 		}
-		got = append(got, fmt.Sprintf("%s %q call=%s expect=%s", n, c.Payload.Prose["test"], c.Payload.Facts["call"], c.Local["expect"]))
+		line := fmt.Sprintf("%s %q call=%s expect=%s", n, c.Payload.Prose["test"], c.Payload.Facts["call"], c.Local["expect"])
+		if su := c.Payload.Facts["setup"]; su != "nothing" {
+			line += fmt.Sprintf(" setup=%q", su)
+		}
+		if d := c.Payload.Prose["doc"]; d != "" {
+			line += fmt.Sprintf(" doc=%q", d)
+		}
+		got = append(got, line)
 	}
 	want := []string{
 		`1 "validate rejects empty" call=Validate expect=error`,
@@ -91,6 +101,15 @@ func TestExtraction(t *testing.T) {
 		`40 "validate accepts error text" call=Validate expect=no_error`,
 		`41 unsupported: the error is checked in a form not read here`,
 		`42 unsupported: the error is checked in a form not read here`,
+		`43 "validate accepts documented" call=Validate expect=no_error doc="this test checks that a plain token passes; TestValidateAcceptsDocumentedToo\nis a different name and stays."`,
+		`44 "validate accepts spaced" call=Validate expect=no_error doc="Every mention is masked: see this test (this test)."`,
+		`45 "wrap nil error" call=Wrap expect=no_error setup="the test passes an error value to Wrap as an argument"`,
+		`46 "join nothing" call=Join expect=no_error`,
+		`47 "collect empty" call=Collect expect=no_error`,
+		`48 "store restore keeps cause" call=Restore expect=error setup="the test passes an error value to Restore as an argument"`,
+		`49 "validate accepts undocumented" call=Validate expect=no_error`,
+		`50 "join one" call=Join expect=no_error setup="the test passes an error value to Join as an argument"`,
+		`51 "join spread" call=Join expect=no_error`,
 	}
 	if strings.Join(got, "\n") != strings.Join(want, "\n") {
 		t.Fatalf("candidates:\n%s\n\nwant:\n%s", strings.Join(got, "\n"), strings.Join(want, "\n"))
@@ -119,6 +138,15 @@ func TestDecide(t *testing.T) {
 		{wantErr, nameSays("input_only", 0.95), false, false},
 		{wantErr, nameSays("input_only", 0.6), false, true},
 		{noErr, nameSays("unclear", 0.95), false, true},
+		// At the threshold the answer counts; just below it abstains.
+		{noErr, nameSays("error", 0.9), true, false},
+		{noErr, nameSays("error", 0.89), false, true},
+		// A name that describes the input or an arranged failure is clean whichever way the test asserts.
+		{noErr, nameSays("input_only", 0.99), false, false},
+		{wantErr, nameSays("input_only", 0.99), false, false},
+		// A choice without its probability abstains, as does an answer with none at all.
+		{noErr, map[string]sdk.Answer{"name_says": {QuestionID: "name_says", Choice: "error", Probabilities: map[string]float64{"no_error": 0.95}}}, false, true},
+		{noErr, map[string]sdk.Answer{}, false, true},
 	} {
 		d := r.Decide(tc.c, tc.answers)
 		if d.Report != tc.report || (d.Abstained != "") != tc.abstain {
@@ -130,5 +158,54 @@ func TestDecide(t *testing.T) {
 	}
 	if d := r.Decide(wantErr, nameSays("no_error", 0.95)); d.Message != "test name expects Validate to succeed, but the test fails when Validate returns no error" {
 		t.Errorf("message: %s", d.Message)
+	}
+}
+
+// TestQuestionIsFixed checks that the question does not depend on the candidate and refers to every
+// field the payload sends, so a request carries text a person wrote only as state, never as
+// instructions.
+func TestQuestionIsFixed(t *testing.T) {
+	r := &rule{threshold: 0.9}
+	a := r.Questions(&sdk.Candidate{Local: map[string]string{"test": "TestA"}})
+	b := r.Questions(&sdk.Candidate{Local: map[string]string{"test": "TestB"}})
+	if fmt.Sprint(a) != fmt.Sprint(b) || len(a) != 1 {
+		t.Fatalf("questions differ or are not one: %v / %v", a, b)
+	}
+	for _, field := range []string{"`test`", "`doc`", "`call`", "`setup`"} {
+		if !strings.Contains(a[0].Text, field) {
+			t.Errorf("question does not refer to %s: %s", field, a[0].Text)
+		}
+	}
+	if err := a[0].Validate(); err != nil {
+		t.Fatal(err)
+	}
+}
+
+// TestFixtureDocsCarryNoHints checks that the twins' and the showcase's explanations ("Defect: ...",
+// "test-name-vs-assertion: ...") are not part of a test's doc comment, which this linter sends: they
+// would tell the classifier the answer and make a live evaluation measure the hint.
+func TestFixtureDocsCarryNoHints(t *testing.T) {
+	files, _ := filepath.Glob("../../testdata/twins/testname/*_test.go")
+	files = append(files, "../../examples/showcase/tests_test.go")
+	if len(files) < 2 {
+		t.Fatalf("fixtures not found: %v", files)
+	}
+	fset := token.NewFileSet()
+	for _, name := range files {
+		f, err := parser.ParseFile(fset, name, nil, parser.ParseComments)
+		if err != nil {
+			t.Fatal(err)
+		}
+		for _, d := range f.Decls {
+			fd, ok := d.(*ast.FuncDecl)
+			if !ok || fd.Doc == nil {
+				continue
+			}
+			for _, hint := range []string{"Defect", "Fixed twin", "Negative", "test-name-vs-assertion", "want"} {
+				if strings.Contains(fd.Doc.Text(), hint) {
+					t.Errorf("%s: the doc of %s carries %q", name, fd.Name.Name, hint)
+				}
+			}
+		}
 	}
 }
