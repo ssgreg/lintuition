@@ -1,7 +1,16 @@
 // Package suppress holds twins for suppression-rationale.
+//
+// Every explanation is a separate comment, a blank line above the code it explains, so it never
+// reaches the classifier: only a directive's reason is sent.
 package suppress
 
-import "os"
+import (
+	"os"
+	"os/exec"
+	"path/filepath"
+)
+
+// Defect: errcheck reports the unchecked Close; the reason talks about the file's size.
 
 // Head reads the first bytes of a file.
 func Head(path string) []byte {
@@ -9,14 +18,15 @@ func Head(path string) []byte {
 	if err != nil {
 		return nil
 	}
-	// Defect: errcheck reports the unchecked Close; the reason talks about the file's size.
 	defer f.Close() //nolint:errcheck // the file is small, so reading it whole is fine // want `nolint rationale is about something other than what errcheck reports`
 	buf := make([]byte, 64)
 	n, _ := f.Read(buf)
 	return buf[:n]
 }
 
-// HeadFixed is the fixed twin.
+// Fixed twin: the reason says why the lost close error does not matter.
+
+// HeadFixed reads the first bytes of a file.
 func HeadFixed(path string) []byte {
 	f, err := os.Open(path)
 	if err != nil {
@@ -29,6 +39,8 @@ func HeadFixed(path string) []byte {
 }
 
 // Defect: funlen reports the function's length; the reason is about who calls it.
+
+// Opcode names an opcode.
 //
 //nolint:funlen // only the tests call this function // want `nolint rationale is about something other than what funlen reports`
 func Opcode(op byte) string {
@@ -41,7 +53,9 @@ func Opcode(op byte) string {
 	return "?"
 }
 
-// OpcodeFixed is the fixed twin.
+// Fixed twin: the reason is about the function's length.
+
+// OpcodeFixed names an opcode.
 //
 //nolint:funlen // one flat switch over every opcode; splitting it would hide the table
 func OpcodeFixed(op byte) string {
@@ -55,12 +69,91 @@ func OpcodeFixed(op byte) string {
 }
 
 // Negative: an lll directive whose reason is about the long line.
+
 const docURL = "https://example.com/a/very/long/path/that/goes/on/and/on/so/that/the/line/is/longer/than/the/limit" //nolint:lll // a URL in a string cannot be wrapped
 
 // Negative: two linters are unsupported, never asked.
+
 var _ = os.Remove //nolint:errcheck,gosec // both fine here
 
 // Negative: a reason whose second clause, after another //, answers errcheck is read whole.
+
+// Cleanup closes f.
 func Cleanup(f *os.File) {
 	f.Close() //nolint:errcheck // the buffer is small // errors from this best-effort cleanup are deliberately ignored
+}
+
+// Defect: the reason names gosec's G304 (file path from taint input) and then talks about the
+// file's size.
+
+func loadManifest(path string) []byte {
+	b, _ := os.ReadFile(path) //nolint:gosec // G304: the file is only a few bytes long // want `nolint rationale is about something other than what gosec G304 reports`
+	return b
+}
+
+// Fixed twin: the reason says where the path comes from.
+
+func loadManifestFixed(dir string) []byte {
+	b, _ := os.ReadFile(filepath.Join(dir, "manifest.json")) //nolint:gosec // G304: built from the build directory and a constant file name
+	return b
+}
+
+// Defect: G204 (command execution) answered with speed.
+
+func runHook(name string) *exec.Cmd {
+	return exec.Command(name) //nolint:gosec // G204: this runs on every request and has to stay fast // want `nolint rationale is about something other than what gosec G204 reports`
+}
+
+// Negative: the same rule answered without naming it, through the general gosec description.
+
+func runFormatter() *exec.Cmd {
+	return exec.Command("gofmt", "-l", ".") //nolint:gosec // the command line is a fixed list of literals
+}
+
+// Defect: G306 (file permissions) answered with the code's age.
+
+func writeStamp(path string, b []byte) {
+	_ = os.WriteFile(path, b, 0o644) //nolint:gosec // G306: legacy code from the first release // want `nolint rationale is about something other than what gosec G306 reports`
+}
+
+// Fixed twin: the reason is about who may read the file.
+
+func writeStampFixed(path string, b []byte) {
+	_ = os.WriteFile(path, b, 0o644) //nolint:gosec // G306: the stamp is public build metadata, readable by anyone on purpose
+}
+
+// Defect: no rule named, and the reason only says the code is old.
+
+func readSpool(path string) []byte {
+	b, _ := os.ReadFile(path) //nolint:gosec // inherited from the old service, a rewrite is planned // want `nolint rationale is about something other than what gosec reports`
+	return b
+}
+
+// Defect: revive's exported rule answered with speed.
+
+//nolint:revive // exported: the loop over the cache is cheap // want `nolint rationale is about something other than what revive exported reports`
+type CacheStats struct{ Hits int }
+
+// Negative: revive's var-naming rule, answered.
+
+var userIdKey = "user_id" //nolint:revive // var-naming: the name matches the field of the wire protocol
+
+// Negative: staticcheck's SA1019 (a deprecated API), answered.
+
+func seekStart(f *os.File) {
+	_, _ = f.Seek(0, os.SEEK_SET) //nolint:staticcheck // SA1019: the replacement constant is missing in the oldest Go release we build with
+}
+
+// Negative: a reason that names two gosec rules is unsupported, never asked.
+
+func readTwo(path string) []byte {
+	b, _ := os.ReadFile(path) //nolint:gosec // G304/G703: the file sits next to the binary
+	return b
+}
+
+// Negative: a rule the table does not describe is unsupported, never asked.
+
+func readNew(path string) []byte {
+	b, _ := os.ReadFile(path) //nolint:gosec // G999: a check from a newer release
+	return b
 }

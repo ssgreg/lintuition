@@ -505,20 +505,36 @@ data, _ := os.ReadFile(p) //nolint:errcheck // the file is small, so reading it 
 
 errcheck reports an unchecked error; the reason is about file size.
 
-**Reads:** `//nolint:<linter> // <reason>` directives naming one linter.
+**Reads:** `//nolint:<linter> // <reason>` directives naming one linter. For gosec, staticcheck and
+revive it also reads which rule the reason names: a gosec ID (`G304`), a staticcheck ID (`SA1019`,
+`S1000`, `ST1003`, `QF1001`), or a revive rule name first in the reason before a colon
+(`var-naming: ...`) or after revive's disable syntax (`disable-line:unused-receiver`).
 
-**Sends:** a fixed description of what that linter reports (lintuition's own linters' docs, plus a
-built-in table for errcheck, gosec, unused, ineffassign, staticcheck, govet, gocritic, revive, lll,
-funlen, gocyclo, dupl, goconst and nestif), and the reason.
+**Sends:** a fixed description of what was reported, and the reason. When the reason names a rule,
+the description is that rule's own title from the linter's documentation (gosec's RULES.md,
+staticcheck's check titles, the rules table in revive's README), and the rule ID goes with it.
+Otherwise it is the linter's general description: lintuition's own linters' docs, plus a built-in
+table for errcheck, gosec, unused, ineffassign, staticcheck, govet, gocritic, revive, lll, funlen,
+gocyclo, dupl, goconst and nestif. gosec alone covers credentials, file paths, commands, crypto and
+slice bounds, and "G304: a constant file name under the build directory" answers file inclusion,
+not "a security weakness" in general.
 
-**Asks:** whether the reason mentions or addresses what the linter reports, or is about a different
-subject. An earlier wording asked whether the reason explains why the report is acceptable here;
-a classifier reads almost any reason as a justification, so it called "this function is short"
-a fine reason to skip an error check.
+**Asks:** whether the reason argues about the reported thing (why that risk does not apply, where an
+input comes from and why it is safe, why the construct is needed), or only talks about some other
+property of the code, such as its size, speed, age, callers or readability. Two earlier wordings
+failed. "Does the reason explain why the report is acceptable here?" made almost any reason a
+justification: it called "this function is short" a fine reason to skip an error check. "Does the
+reason mention what the linter reports?" read the subject literally: a reason that argues where a
+path comes from does not mention path traversal, so on 25 repositories 19 of 19 findings were
+reasons that answer their rule.
 
-**Decides:** reports "a different subject". Threshold 0.8.
+**Decides:** reports "only talks about something else". Threshold 0.9, both ways: below it the
+linter abstains.
 
-**Unsupported:** directives naming several linters, and linters the table does not describe.
+**Unsupported:** directives naming several linters, linters the table does not describe, reasons
+that name several rules of one linter, and reasons that name a rule the tables do not describe:
+a rule from a newer release, a title that cannot be sent as a fact, or gosec's G113 and G307,
+whose IDs were reassigned to new checks.
 
 ---
 
