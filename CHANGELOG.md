@@ -4,6 +4,10 @@
 
 - New linter `doc-vs-signature`: a doc comment that promises a returned result or error the
   function's signature does not have.
+- `enum-comment-shift` no longer asks about a comment that names its own constant, and marks
+  comments that differ from a neighbour's in one word at most as unsupported. Both shapes made
+  false findings on real code: the classifier could not tell near-identical comments apart, and
+  masking the own name left words that fit a neighbour.
 
 ## v0.1.0 (2026-10-02)
 
