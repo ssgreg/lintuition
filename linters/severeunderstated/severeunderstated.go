@@ -4,12 +4,14 @@
 //	slog.Info("queue full, dropping events") // the events are gone for good
 //
 // Code finds log calls at debug or info level, resolved through go/types, with a constant message of
-// at least two words. The classifier reads the message, its level, and the conditions the code has
-// established where it logs, read from the enclosing branches through go/types: an error it checked
-// for (errors.Is(err, fs.ErrNotExist), os.IsNotExist, err == context.Canceled), a context that is
-// done, a signal that arrived. A message logged in such a branch reports a case the code expected
-// and handles, and the message alone does not show it: "notify failed" at debug reads as a loss
-// until you see that the branch is the one where the context was cancelled on shutdown.
+// at least two words. The classifier reads the message, its level, and the conditions the code
+// checked on the way to the log, read from the enclosing branches through go/types: an error it
+// tested (errors.Is(err, fs.ErrNotExist), os.IsNotExist, err == context.Canceled) while that error
+// is still the one at hand, a receive from a context's Done channel or from a channel of
+// os.Signal. The message alone often hides this: "notify failed" at debug reads as a loss until you
+// see that it sits in the branch where the context was cancelled. The facts say what the code
+// checked, not why; whether the missing file was optional or the cancel was asked for is left to
+// the classifier.
 //
 // It is asked two things: what consequence the message states, with an answer for each kind of
 // expected event (an anticipated absence, a requested stop, the program's own recovery), and
@@ -109,8 +111,8 @@ func candidate(pass *analysis.Pass, call *ast.CallExpr, stack []ast.Node) *sdk.C
 	c.Local["message"] = lc.Message
 	c.Payload.AddProse("message", lc.Message)
 	c.Payload.Fact("level", lc.Level)
-	if b := branchFacts(pass.TypesInfo, stack); len(b) > 0 {
-		c.Payload.Fact("branch", joinFacts(b))
+	if b := branchFacts(pass.Pkg, pass.TypesInfo, stack, call); len(b) > 0 {
+		c.Payload.Fact("branch", b)
 	}
 	return c
 }
@@ -125,7 +127,7 @@ func (r *rule) Questions(*sdk.Candidate) []sdk.Question {
 		{
 			ID:   "consequence",
 			Kind: sdk.Choice,
-			Text: "What consequence does the log message `message` state? `level` is its log level; `branch`, when present, names what the code has established where it logs `message`: an error it checked for (such as \"error is fs.ErrNotExist\", \"error is context.Canceled\" or \"os.IsNotExist\"), a context that is done, or a signal that arrived.",
+			Text: "What consequence does the log message `message` state? `level` is its log level; `branch`, when present, lists conditions the code checked on the way to logging `message`, nearest first: an error test that held (such as \"error is fs.ErrNotExist\", \"error is context.Canceled\" or \"os.IsNotExist\"), \"context done\", \"receive from a channel of os.Signal\", or \"callback passed along with a signal value\". They say what was checked, not why.",
 			Options: []sdk.Option{
 				{Key: "routine", Description: "Routine progress or a state change the program handles as designed, including a deletion or cleanup that was requested, and an entry that expired or timed out and is removed."},
 				{Key: "expected_absence", Description: "Something optional or anticipated is missing or not found, such as no saved state on the first start, and the program carries on without it."},
@@ -152,10 +154,21 @@ func (r *rule) Decide(c *sdk.Candidate, answers map[string]sdk.Answer) sdk.Decis
 		// Every answer but unintended_loss is one outcome for this rule, so their probabilities add
 		// up: a message the classifier splits between "routine" and "recovery" is still confidently
 		// not a loss. A missing probability counts as 0.
-		var clean float64
+		//
+		// The sum is only meaningful over a distribution whose mass is at most 1. The shared answer
+		// check rejects a choice whose mass rounding cannot explain and normalizes the rest; should a
+		// mass above 1 reach this point anyway, the clean share is taken of the total, so excess
+		// mass never reads as confidence.
+		var clean, total float64
 		for _, k := range cleanOptions {
 			q, _ := a.Probability(k)
 			clean += q
+		}
+		for _, q := range a.Probabilities {
+			total += q
+		}
+		if total > 1 {
+			clean /= total
 		}
 		if clean < r.threshold {
 			return sdk.Abstain(fmt.Sprintf("the answers other than a loss together at %.2f are below the threshold %.2f", clean, r.threshold))

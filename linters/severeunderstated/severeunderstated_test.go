@@ -13,6 +13,7 @@ import (
 
 	"golang.org/x/tools/go/analysis/analysistest"
 
+	"github.com/ssgreg/lintuition/internal/classify"
 	"github.com/ssgreg/lintuition/sdk"
 )
 
@@ -68,7 +69,15 @@ func TestExtraction(t *testing.T) {
 		}
 		line := fmt.Sprintf("%s %s %q", n, c.Local["level"], c.Payload.Prose["message"])
 		if b, ok := c.Payload.Facts["branch"]; ok {
-			line += fmt.Sprintf(" branch=%v", b)
+			list, isList := b.([]string)
+			if !isList || len(list) == 0 {
+				t.Errorf("case %s: branch is %T %v, want a non-empty []string", n, b, b)
+			}
+			line += " branch=" + strings.Join(list, " | ")
+		}
+		// Every candidate the analyzer asks about must pass the payload policy as it is sent.
+		if _, err := classify.State(c.Payload, classify.Prose); err != nil {
+			t.Errorf("case %s: the payload is refused: %v", n, err)
 		}
 		got = append(got, line)
 	}
@@ -92,11 +101,11 @@ func TestExtraction(t *testing.T) {
 		`24 info "upload cut short, chunk lost"`,
 		`25 info "worker exits, jobs keep running" branch=context done`,
 		`26 info "worker exits, jobs keep running"`,
-		`27 info "interrupted, stopping without waiting" branch=signal received`,
-		`28 info "second interrupt, stopping without waiting" branch=signal received`,
+		`27 info "interrupted, stopping without waiting" branch=receive from a channel of os.Signal`,
+		`28 info "second interrupt, stopping without waiting" branch=callback passed along with a signal value`,
 		`29 info "second interrupt, stopping without waiting"`,
 		`30 info "interrupted, stopping without waiting"`,
-		`31 info "shutdown cut the sync short, changes lost" branch=error is context.Canceled; context done`,
+		`31 info "shutdown cut the sync short, changes lost" branch=error is context.Canceled | context done`,
 		`33 info "no saved state, starting empty"`,
 		`35 info "no saved state, starting empty" branch=os.IsNotExist`,
 		`37 info "no saved state, starting empty" branch=os.IsNotExist`,
@@ -104,6 +113,27 @@ func TestExtraction(t *testing.T) {
 		`41 info "worker exits, jobs keep running"`,
 		`42 info "node not ready, request queued" branch=error is a.errNotReady`,
 		`43 info "no saved state, starting empty" branch=os.IsNotExist`,
+		`44 info "buffered rows were thrown away"`,
+		`45 info "buffered rows were thrown away"`,
+		`46 info "buffered rows were thrown away"`,
+		`47 info "buffered rows were thrown away"`,
+		`48 info "buffered rows were thrown away"`,
+		`49 info "buffered rows were thrown away"`,
+		`50 info "buffered rows were thrown away"`,
+		`51 info "buffered rows were thrown away"`,
+		`52 info "buffered rows were thrown away"`,
+		`53 info "buffered rows were thrown away"`,
+		`54 info "buffered rows were thrown away" branch=error is context.Canceled`,
+		`55 info "buffered rows were thrown away"`,
+		`56 info "buffered rows were thrown away" branch=context done`,
+		`57 info "buffered rows were thrown away" branch=context done`,
+		`58 info "buffered rows were thrown away" branch=callback passed along with a signal value`,
+		`59 info "buffered rows were thrown away"`,
+		`60 info "buffered rows were thrown away"`,
+		`61 info "buffered rows were thrown away"`,
+		`62 info "buffered rows were thrown away"`,
+		`63 info "buffered rows were thrown away" branch=error is context.Canceled`,
+		`64 info "buffered rows were thrown away"`,
 	}
 	if strings.Join(got, "\n") != strings.Join(want, "\n") {
 		t.Fatalf("candidates:\n%s\n\nwant:\n%s", strings.Join(got, "\n"), strings.Join(want, "\n"))
@@ -146,6 +176,14 @@ func TestQuestions(t *testing.T) {
 		if !strings.Contains(q.Text, "`message`") {
 			t.Errorf("%s does not name the message field: %s", q.ID, q.Text)
 		}
+	}
+	for _, fact := range []string{"context done", "receive from a channel of os.Signal", "callback passed along with a signal value"} {
+		if !strings.Contains(qs[0].Text, fact) {
+			t.Errorf("consequence does not show the branch fact %q", fact)
+		}
+	}
+	if strings.Contains(qs[0].Text, "arrived") || strings.Contains(qs[0].Text, "established") {
+		t.Errorf("consequence claims more than the facts show: %s", qs[0].Text)
 	}
 	for _, field := range []string{"`level`", "`branch`"} {
 		if !strings.Contains(qs[0].Text, field) {
@@ -214,6 +252,10 @@ func TestDecide(t *testing.T) {
 		{"split confident at 0.90, the strict threshold abstains", strict, split(map[string]float64{"routine": 0.6, "recovery": 0.3, "unintended_loss": 0.1}), false, true},
 		{"split confident at 0.97, the strict threshold is clean", strict, split(map[string]float64{"routine": 0.6, "recovery": 0.37, "unintended_loss": 0.03}), false, false},
 		{"loss picked by a hair is not rescued by the clean sum", r, split(map[string]float64{"unintended_loss": 0.4, "routine": 0.35, "recovery": 0.25}), false, true},
+		{"mass above 1: the clean share of the total is below the threshold", r, split(map[string]float64{"routine": 0.43, "recovery": 0.42, "unintended_loss": 0.18}), false, true},
+		{"mass above 1: a clean share of the total above the threshold stays clean", r, split(map[string]float64{"routine": 0.6, "recovery": 0.41, "unintended_loss": 0.01}), false, false},
+		{"mass of exactly 1 is taken as it is", r, split(map[string]float64{"routine": 0.43, "recovery": 0.42, "unintended_loss": 0.15}), false, false},
+		{"mass above 1 counts the unclear share too", r, split(map[string]float64{"routine": 0.5, "recovery": 0.38, "unclear": 0.2}), false, true},
 		{"consequence missing entirely", r, map[string]sdk.Answer{"on_purpose": {QuestionID: "on_purpose", Yes: f(0.1)}}, false, true},
 	} {
 		d := tc.r.Decide(c, tc.answers)

@@ -226,12 +226,17 @@ slog.Info("events for the last hour are lost, the write to disk was refused")
 
 **Reads:** debug and info logs with a constant message of at least two words.
 
-**Sends:** the message, its level, and what the code has established where it logs, read from the
-enclosing branches through go/types: an error it checked for (`errors.Is(err, fs.ErrNotExist)`,
-`os.IsNotExist(err)`, `err == context.Canceled`, also under a guard that returns on every other
-error), a context that is done, or a signal that arrived. A debug "notify failed" reads as lost
-work until you see it sits in the branch where shutdown cancelled the context; the branch fact is
-what lets the classifier see that.
+**Sends:** the message, its level, and a `branch` list of what the code checked on the way to the
+log, read through go/types: an error test that held (`errors.Is(err, fs.ErrNotExist)`,
+`os.IsNotExist(err)`, `err == context.Canceled`, also a guard that returns on every other error),
+a receive from a context's Done channel or from a channel of `os.Signal`, and a function literal
+passed along with a signal value. An error test counts only while the checked variable still holds
+the checked value at the log: not written or shadowed in between, not written in a closure or
+through its address, and the log line does not log another error. The walk stops at a function
+literal, and a case reached by `fallthrough` or code after a label names nothing. A debug "notify
+failed" reads as lost work until you see it sits in the branch where the context was cancelled.
+The facts say what was checked, not why: whether a missing file was optional, or a cancel was
+asked for, is still the classifier's call.
 
 **Asks two questions:** what consequence the message states: routine progress, an expected absence
 (no saved state on the first start), a requested stop, the program's own recovery, a temporary
@@ -240,7 +245,8 @@ deletion, sampling as configured).
 
 **Decides:** reports when the loss is unintended (threshold 0.85) and "meant" is unlikely (0.3 or
 below); between 0.3 and 0.7 on the second question it abstains. The answers other than a loss are
-one outcome here, so their probabilities are added before the threshold.
+one outcome here, so their probabilities are added before the threshold, as a share of the total
+when a distribution adds up to more than 1.
 
 ### destructive-remediation
 

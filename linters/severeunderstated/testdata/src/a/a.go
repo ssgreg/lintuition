@@ -280,3 +280,191 @@ func c43(ok bool, err error) {
 		slog.Info("no saved state, starting empty") // 43 branch: a negated disjunction holds each negated part
 	}
 }
+
+// Control flow into the log: fallthrough and goto.
+
+func c44(err error) {
+	switch err {
+	case io.EOF:
+		fallthrough
+	case context.Canceled:
+		slog.Info("buffered rows were thrown away") // 44 no branch: the previous case falls through
+	}
+}
+
+func c45(err error) {
+	switch {
+	case err == nil:
+		fallthrough
+	case stderrors.Is(err, context.Canceled):
+		slog.Info("buffered rows were thrown away") // 45 no branch: a tagless case reached by fallthrough
+	}
+}
+
+func c46(err error) {
+	if !os.IsNotExist(err) {
+		goto report
+	}
+report:
+	slog.Info("buffered rows were thrown away") // 46 no branch: a goto is not a guard that leaves
+}
+
+func c47(err error, again bool) {
+	if !os.IsNotExist(err) {
+		return
+	}
+	if again {
+		goto retry
+	}
+retry:
+	slog.Info("buffered rows were thrown away") // 47 no branch: a label a goto can reach resets the guards
+}
+
+// The checked value must still be the one at hand.
+
+func c48(err error) {
+	if !os.IsNotExist(err) {
+		return
+	}
+	err = io.ErrUnexpectedEOF
+	slog.Info("buffered rows were thrown away", "err", err) // 48 no branch: the checked variable is written after the guard
+}
+
+func c49(err error) {
+	if stderrors.Is(err, context.Canceled) {
+		err = io.ErrUnexpectedEOF
+		slog.Info("buffered rows were thrown away", "err", err) // 49 no branch: the checked variable is written in the branch
+	}
+}
+
+func c50(err error) {
+	if stderrors.Is(err, context.Canceled) {
+		err := io.ErrUnexpectedEOF
+		slog.Info("buffered rows were thrown away", "err", err) // 50 no branch: the name is shadowed at the log
+	}
+}
+
+func c51(err error) func(error) {
+	if stderrors.Is(err, context.Canceled) {
+		return func(err error) {
+			slog.Info("buffered rows were thrown away", "err", err) // 51 no branch: a function literal runs later, with its own error
+		}
+	}
+	return nil
+}
+
+func c52(err error) {
+	if stderrors.Is(err, context.Canceled) {
+		func() {
+			slog.Info("buffered rows were thrown away") // 52 no branch: the walk stops at any function literal
+		}()
+	}
+}
+
+func c53(err, other error) {
+	if stderrors.Is(err, context.Canceled) {
+		slog.Info("buffered rows were thrown away", "err", other) // 53 no branch: the line logs another error value
+	}
+}
+
+func c54(ctx context.Context, err error, l *logf.Logger) {
+	if stderrors.Is(err, context.Canceled) {
+		l.Info(ctx, "buffered rows were thrown away", logf.Error(err)) // 54 branch: the line logs the checked error itself
+	}
+}
+
+func c60(err error, retry func()) {
+	reset := func() { err = nil }
+	if stderrors.Is(err, context.Canceled) {
+		retry()
+		slog.Info("buffered rows were thrown away") // 60 no branch: a function literal in the function writes the variable
+	}
+	reset()
+}
+
+func c61(err error, fill func(*error)) {
+	if stderrors.Is(err, context.Canceled) {
+		fill(&err)
+		slog.Info("buffered rows were thrown away") // 61 no branch: the variable's address is taken
+	}
+}
+
+var lastErr error
+
+func c62() {
+	if stderrors.Is(lastErr, context.Canceled) {
+		slog.Info("buffered rows were thrown away") // 62 no branch: a package-level variable can change anywhere
+	}
+}
+
+func c63(err error) error {
+	if stderrors.Is(err, context.Canceled) {
+		slog.Info("buffered rows were thrown away") // 63 branch: a write after the log does not matter
+		err = nil
+	}
+	return err
+}
+
+func c64(ctx context.Context, other context.Context) {
+	if stderrors.Is(ctx.Err(), context.Canceled) {
+		ctx = other
+		slog.Info("buffered rows were thrown away") // 64 no branch: the context the check read is replaced
+	}
+}
+
+// Contexts and signals, by what the types say.
+
+type fauxContext struct{ ch chan int }
+
+func (fauxContext) Deadline() int    { return 0 }
+func (f fauxContext) Done() chan int { return f.ch }
+func (fauxContext) Err() bool        { return false }
+func (fauxContext) Value()           {}
+
+func c55(f fauxContext, jobs chan int) {
+	select {
+	case <-f.Done():
+		slog.Info("buffered rows were thrown away") // 55 no branch: methods named like a context's, with other signatures
+	case <-jobs:
+	}
+}
+
+type job struct {
+	context.Context
+}
+
+func c56(j job, jobs chan int) {
+	select {
+	case <-j.Done():
+		slog.Info("buffered rows were thrown away") // 56 branch: a type embedding a context is one
+	case <-jobs:
+	}
+}
+
+type ctxAlias = context.Context
+
+func c57(ctx ctxAlias, jobs chan int) {
+	select {
+	case <-ctx.Done():
+		slog.Info("buffered rows were thrown away") // 57 branch: an alias of context.Context
+	case <-jobs:
+	}
+}
+
+func callNow(_ os.Signal, f func()) { f() }
+
+func c58() {
+	callNow(syscall.SIGUSR1, func() {
+		slog.Info("buffered rows were thrown away") // 58 branch: the call's shape is described, not a delivery
+	})
+}
+
+func c59(sigs chan os.Signal, jobs chan int) {
+	select {
+	case _, ok := <-sigs:
+		if !ok {
+			slog.Info("buffered rows were thrown away") // 59 no branch: a two-value receive may be a closed channel
+		}
+	case <-jobs:
+	}
+}

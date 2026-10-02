@@ -4,76 +4,208 @@ import (
 	"go/ast"
 	"go/token"
 	"go/types"
-	"strings"
 
 	"github.com/ssgreg/lintuition/internal/facts"
 )
 
-// branchFacts names, nearest first, the conditions the code has established where the log call
-// runs, read from the enclosing statements through go/types:
+// branchFacts lists, nearest first, conditions the code checked on the way to the log call, read
+// from the enclosing statements of the same function through go/types:
 //
 //   - "error is fs.ErrNotExist": an if or case condition errors.Is(x, fs.ErrNotExist) or
 //     x == io.EOF, with a package-level error variable as the target, holds in its body;
 //   - "os.IsNotExist": the same for the os.IsNotExist, os.IsExist, os.IsPermission and
 //     os.IsTimeout predicates;
-//   - the same conditions when an earlier statement of the block left it under their negation:
-//     if !os.IsNotExist(err) { return err } leaves the rest of the block on os.IsNotExist;
+//   - the same conditions when an earlier statement of the block left it under their negation
+//     with return, panic, break or continue: if !os.IsNotExist(err) { return err } leaves the rest
+//     of the block on os.IsNotExist;
 //   - "context done": a select case receiving from the Done channel of a context.Context;
-//   - "signal received": a select case receiving from a channel of os.Signal, or a function
-//     literal passed to a call that also takes a signal (a signal handler).
+//   - "receive from a channel of os.Signal": a select case that receives a single value from such
+//     a channel;
+//   - "callback passed along with a signal value": the log is in a function literal passed to a
+//     call that also takes a signal value. This describes the call's shape only; nothing says the
+//     call registers a handler or that a signal arrived.
 //
+// An error condition is kept only while it still describes the value it checked: the checked
+// value must be rooted in a local variable (err, or ctx in ctx.Err()), the variable must not be
+// written between the check and the log, shadowed at the log, written in a function literal or
+// address-taken anywhere in the function, and the log call must not log another error value.
 // Only conditions that hold positively count: the else branch of errors.Is(err, X), or a
-// condition under !, establishes nothing that can be named.
-func branchFacts(info *types.Info, stack []ast.Node) []string {
+// condition under !, names nothing. The walk stops at a function literal, which may run later
+// with other values. A case that the previous case falls through into, and code after a label a
+// goto can reach, establish nothing.
+//
+// The facts say what the code checked, not why: a not-exist check does not prove that the file was
+// optional, nor a cancellation check that the stop was requested. The classifier weighs that.
+func branchFacts(pkg *types.Package, info *types.Info, stack []ast.Node, call *ast.CallExpr) []string {
 	var out []string
 	seen := map[string]bool{}
-	add := func(s string) {
-		if s != "" && !seen[s] && facts.FactSafe(s) {
-			seen[s] = true
-			out = append(out, s)
+	body := enclosingBody(stack)
+	add := func(cs []cond) {
+		for _, c := range cs {
+			if c.operand != nil && !stillChecked(pkg, info, body, c, call) {
+				continue
+			}
+			if c.text != "" && !seen[c.text] && facts.FactSafe(c.text) {
+				seen[c.text] = true
+				out = append(out, c.text)
+			}
 		}
 	}
 	for i := len(stack) - 1; i > 0; i-- {
 		child, parent := stack[i], stack[i-1]
+		if _, ok := child.(*ast.FuncLit); ok {
+			if p, ok := parent.(*ast.CallExpr); ok && takesSignal(info, p) {
+				add([]cond{{text: "callback passed along with a signal value"}})
+			}
+			break
+		}
 		switch p := parent.(type) {
 		case *ast.BlockStmt:
-			for _, s := range guardsBefore(info, p.List, child) {
-				add(s)
-			}
+			add(guardsBefore(info, p.List, child))
 		case *ast.CaseClause:
-			for _, s := range guardsBefore(info, p.Body, child) {
-				add(s)
-			}
+			add(guardsBefore(info, p.Body, child))
 			if inList(p.Body, child) {
-				for _, s := range caseConditions(info, p, stack[:i-1]) {
-					add(s)
-				}
+				add(caseConditions(info, p, stack[:i-1]))
 			}
 		case *ast.CommClause:
-			for _, s := range guardsBefore(info, p.Body, child) {
-				add(s)
-			}
+			add(guardsBefore(info, p.Body, child))
 			if inList(p.Body, child) {
-				add(commCondition(info, p.Comm))
+				if s := commCondition(info, p.Comm); s != "" {
+					add([]cond{{text: s}})
+				}
 			}
 		case *ast.IfStmt:
 			switch child {
 			case p.Body:
-				for _, s := range conditions(info, p.Cond, false) {
-					add(s)
-				}
+				add(conditions(info, p.Cond, false))
 			case p.Else:
-				for _, s := range conditions(info, p.Cond, true) {
-					add(s)
-				}
-			}
-		case *ast.CallExpr:
-			if _, ok := child.(*ast.FuncLit); ok && takesSignal(info, p) {
-				add("signal received")
+				add(conditions(info, p.Cond, true))
 			}
 		}
 	}
 	return out
+}
+
+// cond is one nameable condition, the local variable whose value it checked (nil for the select
+// and callback facts, which check no value) and where the check ends.
+type cond struct {
+	text    string
+	operand *types.Var
+	at      token.Pos
+}
+
+// enclosingBody is the body of the innermost function on the stack.
+func enclosingBody(stack []ast.Node) *ast.BlockStmt {
+	for i := len(stack) - 1; i >= 0; i-- {
+		switch f := stack[i].(type) {
+		case *ast.FuncLit:
+			return f.Body
+		case *ast.FuncDecl:
+			return f.Body
+		}
+	}
+	return nil
+}
+
+// stillChecked reports whether the variable a condition checked still holds the checked value at
+// the log call, as far as the code shows, and is the only error value the call logs.
+func stillChecked(pkg *types.Package, info *types.Info, body *ast.BlockStmt, c cond, call *ast.CallExpr) bool {
+	v := c.operand
+	if body == nil || v.Pkg() == nil || v.Parent() == nil || v.Parent() == v.Pkg().Scope() {
+		return false
+	}
+	if pkg != nil {
+		if s := pkg.Scope().Innermost(call.Pos()); s != nil {
+			if _, o := s.LookupParent(v.Name(), call.Pos()); o != v {
+				return false // shadowed: the name means another variable at the log
+			}
+		}
+	}
+	ok := true
+	ast.Inspect(body, func(n ast.Node) bool {
+		if !ok {
+			return false
+		}
+		if lit, isLit := n.(*ast.FuncLit); isLit {
+			ast.Inspect(lit.Body, func(m ast.Node) bool {
+				if writes(info, m, v) {
+					ok = false
+				}
+				return ok
+			})
+			return false
+		}
+		if u, isU := n.(*ast.UnaryExpr); isU && u.Op == token.AND && rootVar(info, u.X) == v {
+			ok = false // address-taken: written through a pointer anywhere
+		}
+		if writes(info, n, v) && n.Pos() > c.at && n.Pos() < call.Pos() {
+			ok = false
+		}
+		return ok
+	})
+	if !ok {
+		return false
+	}
+	for _, a := range call.Args {
+		ast.Inspect(a, func(n ast.Node) bool {
+			e, isExpr := n.(ast.Expr)
+			if !isExpr || !ok {
+				return ok
+			}
+			if facts.IsError(info.TypeOf(e)) {
+				if rootVar(info, e) != v {
+					ok = false // the line logs another error value
+				}
+				return false
+			}
+			return true
+		})
+	}
+	return ok
+}
+
+// writes reports whether a node assigns to v or to something rooted in it.
+func writes(info *types.Info, n ast.Node, v *types.Var) bool {
+	switch n := n.(type) {
+	case *ast.AssignStmt:
+		for _, l := range n.Lhs {
+			if rootVar(info, l) == v {
+				return true
+			}
+		}
+	case *ast.IncDecStmt:
+		return rootVar(info, n.X) == v
+	case *ast.RangeStmt:
+		return (n.Key != nil && rootVar(info, n.Key) == v) || (n.Value != nil && rootVar(info, n.Value) == v)
+	case *ast.UnaryExpr:
+		return n.Op == token.AND && rootVar(info, n.X) == v
+	}
+	return false
+}
+
+// rootVar is the variable an expression is rooted in: err, ctx in ctx.Err(), r in r.err. Nil
+// when the root is anything else (a function call, a literal, a package-qualified name).
+func rootVar(info *types.Info, e ast.Expr) *types.Var {
+	switch e := ast.Unparen(e).(type) {
+	case *ast.Ident:
+		v, _ := info.ObjectOf(e).(*types.Var)
+		return v
+	case *ast.SelectorExpr:
+		if s, ok := info.Selections[e]; ok && s.Kind() == types.FieldVal {
+			return rootVar(info, e.X)
+		}
+	case *ast.CallExpr:
+		if sel, ok := ast.Unparen(e.Fun).(*ast.SelectorExpr); ok {
+			if s, ok := info.Selections[sel]; ok && s.Kind() == types.MethodVal {
+				return rootVar(info, sel.X)
+			}
+		}
+	case *ast.StarExpr:
+		return rootVar(info, e.X)
+	case *ast.IndexExpr:
+		return rootVar(info, e.X)
+	}
+	return nil
 }
 
 func inList(list []ast.Stmt, n ast.Node) bool {
@@ -86,11 +218,15 @@ func inList(list []ast.Stmt, n ast.Node) bool {
 }
 
 // guardsBefore returns what the statements of a block before child leave established: an if
-// without else whose body always leaves (return, panic, continue, break, goto) passes only under
-// the negation of its condition.
-func guardsBefore(info *types.Info, list []ast.Stmt, child ast.Node) []string {
-	var out []string
+// without else whose body always leaves (return, panic, break, continue) passes only under the
+// negation of its condition. A label resets it, since a goto can reach the code after a label
+// from elsewhere, and a goto in a guard is not taken to leave.
+func guardsBefore(info *types.Info, list []ast.Stmt, child ast.Node) []cond {
+	var out []cond
 	for _, s := range list {
+		if _, ok := s.(*ast.LabeledStmt); ok {
+			out = nil
+		}
 		if s == child {
 			return out
 		}
@@ -112,7 +248,7 @@ func leaves(info *types.Info, b *ast.BlockStmt) bool {
 	case *ast.ReturnStmt:
 		return true
 	case *ast.BranchStmt:
-		return s.Tok != token.FALLTHROUGH
+		return s.Tok == token.BREAK || s.Tok == token.CONTINUE
 	case *ast.ExprStmt:
 		call, ok := ast.Unparen(s.X).(*ast.CallExpr)
 		if !ok {
@@ -128,11 +264,11 @@ func leaves(info *types.Info, b *ast.BlockStmt) bool {
 	return false
 }
 
-// conditions returns the nameable conditions that hold when cond is true, or, with negated, when
-// cond is false. True splits on &&; false splits on ||; ! flips.
-func conditions(info *types.Info, cond ast.Expr, negated bool) []string {
-	cond = ast.Unparen(cond)
-	switch e := cond.(type) {
+// conditions returns the nameable conditions that hold when c is true, or, with negated, when c
+// is false. True splits on &&; false splits on ||; ! flips.
+func conditions(info *types.Info, c ast.Expr, negated bool) []cond {
+	c = ast.Unparen(c)
+	switch e := c.(type) {
 	case *ast.UnaryExpr:
 		if e.Op == token.NOT {
 			return conditions(info, e.X, !negated)
@@ -142,8 +278,8 @@ func conditions(info *types.Info, cond ast.Expr, negated bool) []string {
 			return append(conditions(info, e.X, negated), conditions(info, e.Y, negated)...)
 		}
 		if (e.Op == token.EQL && !negated) || (e.Op == token.NEQ && negated) {
-			if s := equalsSentinel(info, e.X, e.Y); s != "" {
-				return []string{s}
+			if c, ok := equalsSentinel(info, e.X, e.Y); ok {
+				return []cond{c}
 			}
 		}
 		return nil
@@ -151,8 +287,8 @@ func conditions(info *types.Info, cond ast.Expr, negated bool) []string {
 	if negated {
 		return nil
 	}
-	if s := predicate(info, cond); s != "" {
-		return []string{s}
+	if c, ok := predicate(info, c); ok {
+		return []cond{c}
 	}
 	return nil
 }
@@ -168,36 +304,43 @@ var isFuncs = map[string]bool{
 	"github.com/cockroachdb/errors.Is": true,
 }
 
-// predicate names a call that tests an error: errors.Is(x, pkg.Sentinel) or os.IsNotExist(x).
-func predicate(info *types.Info, e ast.Expr) string {
+// predicate names a call that tests an error rooted in a variable: errors.Is(err, pkg.Sentinel)
+// or os.IsNotExist(err).
+func predicate(info *types.Info, e ast.Expr) (cond, bool) {
 	call, ok := e.(*ast.CallExpr)
-	if !ok {
-		return ""
+	if !ok || len(call.Args) == 0 {
+		return cond{}, false
 	}
 	fn := facts.Callee(info, call)
 	if fn == nil || fn.Pkg() == nil {
-		return ""
+		return cond{}, false
 	}
 	full := fn.Pkg().Path() + "." + fn.Name()
+	v := rootVar(info, call.Args[0])
+	if v == nil {
+		return cond{}, false
+	}
 	if errorPredicates[full] {
-		return full
+		return cond{text: full, operand: v, at: call.End()}, true
 	}
 	if isFuncs[full] && len(call.Args) == 2 {
 		if s := sentinel(info, call.Args[1]); s != "" {
-			return "error is " + s
+			return cond{text: "error is " + s, operand: v, at: call.End()}, true
 		}
 	}
-	return ""
+	return cond{}, false
 }
 
-// equalsSentinel names x == pkg.Sentinel, with an error-typed other side.
-func equalsSentinel(info *types.Info, x, y ast.Expr) string {
+// equalsSentinel names x == pkg.Sentinel, with an error-typed other side rooted in a variable.
+func equalsSentinel(info *types.Info, x, y ast.Expr) (cond, bool) {
 	for _, p := range [][2]ast.Expr{{x, y}, {y, x}} {
 		if s := sentinel(info, p[1]); s != "" && facts.IsError(info.TypeOf(p[0])) {
-			return "error is " + s
+			if v := rootVar(info, p[0]); v != nil {
+				return cond{text: "error is " + s, operand: v, at: p[0].End()}, true
+			}
 		}
 	}
-	return ""
+	return cond{}, false
 }
 
 // sentinel names a package-level variable whose type implements error: fs.ErrNotExist,
@@ -226,8 +369,9 @@ var errorIface = types.Universe.Lookup("error").Type().Underlying().(*types.Inte
 
 // caseConditions names the conditions a switch case establishes: in a switch without a tag a case
 // is a condition; in a switch on an error value a case is a comparison with it. A case of several
-// expressions holds any one of them, so it names nothing unless it has one.
-func caseConditions(info *types.Info, cc *ast.CaseClause, outer []ast.Node) []string {
+// expressions holds any one of them, and a case the previous one falls through into holds
+// nothing, so neither names anything.
+func caseConditions(info *types.Info, cc *ast.CaseClause, outer []ast.Node) []cond {
 	if len(cc.List) != 1 || len(outer) < 2 {
 		return nil
 	}
@@ -235,24 +379,35 @@ func caseConditions(info *types.Info, cc *ast.CaseClause, outer []ast.Node) []st
 	if !ok {
 		return nil
 	}
+	for i, s := range sw.Body.List {
+		if s != cc || i == 0 {
+			continue
+		}
+		if prev, ok := sw.Body.List[i-1].(*ast.CaseClause); ok && len(prev.Body) > 0 {
+			if b, ok := prev.Body[len(prev.Body)-1].(*ast.BranchStmt); ok && b.Tok == token.FALLTHROUGH {
+				return nil
+			}
+		}
+	}
 	if sw.Tag == nil {
 		return conditions(info, cc.List[0], false)
 	}
-	if s := equalsSentinel(info, sw.Tag, cc.List[0]); s != "" {
-		return []string{s}
+	if c, ok := equalsSentinel(info, sw.Tag, cc.List[0]); ok {
+		return []cond{c}
 	}
 	return nil
 }
 
 // commCondition names what a select case receives: the Done channel of a context.Context, or a
-// signal from a channel of os.Signal.
+// single value from a channel of os.Signal. A two-value receive (v, ok := <-ch) may report a
+// closed channel, so it names nothing.
 func commCondition(info *types.Info, comm ast.Stmt) string {
 	var x ast.Expr
 	switch s := comm.(type) {
 	case *ast.ExprStmt:
 		x = s.X
 	case *ast.AssignStmt:
-		if len(s.Rhs) == 1 {
+		if len(s.Rhs) == 1 && len(s.Lhs) == 1 {
 			x = s.Rhs[0]
 		}
 	}
@@ -269,33 +424,74 @@ func commCondition(info *types.Info, comm ast.Stmt) string {
 		}
 	}
 	if c, ok := types.Unalias(info.TypeOf(ch)).Underlying().(*types.Chan); ok && isSignal(c.Elem()) {
-		return "signal received"
+		return "receive from a channel of os.Signal"
 	}
 	return ""
 }
 
-// isContext reports whether t has the methods of context.Context; the method set decides, so a
-// type that embeds or implements it counts.
+// method returns the signature of the named method of t, or of *t when t is neither a pointer
+// nor an interface (an addressable value calls pointer methods too); nil when there is none.
+func method(t types.Type, name string) *types.Signature {
+	sets := []*types.MethodSet{types.NewMethodSet(t)}
+	if _, isPtr := t.Underlying().(*types.Pointer); !isPtr && !types.IsInterface(t) {
+		sets = append(sets, types.NewMethodSet(types.NewPointer(t)))
+	}
+	for _, ms := range sets {
+		for i := 0; i < ms.Len(); i++ {
+			if ms.At(i).Obj().Name() == name {
+				s, _ := ms.At(i).Obj().Type().(*types.Signature)
+				return s
+			}
+		}
+	}
+	return nil
+}
+
+// isContext reports whether t implements context.Context, checked by the full signatures of its
+// methods: Deadline() (time.Time, bool), Done() <-chan struct{}, Err() error, Value(any) any.
+// context.Context itself, an alias of it and a type embedding it count; methods that only share
+// the names do not.
 func isContext(t types.Type) bool {
 	if t == nil {
 		return false
 	}
-	ms := types.NewMethodSet(t)
-	for _, name := range []string{"Deadline", "Done", "Err", "Value"} {
-		if lookupAny(ms, name) == nil {
-			return false
-		}
+	d, done, e, v := method(t, "Deadline"), method(t, "Done"), method(t, "Err"), method(t, "Value")
+	if d == nil || done == nil || e == nil || v == nil {
+		return false
 	}
-	return true
+	if d.Params().Len() != 0 || d.Results().Len() != 2 || !isNamed(d.Results().At(0).Type(), "time", "Time") || !isBasic(d.Results().At(1).Type(), types.Bool) {
+		return false
+	}
+	if done.Params().Len() != 0 || done.Results().Len() != 1 {
+		return false
+	}
+	ch, ok := types.Unalias(done.Results().At(0).Type()).(*types.Chan)
+	if !ok || ch.Dir() != types.RecvOnly {
+		return false
+	}
+	if st, ok := types.Unalias(ch.Elem()).(*types.Struct); !ok || st.NumFields() != 0 {
+		return false
+	}
+	if e.Params().Len() != 0 || e.Results().Len() != 1 || !facts.IsError(e.Results().At(0).Type()) {
+		return false
+	}
+	return v.Params().Len() == 1 && v.Results().Len() == 1 && !v.Variadic() &&
+		isEmptyIface(v.Params().At(0).Type()) && isEmptyIface(v.Results().At(0).Type())
 }
 
-func lookupAny(ms *types.MethodSet, name string) *types.Selection {
-	for i := 0; i < ms.Len(); i++ {
-		if ms.At(i).Obj().Name() == name {
-			return ms.At(i)
-		}
-	}
-	return nil
+func isNamed(t types.Type, pkg, name string) bool {
+	n, ok := types.Unalias(t).(*types.Named)
+	return ok && n.Obj().Pkg() != nil && n.Obj().Pkg().Path() == pkg && n.Obj().Name() == name
+}
+
+func isBasic(t types.Type, k types.BasicKind) bool {
+	b, ok := types.Unalias(t).(*types.Basic)
+	return ok && b.Kind() == k
+}
+
+func isEmptyIface(t types.Type) bool {
+	i, ok := types.Unalias(t).Underlying().(*types.Interface)
+	return ok && i.Empty()
 }
 
 // isSignal reports whether t is os.Signal or implements it: Signal() and String() string. The
@@ -305,21 +501,25 @@ func isSignal(t types.Type) bool {
 		return false
 	}
 	ms := types.NewMethodSet(t)
-	sig, str := lookupAny(ms, "Signal"), lookupAny(ms, "String")
-	if sig == nil || str == nil {
+	var s1, s2 *types.Signature
+	for i := 0; i < ms.Len(); i++ {
+		switch ms.At(i).Obj().Name() {
+		case "Signal":
+			s1, _ = ms.At(i).Obj().Type().(*types.Signature)
+		case "String":
+			s2, _ = ms.At(i).Obj().Type().(*types.Signature)
+		}
+	}
+	if s1 == nil || s2 == nil {
 		return false
 	}
-	s1 := sig.Obj().Type().(*types.Signature)
-	s2 := str.Obj().Type().(*types.Signature)
 	if s1.Params().Len() != 0 || s1.Results().Len() != 0 || s2.Params().Len() != 0 || s2.Results().Len() != 1 {
 		return false
 	}
-	b, ok := s2.Results().At(0).Type().(*types.Basic)
-	return ok && b.Kind() == types.String
+	return isBasic(s2.Results().At(0).Type(), types.String)
 }
 
-// takesSignal reports whether a call takes a signal among its arguments: trap.Bind(syscall.SIGINT,
-// func() {...}). A function literal passed to it is a signal handler.
+// takesSignal reports whether a call takes a signal value among its arguments.
 func takesSignal(info *types.Info, call *ast.CallExpr) bool {
 	for _, a := range call.Args {
 		if isSignal(info.TypeOf(a)) {
@@ -328,6 +528,3 @@ func takesSignal(info *types.Info, call *ast.CallExpr) bool {
 	}
 	return false
 }
-
-// joinFacts renders the branch facts as one fact.
-func joinFacts(fs []string) string { return strings.Join(fs, "; ") }

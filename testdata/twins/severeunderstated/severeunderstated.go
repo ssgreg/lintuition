@@ -60,6 +60,18 @@ func spoolDefect(path string) {
 	}
 }
 
+// Defect: the cancellation was checked, but the error is replaced before the log: the final flush
+// failed and its loss sits in the cancelled branch. No branch fact is sent for it.
+
+func drainDefect(err error, flush func() error) {
+	if errors.Is(err, context.Canceled) {
+		err = flush()
+		if err != nil {
+			slog.Info("final flush on cancel failed, the buffered entries are gone", "err", err) // want `unintended loss logged at info level`
+		}
+	}
+}
+
 // Negative: a requested deletion is routine progress.
 
 func purge(ids []string) {
