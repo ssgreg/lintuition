@@ -4,6 +4,13 @@
 
 - New linter `doc-vs-signature`: a doc comment that promises a returned result or error the
   function's signature does not have.
+- `normal-event-at-error` stops reading a structured failure as a routine event: in
+  `logger.Error("closing the listener", zap.Error(err))` the message only names the operation and
+  the error says it failed. It now sends whether the call logs a value of type error and what the
+  code checked about that error where it logs (not nil, `errors.Is(err, context.Canceled)`,
+  `err == io.EOF`, `os.IsNotExist(err)`). When the error is not one the code identified, a second
+  question asks whether the message only names an action; if it does, the line reports a failure
+  and is not a finding.
 
 ## v0.1.0 (2026-10-02)
 

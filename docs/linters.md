@@ -210,11 +210,27 @@ log.Error("cache miss, loading from the database")
 **Reads:** error and fatal level logs with a constant message. Messages that name a failure as a
 word ("failed", "cannot", "unable", "invalid") are skipped; "failover" and "failback" are asked about.
 
-**Sends:** the message.
+**Sends:** the message, whether the call logs a value of type error (a field such as
+`zap.Error(err)` or slog's `"err", err`, a printf argument, logrus `WithError`, zerolog `Err`), and
+what the code checked about that error where it logs, read through go/types from the enclosing
+branches: `err != nil` gives "not nil", `errors.Is(err, context.Canceled)` "is context.Canceled",
+`!errors.Is(err, net.ErrClosed)` "is not net.ErrClosed", also `err == io.EOF`, `os.IsNotExist(err)`,
+a switch case, and a guard that returns on the other case. In a structured log the message often
+only names the operation, `"closing the listener"`, and the error says that it failed; without the
+error the classifier reads such a message as routine. A check counts only for the very variable
+that is logged, only if nothing in between can assign it (an assignment, `&err`, a closure that
+sets it, a `goto`), and never across a function literal.
 
-**Asks:** whether the event is routine, a recoverable degradation, or a failure.
+**Asks:** whether the event is routine (including an operation that stopped on an error the code
+checked to be an expected one: a cancellation, a closed connection, the end of input), a
+recoverable degradation, or a failure. When the call carries an error the code did not identify
+(only `err != nil`, or `!errors.Is(...)`, or nothing), it also asks, about the message alone,
+whether it only names an action ("closing the listener") or says what happened ("cache miss",
+"retry scheduled").
 
-**Decides:** reports "routine". Threshold 0.9.
+**Decides:** an action named together with an error the code did not identify is how a structured
+log reports a failure, so it is clean when "action" is at 0.7 or above, whatever the first answer.
+Otherwise it reports "routine" at threshold 0.9.
 
 ### severe-event-understated
 
