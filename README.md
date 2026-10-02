@@ -72,6 +72,9 @@ Findings are review hints with their evidence, not proofs.
 go install github.com/ssgreg/lintuition/cmd/lintuition@latest
 ```
 
+Or download a binary for Linux, macOS or Windows from the
+[releases page](https://github.com/ssgreg/lintuition/releases).
+
 See the output without a model, on the showcase with scripted answers:
 
 ```sh
