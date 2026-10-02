@@ -253,8 +253,10 @@ coverage limit, chosen on purpose: a destructive instruction logged at debug or 
 it, the function the program calls right after the log call (`Store.Drop`, `os.RemoveAll`), so a
 warning followed by the deletion it names reads as the program's own step. That fact is sent only
 when the next statement is a call, an assignment or return of one call, or an if whose init is one,
-and the call's receiver and arguments call nothing; it is left out after a fatal or panic log and
-for anything that runs maybe, later or never (a branch, a func literal, `defer`, `go`, `&&`).
+and evaluating the call's receiver and arguments cannot fail or block first: names, constants,
+`&name` and selectors that dereference no pointer, but no calls, indexes, `*p`, receives or
+arithmetic. It is left out after a fatal or panic log and for anything that runs maybe, later or
+never (a branch, a func literal, `defer`, `go`, `&&`).
 
 **Asks two questions:** whether the text gives destructive advice, safe advice, names an action the
 program itself is doing or must do, or gives no advice; and whether it says what would be lost or

@@ -22,6 +22,7 @@ package destructiveadvice
 import (
 	"fmt"
 	"go/ast"
+	"go/token"
 	"go/types"
 	"regexp"
 
@@ -137,8 +138,11 @@ func candidate(pass *analysis.Pass, call *ast.CallExpr, stack []ast.Node) *sdk.C
 //   - the next statement is not a call, an assignment or return of exactly one call, or an if
 //     statement whose init is one (a call in a branch, a stored func literal, a defer or go, a
 //     short-circuited operand runs maybe, later, or never);
-//   - the call's receiver or arguments make calls of their own, which Go evaluates first and which
-//     may not return (DeletePath(MustConfirm()), MustStore().Drop());
+//   - evaluating the call's receiver or arguments may fail or block before the call: a call of
+//     their own (DeletePath(MustConfirm()), MustStore().Drop()), an index, a dereference (an
+//     explicit *p, or a field or value method reached through a pointer), a receive, arithmetic.
+//     Names, constants, &name and selectors with no dereference on the way are evaluated safely;
+//     a nil receiver or interface that the call itself fails on still counts as the call;
 //   - the callee does not resolve statically, or is a log call.
 func nextCall(pass *analysis.Pass, level string, stack []ast.Node) (string, bool) {
 	if level == facts.LevelFatal || level == facts.LevelPanic || len(stack) < 3 {
@@ -169,11 +173,11 @@ func nextCall(pass *analysis.Pass, level string, stack []ast.Node) (string, bool
 		next = is.Init
 	}
 	call, ok := soleCall(next)
-	if !ok || !plainCallee(call.Fun) {
+	if !ok || !safeCallee(pass.TypesInfo, call.Fun) {
 		return "", false
 	}
 	for _, a := range call.Args {
-		if makesCall(a) {
+		if !safeOperand(pass.TypesInfo, a) {
 			return "", false
 		}
 	}
@@ -216,33 +220,82 @@ func soleCall(s ast.Stmt) (*ast.CallExpr, bool) {
 	return call, ok
 }
 
-// plainCallee reports whether a call's function is a name or a chain of selectors on a name,
-// os.RemoveAll or s.store.Drop, so evaluating it calls nothing.
-func plainCallee(e ast.Expr) bool {
-	for {
-		switch x := ast.Unparen(e).(type) {
-		case *ast.Ident:
-			return true
-		case *ast.SelectorExpr:
-			e = x.X
-		default:
-			return false
-		}
+// safeCallee reports whether evaluating a call's function value cannot fail: a name, a package
+// member, or a method or field reached from a name with no pointer dereferenced on the way
+// (s.Drop on a *store, h.cfg.Drop on a value h). A nil receiver or interface the call itself then
+// fails on counts as the call; a dereference before it does not.
+func safeCallee(info *types.Info, e ast.Expr) bool {
+	switch x := ast.Unparen(e).(type) {
+	case *ast.Ident:
+		return true
+	case *ast.SelectorExpr:
+		return safeSelector(info, x)
 	}
+	return false
 }
 
-// makesCall reports whether evaluating e may call a function: any call or conversion in it, a
-// func literal included.
-func makesCall(e ast.Expr) bool {
-	found := false
-	ast.Inspect(e, func(n ast.Node) bool {
-		switch n.(type) {
-		case *ast.CallExpr, *ast.FuncLit:
-			found = true
-		}
-		return !found
-	})
-	return found
+// safeOperand reports whether evaluating an argument can neither fail nor block: a constant, a
+// name, &name, or a selector as in safeCallee. An index, a dereference, a receive, arithmetic, a
+// call or a literal are not.
+func safeOperand(info *types.Info, e ast.Expr) bool {
+	e = ast.Unparen(e)
+	if tv, ok := info.Types[e]; ok && tv.Value != nil {
+		return true
+	}
+	switch x := e.(type) {
+	case *ast.Ident:
+		return true
+	case *ast.SelectorExpr:
+		return safeSelector(info, x)
+	case *ast.UnaryExpr:
+		_, isIdent := ast.Unparen(x.X).(*ast.Ident)
+		return x.Op == token.AND && isIdent
+	}
+	return false
+}
+
+// safeSelector reports whether x.f evaluates without dereferencing a pointer: a package member, or
+// a field or method selected without indirection from an operand that is itself safe.
+func safeSelector(info *types.Info, x *ast.SelectorExpr) bool {
+	sel, ok := info.Selections[x]
+	if !ok {
+		return isPackageName(info, x.X) // pkg.Name
+	}
+	if sel.Kind() == types.MethodExpr {
+		return false
+	}
+	if derefs(sel) {
+		return false
+	}
+	switch r := ast.Unparen(x.X).(type) {
+	case *ast.Ident:
+		return true
+	case *ast.SelectorExpr:
+		return safeSelector(info, r)
+	}
+	return false
+}
+
+// derefs reports whether selecting sel dereferences a pointer. Selection.Indirect also reports true
+// for a method with a pointer receiver called on a pointer, which dereferences nothing, so a direct
+// method (not promoted through an embedded field) is judged by its receiver: only a value method
+// called on a pointer dereferences it.
+func derefs(sel *types.Selection) bool {
+	if sel.Kind() != types.MethodVal || len(sel.Index()) != 1 {
+		return sel.Indirect()
+	}
+	_, onPtr := sel.Recv().Underlying().(*types.Pointer)
+	_, ptrRecv := sel.Obj().Type().(*types.Signature).Recv().Type().(*types.Pointer)
+	return onPtr && !ptrRecv
+}
+
+func isPackageName(info *types.Info, e ast.Expr) bool {
+	id, ok := ast.Unparen(e).(*ast.Ident)
+	if !ok {
+		return false
+	}
+	_, ok = info.Uses[id].(*types.PkgName)
+	return ok
 }
 
 // funcName is Type.Method for a method of a named type, pkg.Func for a package function, and the

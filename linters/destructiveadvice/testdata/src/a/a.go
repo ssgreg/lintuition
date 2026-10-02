@@ -244,7 +244,7 @@ func c45(ctx context.Context, l *logf.Logger, s *store) (int, error) {
 }
 
 func c46(ctx context.Context, l *logf.Logger, h *holder) error {
-	l.Warn(ctx, "the cache entries are stale and get dropped") // 46 candidate: return of a call through a field chain
+	l.Warn(ctx, "the cache entries are stale and get dropped") // 46 candidate: a receiver through a pointer field may be nil, no next call
 	return (h.s.Drop("x"))
 }
 
@@ -279,4 +279,87 @@ func c51(ctx context.Context, l *logf.Logger, s *store) {
 	l.Warn(ctx, "erase the build cache")             // 51 candidate: the next statement starts with another log call
 	l.Error(ctx, "and again", logf.String("k", "v")) // 51 candidate: the log after it does get the call
 	_ = s.Drop("x")
+}
+
+func dropPath(p string) error    { return nil }
+func dropPtr(p *string) error    { return nil }
+func dropN(n int) error          { return nil }
+func (v valueStore) Drop() error { return nil }
+
+type valueStore struct{}
+
+type box struct {
+	s    *store
+	v    valueStore
+	name string
+}
+
+var defaultPath = "/tmp/x"
+
+const prefix = "/tmp/"
+
+func c52(ctx context.Context, l *logf.Logger, paths []string, i int) {
+	l.Warn(ctx, "erase the build cache") // 52 candidate: an index argument may panic first
+	_ = dropPath(paths[i])
+}
+
+func c53(ctx context.Context, l *logf.Logger, p *string) {
+	l.Warn(ctx, "erase the build cache") // 53 candidate: a dereferenced argument may panic first
+	_ = dropPath(*p)
+}
+
+func c54(ctx context.Context, l *logf.Logger, ch <-chan string) {
+	l.Warn(ctx, "erase the build cache") // 54 candidate: a receive argument may block first
+	_ = dropPath(<-ch)
+}
+
+func c55(ctx context.Context, l *logf.Logger, b *box) {
+	l.Warn(ctx, "erase the build cache") // 55 candidate: the receiver is reached through a pointer that may be nil
+	_ = b.s.Drop("x")
+}
+
+func c56(ctx context.Context, l *logf.Logger, b *box) {
+	l.Warn(ctx, "erase the build cache") // 56 candidate: an argument field through a pointer
+	_ = dropPath(b.name)
+}
+
+func c57(ctx context.Context, l *logf.Logger, v *valueStore) {
+	l.Warn(ctx, "erase the build cache") // 57 candidate: a value method through a pointer dereferences it first
+	_ = v.Drop()
+}
+
+func c58(ctx context.Context, l *logf.Logger, a, b int) {
+	l.Warn(ctx, "erase the build cache") // 58 candidate: arithmetic in an argument may panic first
+	_ = dropN(a / b)
+}
+
+func c59(ctx context.Context, l *logf.Logger, s *store) {
+	l.Warn(ctx, "erase the build cache") // 59 candidate: a method expression
+	_ = (*store).Drop(s, "x")
+}
+
+func c60(ctx context.Context, l *logf.Logger) {
+	l.Warn(ctx, "the cache entries are stale and get dropped") // 60 candidate: a constant expression argument
+	_ = dropPath(prefix + "cache")
+}
+
+func c61(ctx context.Context, l *logf.Logger, p string) {
+	l.Warn(ctx, "the cache entries are stale and get dropped") // 61 candidate: &name
+	_ = dropPtr(&p)
+}
+
+func c62(ctx context.Context, l *logf.Logger) {
+	l.Warn(ctx, "the cache entries are stale and get dropped") // 62 candidate: a package variable argument
+	_ = dropPath(defaultPath)
+}
+
+func c63(ctx context.Context, l *logf.Logger, b box) {
+	l.Warn(ctx, "the cache entries are stale and get dropped") // 63 candidate: fields of a value, no pointer on the way
+	_ = b.v.Drop()
+	_ = dropPath(b.name)
+}
+
+func c64(ctx context.Context, l *logf.Logger, b box) {
+	l.Warn(ctx, "the cache entries are stale and get dropped") // 64 candidate: a pointer field used as the receiver of a pointer method
+	_ = b.s.Drop(b.name)
 }
