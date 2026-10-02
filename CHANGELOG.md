@@ -4,6 +4,8 @@
 
 - New linter `doc-vs-signature`: a doc comment that promises a returned result or error the
   function's signature does not have.
+- New linter `read-only-promise`: a doc comment that promises a function changes nothing while its
+  body writes the receiver, a parameter or a package-level variable.
 
 ## v0.1.0 (2026-10-02)
 
