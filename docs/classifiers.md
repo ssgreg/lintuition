@@ -60,9 +60,9 @@ code.
 | `openai` (Ollama, local) | qwen2.5:7b | 1/6 | 0 | 16 | 4 s | local |
 | `openai` (Ollama, local) | qwen2.5:3b | 0/6 | 0 | 16 | 2 s | local |
 
-On the [showcase](../examples/showcase) (all 15 linters, 16 marked findings), `jev-latest` caught
-every finding in each of 3 runs with no unmarked findings, at 99 requests and ~$0.0018 for the three
-runs (2026-10-02).
+On the [showcase](../examples/showcase) (all 16 linters, 17 marked findings), `jev-latest` caught
+every finding in each of 3 runs with no unmarked findings, at 105 requests and ~$0.0019 for the
+three runs (2026-10-02).
 
 The small local models mostly answer "the text does not let you tell" or read "config saved to
 disk" as an operation that is starting; the rules then abstain or stay quiet rather than report

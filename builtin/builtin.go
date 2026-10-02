@@ -8,6 +8,7 @@ import (
 	_ "github.com/ssgreg/lintuition/classifiers/jev"
 	_ "github.com/ssgreg/lintuition/classifiers/openai"
 	_ "github.com/ssgreg/lintuition/linters/destructiveadvice"
+	_ "github.com/ssgreg/lintuition/linters/docsignature"
 	_ "github.com/ssgreg/lintuition/linters/docvstable"
 	_ "github.com/ssgreg/lintuition/linters/enumcomment"
 	_ "github.com/ssgreg/lintuition/linters/errorneedstype"

@@ -62,7 +62,7 @@ func TestUnquoteRejectsUnbalancedQuote(t *testing.T) {
 - **Unsure means quiet.** Below a linter's confidence threshold it stays silent whichever way the
   answer leans. Code it cannot read, like a message built at run time, is counted as unsupported in
   the summary instead of being guessed at.
-- **Measured cost, with a budget.** On the [showcase](examples/showcase), Jev caught all 16 marked
+- **Measured cost, with a budget.** On the [showcase](examples/showcase), Jev caught all 17 marked
   findings in each of 3 runs for about $0.0006 a run
   ([measured 2026-10-02](docs/classifiers.md#how-the-backends-compare)).
   `semantic.budget.max-cost-usd` stops new requests once reported spending reaches the limit;
@@ -159,6 +159,7 @@ How each one reads your code, what it sends and how it decides, with an example:
 | | `error-needs-type` | policy, off by default: a branchable condition (not found, already exists) returned as a plain string error |
 | units, comments | `human-unit-contradiction` | a printf message names a different unit than the duration it prints |
 | | `enum-comment-shift` | a comment in a const block that describes a neighbouring constant |
+| | `doc-vs-signature` | a doc that promises a result or an error the function's signature does not have |
 | tests | `test-name-vs-assertion` | a test named for a failure that asserts success, or the reverse |
 | | `table-case-vs-expectation` | a table case whose name says the opposite of its boolean `want` |
 | | `doc-vs-table` | a table case whose `want` contradicts the tested function's doc |
