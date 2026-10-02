@@ -4,6 +4,12 @@
 
 - New linter `doc-vs-signature`: a doc comment that promises a returned result or error the
   function's signature does not have.
+- `suppression-rationale` (version 3) compares a reason that names a gosec, staticcheck or revive
+  rule (`G304`, `SA1019`, `var-naming:`) with that rule's own title from the linter's
+  documentation, asks whether the reason argues about the reported thing rather than whether it
+  mentions it, and abstains below 0.9 instead of 0.8. A reason naming several rules or a rule it
+  does not know is unsupported. On 25 repositories its 19 findings were all reasons that answer
+  their rule, most of them by saying where a path or a command comes from; now there is one.
 
 ## v0.1.0 (2026-10-02)
 
