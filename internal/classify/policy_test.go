@@ -2,6 +2,7 @@ package classify
 
 import (
 	"errors"
+	"math"
 	"strings"
 	"testing"
 
@@ -63,27 +64,61 @@ func TestCheck(t *testing.T) {
 }
 
 func TestCheckChoiceMass(t *testing.T) {
-	// Three options with unclear: up to 1.015 is rounding, more is a contradiction.
-	qs := []sdk.Question{{ID: "k", Kind: sdk.Choice, Text: "?", Options: []sdk.Option{{Key: "a"}, {Key: "b"}}}}
+	// Two-decimal rounding: each positive entry may be up to 0.005 above its true value, so the
+	// sum may exceed 1 by 0.005 per positive entry and no more.
+	qs := []sdk.Question{{ID: "k", Kind: sdk.Choice, Text: "?", Options: []sdk.Option{{Key: "a"}, {Key: "b"}, {Key: "c"}, {Key: "d"}}}}
 	for _, tc := range []struct {
-		ps map[string]float64
-		ok bool
+		ps   map[string]float64
+		ok   bool
+		want map[string]float64 // what Check returns, when it differs from ps
 	}{
-		{map[string]float64{"a": 0.6, "b": 0.4}, true},
-		{map[string]float64{"a": 0.6, "b": 0.3, "unclear": 0.1}, true},
-		{map[string]float64{"a": 0.6}, true},
-		{nil, true},
-		{map[string]float64{"a": 0.34, "b": 0.34, "unclear": 0.335}, true},
-		{map[string]float64{"a": 0.6, "b": 0.42}, false},
-		{map[string]float64{"a": 0.6, "b": 0.4, "unclear": 0.5}, false},
-		{map[string]float64{"a": 1, "b": 1}, false},
+		{map[string]float64{"a": 0.6, "b": 0.4}, true, nil},
+		{map[string]float64{"a": 0.6, "b": 0.3, "unclear": 0.1}, true, nil},
+		{map[string]float64{"a": 0.6}, true, nil},
+		{map[string]float64{"a": 0.6, "b": 0.2}, true, nil},
+		{nil, true, nil},
+		// At the bound: three positive entries, 1.015, the true values may add up to exactly 1.
+		{map[string]float64{"a": 0.34, "b": 0.34, "c": 0.335, "d": 0}, true, map[string]float64{"a": 0.34 / 1.015, "b": 0.34 / 1.015, "c": 0.335 / 1.015, "d": 0}},
+		{map[string]float64{"a": 0.43, "b": 0.42, "c": 0.16}, true, map[string]float64{"a": 0.43 / 1.01, "b": 0.42 / 1.01, "c": 0.16 / 1.01}},
+		// Just past it: 1.02 over three positive entries; the zeros do not widen the allowance.
+		{map[string]float64{"a": 0.43, "b": 0.42, "c": 0.17, "d": 0, "unclear": 0}, false, nil},
+		{map[string]float64{"a": 0.34, "b": 0.34, "c": 0.336}, false, nil},
+		{map[string]float64{"a": 0.6, "b": 0.42}, false, nil},
+		{map[string]float64{"a": 0.6, "b": 0.4, "unclear": 0.5}, false, nil},
+		{map[string]float64{"a": 1, "b": 1}, false, nil},
 	} {
-		_, err := Check(qs, sdk.Response{Answers: []sdk.Answer{{QuestionID: "k", Choice: "a", Probabilities: tc.ps}}})
+		in := map[string]float64{}
+		for k, v := range tc.ps {
+			in[k] = v
+		}
+		got, err := Check(qs, sdk.Response{Answers: []sdk.Answer{{QuestionID: "k", Choice: "a", Probabilities: tc.ps}}})
 		if (err == nil) != tc.ok {
 			t.Errorf("%v: got %v", tc.ps, err)
+			continue
 		}
-		if err != nil && !strings.Contains(err.Error(), "more than 1") {
-			t.Errorf("%v: %v", tc.ps, err)
+		if err != nil {
+			if !strings.Contains(err.Error(), "more than rounding explains") {
+				t.Errorf("%v: %v", tc.ps, err)
+			}
+			continue
+		}
+		want := tc.want
+		if want == nil {
+			want = in
+		}
+		gp := got["k"].Probabilities
+		if len(gp) != len(want) {
+			t.Errorf("%v: returned %v", tc.ps, gp)
+		}
+		for k, v := range want {
+			if math.Abs(gp[k]-v) > 1e-12 {
+				t.Errorf("%v: %s returned %v, want %v", tc.ps, k, gp[k], v)
+			}
+		}
+		for k, v := range in {
+			if tc.ps[k] != v {
+				t.Errorf("%v: Check changed the caller's map", tc.ps)
+			}
 		}
 	}
 }

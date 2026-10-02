@@ -68,7 +68,8 @@ func State(p sdk.Payload, policy string) (map[string]any, error) {
 }
 
 // Check validates a response against the questions it answers and returns the answers by question ID.
-// A missing, duplicate, unknown or out-of-domain answer is an error, never a guess.
+// A missing, duplicate, unknown or out-of-domain answer is an error, never a guess. A choice whose
+// probabilities add up to more than 1 within rounding is returned normalized to 1.
 func Check(qs []sdk.Question, resp sdk.Response) (map[string]sdk.Answer, error) {
 	byID := map[string]sdk.Question{}
 	for _, q := range qs {
@@ -86,7 +87,7 @@ func Check(qs []sdk.Question, resp sdk.Response) (map[string]sdk.Answer, error) 
 		if err := checkAnswer(q, a); err != nil {
 			return nil, fmt.Errorf("question %q: %w", q.ID, err)
 		}
-		out[a.QuestionID] = a
+		out[a.QuestionID] = normalized(a)
 	}
 	for _, q := range qs {
 		if _, ok := out[q.ID]; !ok {
@@ -99,6 +100,25 @@ func Check(qs []sdk.Question, resp sdk.Response) (map[string]sdk.Answer, error) 
 // roundingPerOption is how far above its true value one reported option probability may be: a
 // backend that rounds to two decimals is off by up to 0.005.
 const roundingPerOption = 0.005
+
+// normalized returns a with its option probabilities divided by their sum when rounding put the sum
+// above 1, so a rule that adds options never counts the excess as confidence. A sum of 1 or less is
+// left as it is: missing mass is not handed to any option. The caller's map is not changed.
+func normalized(a sdk.Answer) sdk.Answer {
+	sum := 0.0
+	for _, p := range a.Probabilities {
+		sum += p
+	}
+	if sum <= 1 {
+		return a
+	}
+	ps := make(map[string]float64, len(a.Probabilities))
+	for k, p := range a.Probabilities {
+		ps[k] = p / sum
+	}
+	a.Probabilities = ps
+	return a
+}
 
 func checkAnswer(q sdk.Question, a sdk.Answer) error {
 	prob := func(p float64) bool { return !math.IsNaN(p) && p >= 0 && p <= 1 }
@@ -117,7 +137,7 @@ func checkAnswer(q sdk.Question, a sdk.Answer) error {
 		if !domain[a.Choice] {
 			return errors.New("the choice is not one of the options")
 		}
-		sum := 0.0
+		sum, positive := 0.0, 0
 		for k, p := range a.Probabilities {
 			if !domain[k] {
 				return errors.New("a probability for an option that was not offered")
@@ -126,13 +146,17 @@ func checkAnswer(q sdk.Question, a sdk.Answer) error {
 				return errors.New("an option probability is outside [0, 1]")
 			}
 			sum += p
+			if p > 0 {
+				positive++
+			}
 		}
-		// The options are mutually exclusive, so their probabilities add up to at most 1, give or
-		// take rounding of each one; more is a contradictory distribution that a rule adding
-		// options together would read as confidence. Less is allowed: a backend may report part of
-		// the mass.
-		if limit := 1 + roundingPerOption*float64(len(domain)) + 1e-9; sum > limit {
-			return fmt.Errorf("the option probabilities add up to %.3f, more than 1", sum)
+		// The options are mutually exclusive, so their true probabilities add up to at most 1. A
+		// reported value is at most roundingPerOption above its true value, and a reported 0 is not
+		// above it at all, so the least the true values can add up to is sum - roundingPerOption
+		// for each positive entry. More than 1 even then is a contradiction, not rounding. Less than
+		// 1 is allowed: a backend may report part of the mass.
+		if sum-roundingPerOption*float64(positive) > 1+1e-9 {
+			return fmt.Errorf("the option probabilities add up to %.3f, more than rounding explains", sum)
 		}
 	case sdk.Noul:
 		if a.Yes == nil || a.Choice != "" || a.Score != nil || len(a.Probabilities) > 0 {

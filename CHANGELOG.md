@@ -9,8 +9,9 @@
   program's own action, and counts its three non-destructive answers together. On 25 repositories
   its 35 findings were all a program announcing its own deletion ("purge temp files" right before
   purging them).
-- Answers to a choice question whose probabilities add up to more than 1 (beyond 0.005 per option
-  of rounding) are rejected as invalid, for every linter and backend.
+- Answers to a choice question whose probabilities add up to more than 1, beyond what rounding to
+  two decimals explains (0.005 per positive entry), are rejected as invalid, for every linter and
+  backend; a sum just above 1 within that rounding is normalized to 1 before rules decide.
 
 ## v0.1.0 (2026-10-02)
 
