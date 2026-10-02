@@ -70,13 +70,12 @@ func TestUnquoteRejectsUnbalancedQuote(t *testing.T) {
 - **Unsure means quiet.** Below a linter's confidence threshold it stays silent whichever way the
   answer leans. Code it cannot read, like a message built at run time, is counted as unsupported in
   the summary instead of being guessed at.
-- **Measured cost, with a budget.** On the showcase, Jev caught all 17 marked findings in each of 3
-  runs for about $0.0006 a run ([measured 2026-10-02](docs/classifiers.md#how-the-backends-compare)).
-  On an [earlier six-case suite](docs/classifiers.md#how-the-backends-compare), both Jev and Claude
-  Code haiku caught all six defects. Jev took about a second at an estimated $0.0003 a run; Claude
-  Code haiku took 66 seconds and reported about $0.13. `semantic.budget.max-cost-usd` stops new requests once reported spending reaches the limit;
-  requests already in flight can take the total above it, and everything found so far is
-  still reported. Valid cached answers are reused on the next run.
+- **Measured cost, with a budget.** On an
+  [earlier six-case suite](docs/classifiers.md#how-the-backends-compare), both Jev and Claude Code
+  haiku caught all six defects. Jev took about a second at an estimated $0.0003 a run; Claude Code
+  haiku took 66 seconds and reported about $0.13. `semantic.budget.max-cost-usd` stops new requests
+  once reported spending reaches the limit; requests already in flight can take the total above it,
+  and everything found so far is still reported. Valid cached answers are reused on the next run.
 
 Findings are review hints with their evidence, not proofs.
 
