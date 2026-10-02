@@ -28,6 +28,7 @@ import (
 	"math"
 	"net/http"
 	"os"
+	"regexp"
 	"strconv"
 	"strings"
 
@@ -40,6 +41,8 @@ const (
 	DefaultBaseURL = "https://api.openai.com/v1"
 	DefaultKeyEnv  = "OPENAI_API_KEY"
 )
+
+var effortRE = regexp.MustCompile(`^[a-z]+$`)
 
 // Settings configure the backend.
 type Settings struct {
@@ -64,6 +67,10 @@ type Settings struct {
 	PricePerMTok *float64 `yaml:"price-per-mtok"`
 	// Account scopes the answer cache; by default a one-way hash of the API key does.
 	Account string `yaml:"account"`
+	// ReasoningEffort is sent as reasoning_effort when set. A model that thinks before it answers
+	// spends its single answer token on the thinking (or on a channel token) and fails every
+	// request; "none" turns that off on Ollama and on OpenAI-compatible servers that support it.
+	ReasoningEffort string `yaml:"reasoning-effort"`
 }
 
 func init() {
@@ -82,6 +89,7 @@ type Classifier struct {
 	keyEnv  string
 	account string
 	temp    float64
+	effort  string
 	minMass float64
 	price   float64
 	hc      *httpx.Client
@@ -122,6 +130,12 @@ func New(s Settings, getenv func(string) string) (*Classifier, error) {
 			return nil, err
 		}
 	}
+	if s.ReasoningEffort != "" {
+		if !effortRE.MatchString(s.ReasoningEffort) {
+			return nil, fmt.Errorf("reasoning-effort %q: must be a lower-case word such as none, low, medium or high", s.ReasoningEffort)
+		}
+		c.effort = s.ReasoningEffort
+	}
 	if s.PricePerMTok != nil {
 		if c.price, err = finite("price-per-mtok", s.PricePerMTok, 0, math.MaxFloat64); err != nil {
 			return nil, err
@@ -149,7 +163,7 @@ func (c *Classifier) Identity() string {
 		sum := sha256.Sum256([]byte("lintuition-cache-scope\x00" + c.key))
 		acct = "key:" + hex.EncodeToString(sum[:8])
 	}
-	return fmt.Sprintf("openai/%s|%s|%s|%s|t=%g|mass=%g", adapterVersion, c.hc.Endpoint(), c.model, acct, c.temp, c.minMass)
+	return fmt.Sprintf("openai/%s|%s|%s|%s|t=%g|mass=%g|effort=%s", adapterVersion, c.hc.Endpoint(), c.model, acct, c.temp, c.minMass, c.effort)
 }
 
 // Model is the public model identity for report evidence.
@@ -177,6 +191,8 @@ type completionRequest struct {
 	MaxTokens   int       `json:"max_tokens"`
 	Logprobs    bool      `json:"logprobs"`
 	TopLogprobs int       `json:"top_logprobs"`
+	// ReasoningEffort is omitted unless configured: not every server accepts it.
+	ReasoningEffort string `json:"reasoning_effort,omitempty"`
 }
 
 // letters labels the options of a question; for a score they are the level digits.
@@ -226,7 +242,7 @@ func (c *Classifier) body(state map[string]any, q sdk.Question) ([]byte, error) 
 		b.WriteString("letter.")
 	}
 	return json.Marshal(completionRequest{
-		Model: c.model, Temperature: c.temp, MaxTokens: 1, Logprobs: true, TopLogprobs: 20,
+		Model: c.model, Temperature: c.temp, MaxTokens: 1, Logprobs: true, TopLogprobs: 20, ReasoningEffort: c.effort,
 		Messages: []message{{"system", system}, {"user", b.String()}},
 	})
 }
@@ -345,7 +361,11 @@ func (c *Classifier) answer(q sdk.Question, cr completionResponse) (sdk.Answer, 
 		return sdk.Answer{}, errors.New("the response's token probabilities add up to more than 1")
 	}
 	if total <= 0 || total < c.minMass {
-		return sdk.Answer{}, fmt.Errorf("the model put %.2f of its first token on the options, under min-letter-mass %.2f", total, c.minMass)
+		hint := ""
+		if c.effort == "" {
+			hint = "; a model that thinks first needs reasoning-effort: none"
+		}
+		return sdk.Answer{}, fmt.Errorf("the model put %.2f of its first token on the options, under min-letter-mass %.2f%s", total, c.minMass, hint)
 	}
 	for i := range mass {
 		mass[i] /= total
