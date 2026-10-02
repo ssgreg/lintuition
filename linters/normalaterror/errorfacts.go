@@ -151,11 +151,16 @@ func assigns(info *types.Info, v *types.Var, nodes ...ast.Node) bool {
 //   - an earlier if of the same block, without else, whose body always leaves (return, panic,
 //     break, continue) leaves the rest of the block under its negation;
 //   - a case of a switch without a tag holds its single condition, and a case of a switch on v
-//     its single value, unless the case before it falls through.
+//     its single value, unless the case before it falls through (empty statements after the
+//     fallthrough do not hide it).
 //
 // && splits a condition that holds, || one that does not. A check counts only if nothing in the
 // region it covers assigns v; the first region that does ends the list, since what was checked
-// outside it may no longer hold. The walk stops at the enclosing function: a condition around a
+// outside it may no longer hold. A check other than nil / not nil also depends on the error's
+// state and the compared variable, so it is dropped when the region writes a field, an element,
+// a pointer target or a package-level variable (w.cause = x, ErrStopped = io.EOF). A call that
+// changes that state is not seen: the checks are what the code tested on the way to the log, and
+// the fact is described that way. The walk stops at the enclosing function: a condition around a
 // function literal says nothing about when the literal runs.
 func errorChecks(info *types.Info, v *types.Var, stack []ast.Node) []string {
 	var out []string
@@ -198,7 +203,11 @@ func errorChecks(info *types.Info, v *types.Var, stack []ast.Node) []string {
 				return out
 			}
 			if i >= 3 {
-				add(caseChecks(info, v, p, stack[i-2], stack[i-3]))
+				cs := caseChecks(info, v, p, stack[i-2], stack[i-3])
+				if writesShared(info, p) {
+					cs = bindingOnly(cs)
+				}
+				add(cs)
 			}
 		case *ast.IfStmt:
 			var cs []string
@@ -212,6 +221,9 @@ func errorChecks(info *types.Info, v *types.Var, stack []ast.Node) []string {
 			}
 			if assigns(info, v, child) {
 				return out
+			}
+			if writesShared(info, child) {
+				cs = bindingOnly(cs)
 			}
 			add(cs)
 		}
@@ -254,7 +266,11 @@ func guards(info *types.Info, v *types.Var, list []ast.Stmt, child ast.Node) (ou
 		if assigns(info, v, region...) {
 			return out, false
 		}
-		out = append(out, conditions(info, v, ifs.Cond, true)...)
+		cs := conditions(info, v, ifs.Cond, true)
+		if writesShared(info, region...) {
+			cs = bindingOnly(cs)
+		}
+		out = append(out, cs...)
 	}
 	return out, true
 }
@@ -412,11 +428,8 @@ func caseChecks(info *types.Info, v *types.Var, cc *ast.CaseClause, body, sw ast
 		if c != cc || i == 0 {
 			continue
 		}
-		prev := s.Body.List[i-1].(*ast.CaseClause).Body
-		if len(prev) > 0 {
-			if b, ok := prev[len(prev)-1].(*ast.BranchStmt); ok && b.Tok == token.FALLTHROUGH {
-				return nil
-			}
+		if b, ok := lastStmt(s.Body.List[i-1].(*ast.CaseClause).Body).(*ast.BranchStmt); ok && b.Tok == token.FALLTHROUGH {
+			return nil
 		}
 	}
 	if s.Tag == nil {
@@ -429,4 +442,76 @@ func caseChecks(info *types.Info, v *types.Var, cc *ast.CaseClause, body, sw ast
 		return []string{c}
 	}
 	return nil
+}
+
+// lastStmt returns the last statement of a list that is not empty: "fallthrough; ;" ends in
+// fallthrough.
+func lastStmt(list []ast.Stmt) ast.Stmt {
+	for i := len(list) - 1; i >= 0; i-- {
+		if _, empty := list[i].(*ast.EmptyStmt); !empty {
+			return list[i]
+		}
+	}
+	return nil
+}
+
+// bindingOnly keeps the checks that depend only on which value v holds: "nil" and "not nil". The
+// others (errors.Is, ==, os.IsNotExist) also depend on the state the error reaches and on the
+// variable it was compared with, which a write in the region can change.
+func bindingOnly(checks []string) []string {
+	var out []string
+	for _, c := range checks {
+		if c == "nil" || c == "not nil" {
+			out = append(out, c)
+		}
+	}
+	return out
+}
+
+// writesShared reports whether the nodes write anything other than a local variable: a field
+// (w.cause = x), an element, a pointer target, a package-level variable (ErrStopped = io.EOF).
+// Such a write can change what errors.Is or == would answer for the logged error, so a check of
+// that kind does not survive it. A call that writes the same state is not seen; the check is then
+// what the code tested on the way to the log, which is what the fact says.
+func writesShared(info *types.Info, nodes ...ast.Node) bool {
+	found := false
+	shared := func(e ast.Expr) bool {
+		id, ok := ast.Unparen(e).(*ast.Ident)
+		if !ok {
+			return true
+		}
+		if id.Name == "_" {
+			return false
+		}
+		obj := info.Uses[id]
+		if obj == nil {
+			obj = info.Defs[id]
+		}
+		v, ok := obj.(*types.Var)
+		return !ok || v.Pkg() == nil || v.Parent() == v.Pkg().Scope()
+	}
+	for _, n := range nodes {
+		ast.Inspect(n, func(n ast.Node) bool {
+			switch n := n.(type) {
+			case *ast.AssignStmt:
+				if n.Tok != token.DEFINE {
+					for _, l := range n.Lhs {
+						if shared(l) {
+							found = true
+						}
+					}
+				}
+			case *ast.IncDecStmt:
+				if shared(n.X) {
+					found = true
+				}
+			case *ast.RangeStmt:
+				if n.Tok == token.ASSIGN && ((n.Key != nil && shared(n.Key)) || (n.Value != nil && shared(n.Value))) {
+					found = true
+				}
+			}
+			return !found
+		})
+	}
+	return found
 }

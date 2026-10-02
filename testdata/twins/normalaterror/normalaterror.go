@@ -117,6 +117,24 @@ func replay(next func() error) {
 	}
 }
 
+// Defect: the poller logs the cancellation it was stopped with, by name, at error level.
+
+func pollerDefect(stop <-chan struct{}) {
+	<-stop
+	slog.Error("shutting down the feed poller", "err", context.Canceled) // want `routine event logged at error level`
+}
+
+// Negative: a long chain of expected errors ruled out; what is left is a real failure. The
+// checks sent are cut to a few, so the request stays within the payload policy.
+
+func tail(read func() error) {
+	if err := read(); err != nil && !errors.Is(err, context.Canceled) && !errors.Is(err, context.DeadlineExceeded) &&
+		!errors.Is(err, io.EOF) && !errors.Is(err, io.ErrUnexpectedEOF) && !errors.Is(err, io.ErrClosedPipe) &&
+		!errors.Is(err, net.ErrClosed) && !errors.Is(err, io.ErrShortBuffer) {
+		slog.Error("tailing the access log", "err", err)
+	}
+}
+
 // Negative: a degradation is a fair thing to report at error level.
 
 func quota(err error) {

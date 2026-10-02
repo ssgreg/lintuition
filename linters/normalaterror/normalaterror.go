@@ -108,36 +108,61 @@ func candidate(pass *analysis.Pass, call *ast.CallExpr, stack []ast.Node) *sdk.C
 	if len(errs) == 0 {
 		return c
 	}
+	if len(errs) == 1 {
+		if name := sentinel(pass.TypesInfo, errs[0]); name != "" && facts.FactSafe(name) {
+			// slog.Error("...", "err", context.Canceled): the logged value is that variable's, read
+			// at the call.
+			c.Payload.Fact("error", name)
+			c.Local["error"] = errorIdentified
+			return c
+		}
+	}
 	c.Payload.Fact("error", "attached")
-	c.Local["error"] = errorUnidentified
+	c.Local["error"] = errorUnproven
 	if v := checkedVar(pass.TypesInfo, errs, outermostBody(stack)); v != nil {
 		cs := errorChecks(pass.TypesInfo, v, stack)
+		if len(cs) > maxChecks {
+			cs = cs[:maxChecks]
+		}
 		if len(cs) > 0 {
-			c.Payload.Fact("error_check", strings.Join(cs, ", "))
+			c.Payload.Fact("error_check", cs)
 		}
-		if identifies(cs) {
-			c.Local["error"] = errorIdentified
-		}
+		c.Local["error"] = errorState(cs)
 	}
 	return c
 }
 
-// What the code knows about the error a log call carries, in Local["error"]: identified when it
-// checked which error it is (errors.Is(err, context.Canceled), err == io.EOF, os.IsNotExist(err)),
-// unidentified when it did not, which includes a check that only says what the error is not.
+// maxChecks bounds the checks sent, nearest first: a long chain of !errors.Is exclusions says no
+// more after a few.
+const maxChecks = 6
+
+// What the code knows about the error a log call carries, in Local["error"]:
+//   - identified: it checked which error it is (errors.Is(err, context.Canceled), err == io.EOF,
+//     os.IsNotExist(err)), or it logs a package-level error by name;
+//   - nil: it checked that the error is nil;
+//   - failed: it checked that the error is not nil, and not which one it is;
+//   - unproven: neither, including a check that only says what the error is not.
 const (
-	errorIdentified   = "identified"
-	errorUnidentified = "unidentified"
+	errorIdentified = "identified"
+	errorNil        = "nil"
+	errorFailed     = "failed"
+	errorUnproven   = "unproven"
 )
 
-// identifies reports whether one of the checks says which error it is, not only which it is not.
-func identifies(checks []string) bool {
+// errorState reads the state from the checks.
+func errorState(checks []string) string {
+	state := errorUnproven
 	for _, c := range checks {
-		if (strings.HasPrefix(c, "is ") && !strings.HasPrefix(c, "is not ")) || strings.HasPrefix(c, "os.Is") {
-			return true
+		switch {
+		case c == "nil":
+			return errorNil
+		case (strings.HasPrefix(c, "is ") && !strings.HasPrefix(c, "is not ")) || strings.HasPrefix(c, "os.Is"):
+			state = errorIdentified
+		case c == "not nil" && state == errorUnproven:
+			state = errorFailed
 		}
 	}
-	return false
+	return state
 }
 
 // outermostBody returns the body of the outermost function on the stack, nil at package level.
@@ -184,15 +209,16 @@ func namesFailure(message string) bool {
 type rule struct{ threshold float64 }
 
 // operationOnly is the probability of "action" on the operation question from which a message is
-// read as only naming an operation. At or above it, an error the code did not identify is the news
-// of the log line: it reports that the operation failed, whatever the event question says. It is
-// lower than the report threshold because it can only make a candidate clean.
+// read as only naming an operation. At or above it, an error the code checked is set and did not
+// single out is taken as the news of the log line, and the candidate is clean whatever the event
+// question says; with an error not shown to be set it abstains. Clean is not free: a routine event
+// worded as an action is missed, and the bar is set below the report threshold knowing that.
 const operationOnly = 0.7
 
 var eventQuestion = sdk.Question{
 	ID:   "event",
 	Kind: sdk.Choice,
-	Text: "What does the event logged by `message` mean? `error`, when present, says that the log call carries a value of type error along with the message; `error_check`, when present, names what the code checked about that error where it logs: that it is not nil, or that it is or is not a particular error (such as \"is context.Canceled\", \"is not net.ErrClosed\" or \"os.IsNotExist\").",
+	Text: "What does the event logged by `message` mean? `error`, when present, says that the log call carries a value of type error along with the message: \"attached\", or the name of the package-level error it logs, such as \"context.Canceled\"; `error_check`, when present, lists, nearest first, the checks the code made on that error on the way to the log call: that it is nil or not nil, or that it is or is not a particular error (such as \"is context.Canceled\", \"is not net.ErrClosed\" or \"os.IsNotExist\").",
 	Options: []sdk.Option{
 		{Key: "routine", Description: "An expected routine event the program handles as designed: a cache miss, a retry scheduled, a client that went away, or an operation that stopped for an expected reason the code checked for, such as a cancellation, a closed connection or the end of input (context.Canceled, net.ErrClosed, io.EOF)."},
 		{Key: "degradation", Description: "A recoverable degradation."},
@@ -210,23 +236,31 @@ var operationQuestion = sdk.Question{
 	},
 }
 
-// Questions asks what the event means; for a call that carries an error the code did not identify,
+// Questions asks what the event means; for a call that carries an error the code did not identify
+// and did not find nil,
 // it also asks whether the message only names an action or says what happened. The second
 // question reads the message alone.
 func (r *rule) Questions(c *sdk.Candidate) []sdk.Question {
-	if c.Local["error"] == errorUnidentified {
+	if e := c.Local["error"]; e == errorFailed || e == errorUnproven {
 		return []sdk.Question{eventQuestion, operationQuestion}
 	}
 	return []sdk.Question{eventQuestion}
 }
 
 func (r *rule) Decide(c *sdk.Candidate, answers map[string]sdk.Answer) sdk.Decision {
-	if c.Local["error"] == errorUnidentified {
-		// "closing the listener" with an error the code did not identify: the message says what
-		// was being done and the error says that it failed. That is how a structured log reports a
-		// failure, so it is not a routine event whatever the message alone reads like.
-		if p, ok := answers["operation"].Probability("action"); ok && p >= operationOnly {
+	if p, ok := answers["operation"].Probability("action"); ok && p >= operationOnly {
+		switch c.Local["error"] {
+		case errorFailed:
+			// "closing the listener" with an error the code checked is not nil and did not single
+			// out: the message says what was being done and the error that it did not work. This
+			// is how a structured log usually reports a failure, so it is taken as one, whatever
+			// the message alone reads like. It is a trade-off: a routine event worded as an action
+			// with an unexpected error attached is missed.
 			return sdk.Clean()
+		case errorUnproven:
+			// The same, but nothing shows the error is not nil: the line may report no failure at
+			// all, and the message alone is not enough to call it routine.
+			return sdk.Abstain("the message names an action and carries an error the code did not show to be set")
 		}
 	}
 	a := answers["event"]

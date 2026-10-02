@@ -367,3 +367,94 @@ func c58(l *zap.Logger, err error, read func() (int, error)) {
 	}
 	_ = n
 }
+
+type wrapper struct{ cause error }
+
+func (w *wrapper) Error() string { return "wrapped" }
+func (w *wrapper) Unwrap() error { return w.cause }
+
+func c61(l *zap.Logger) {
+	w := &wrapper{cause: context.Canceled}
+	var err error = w
+	if errors.Is(err, context.Canceled) {
+		w.cause = io.ErrUnexpectedEOF
+		l.Error("streaming rows", zap.Error(err)) // 61 candidate: the wrapped cause is rewritten, errors.Is is not kept
+	}
+}
+
+func c62(l *zap.Logger) {
+	var err error = &wrapper{cause: context.Canceled}
+	if errors.Is(err, context.Canceled) {
+		l.Error("streaming columns", zap.Error(err)) // 62 candidate: nothing is rewritten, errors.Is is kept
+	}
+}
+
+var errStopped = errors.New("stopped")
+
+func c63(l *zap.Logger, err error) {
+	if err == errStopped {
+		errStopped = io.EOF
+		l.Error("handling stop", zap.Error(err)) // 63 candidate: the sentinel is rewritten, == is not kept
+	}
+}
+
+type stats struct{ seen int }
+
+func c64(l *zap.Logger, s *stats, err error) {
+	if err != nil {
+		s.seen++
+		l.Error("counting frames", zap.Error(err)) // 64 candidate: a field write keeps not nil, which depends on err alone
+	}
+}
+
+func c65(l *zap.Logger, err error) {
+	n := 1
+	if errors.Is(err, io.EOF) {
+		n = 0
+		l.Error("draining input", zap.Error(err)) // 65 candidate: a local write keeps errors.Is
+	}
+	_ = n
+}
+
+func c66() {
+	slog.Error("closing the listener", "err", context.Canceled) // 66 candidate: a package-level error logged by name
+}
+
+func c67() {
+	slog.Error("closing the listener", "err", errors.New("x")) // 67 candidate: a new error, neither named nor checked
+}
+
+func c68(err error) {
+	if err == nil {
+		slog.Error("config reload", "err", err) // 68 candidate: known nil
+	}
+}
+
+func c69(err error) {
+	if err != nil && !errors.Is(err, context.DeadlineExceeded) && !errors.Is(err, context.Canceled) &&
+		!errors.Is(err, io.ErrUnexpectedEOF) && !errors.Is(err, io.ErrClosedPipe) && !errors.Is(err, io.ErrShortBuffer) &&
+		!errors.Is(err, io.ErrShortWrite) {
+		slog.Error("reading stream", "err", err) // 69 candidate: a long chain is cut to six and still passes the policy
+	}
+}
+
+var frames int
+
+func c70(l *zap.Logger, err error) {
+	if err == nil {
+		return
+	}
+	if errors.Is(err, io.EOF) {
+		return
+	}
+	frames++
+	l.Error("decoding frame", zap.Error(err)) // 70 candidate: a package write after the guards drops is not, keeps not nil
+}
+
+func c71(l *zap.Logger, w *wrapper) {
+	var err error = w
+	if errors.Is(err, io.EOF) {
+		defer func() { w.cause = nil }()
+		l.Error("deferred rewrite", zap.Error(err)) // 71 candidate: a write in a literal in the region counts too
+	}
+}
