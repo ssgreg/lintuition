@@ -162,5 +162,5 @@ func readNew(path string) []byte {
 // whole, and it answers the file mode.
 
 func writeGolden(path string, b []byte) {
-	_ = os.WriteFile(path, b, 0o644) //nolint:gosec // the G304.golden fixture is meant to be readable by every test
+	_ = os.WriteFile(path, b, 0o644) //nolint:gosec // the G304.golden fixture gets world-readable file permissions so every test can read it
 }
