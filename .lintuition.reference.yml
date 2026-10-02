@@ -56,6 +56,9 @@ linters:
     destructive-remediation:
       # Minimum probability that a text advises a destructive step. Default: 0.85.
       threshold: 0.85
+    read-only-promise:
+      # Minimum probability of yes for a finding, and of no for a clean answer. Default: 0.75.
+      threshold: 0.75
     sentinel-name-vs-text:
       # Minimum probability of the answer either way. Default: 0.55.
       threshold: 0.55

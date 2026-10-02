@@ -407,6 +407,50 @@ A doc that says only "returns" about something the function sends on a channel o
 wording finding rather than a stale contract: the doc is wrong about how the values reach the caller,
 and the fix is the verb. A doc that names the delivery ("returns them through ch") is clean.
 
+### read-only-promise
+
+**Finds:** a doc that promises the function changes nothing, or leaves its receiver or a parameter
+alone, while the body writes it.
+
+```go
+// Peek returns the next job without altering the queue.     <- it advances q.head
+func (q *Queue) Peek() string { q.head++; return q.items[q.head-1] }
+```
+
+**Reads:** documented functions and methods, and the writes in their bodies that the caller can
+see. A write counts when the written place is reached from the receiver, a parameter or a
+package-level variable through something the caller shares: a pointer (`q.head` on `q *Queue`), a
+map or slice element (`xs[i]`, `c.m[k]`), `delete`, `clear`, `copy` into it, or a `sync/atomic`
+store. Not counted:
+
+- a field of a struct received by value (`v.n = 1` on `v V` changes the function's own copy);
+- assigning the parameter itself (`xs = append(xs, x)`);
+- a place saved to a local and assigned back (`old := s.result; ...; s.result = old`);
+- writes through a local alias (`p := q; p.head = 1`) or inside a callee, which are not followed.
+
+Every documented function with at least one such write is asked; there is no filter on the doc's
+words, because no-change promises take too many forms ("is left as it was", "does not reorder").
+
+**Sends:** the doc, with the function's own name masked, and a description of each written root
+built from identifiers: "the receiver q, a Queue", "the parameter names, a slice", "package-level
+state, the variable calls".
+
+**Asks:** one yes/no question per written root: does the doc promise to leave it unchanged? "Changes
+nothing", "read-only", "pure" and "no side effects" cover every root. A promise about something
+else, one that holds only in some cases ("on failure it leaves the queue unchanged"), or a
+description of what the function does change, does not.
+
+**Decides:** reports at 0.75 or above, clean at 0.25 or below, abstains in between (setting
+`threshold`). The threshold is lower than the other promise linters' because docs that plainly
+promise no change scored 0.77 to 0.95 on the measured sets; it is tuned on them.
+
+**Unsupported:** a function whose only writes are inside a function literal: when the literal runs
+is not known.
+
+A getter that fills a cache (`if c.lflags == nil { c.lflags = ... }`) under a doc that says it does
+not modify the receiver is reported: it does write the receiver, which also makes it unsafe to call
+concurrently.
+
 ---
 
 ## Tests

@@ -31,3 +31,14 @@ func readSmall(p string) []byte {
 }
 
 var _ = time.Second
+
+// Queue is a queue of jobs.
+type Queue struct {
+	head  int
+	items []string
+}
+
+// read-only-promise: the peek advances the queue it promises not to touch.
+
+// Peek returns the next job without altering the queue.
+func (q *Queue) Peek() string { q.head++; return q.items[q.head-1] } // want `doc of Peek promises to leave q unchanged, but Peek writes q.head`
