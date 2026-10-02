@@ -162,10 +162,121 @@ func c31(ctx context.Context, l *logf.Logger, d dropper) {
 }
 
 func c32(ctx context.Context, l *logf.Logger, s *store) {
-	l.Warn(ctx, "drop the old shard") // 32 candidate: a call inside a func literal
+	l.Warn(ctx, "drop the old shard") // 32 candidate: a go statement runs its call later, no next call
 	go func() { _ = s.Drop("old") }()
 }
 
 func c33(ctx context.Context, l *logf.Logger) {
 	l.Warn(ctx, msg) // 33 unsupported: a warn message that is not constant
+}
+
+func mustStore() *store           { return nil }
+func mustName() string            { return "" }
+func removeAll()                  {}
+func confirmed() bool             { return true }
+func (*store) Load() (int, error) { return 0, nil }
+
+type holder struct{ s *store }
+
+func c34(ctx context.Context, l *logf.Logger) {
+	l.Warn(ctx, "erase the build cache") // 34 candidate: a stored func literal is not called
+	cleanup := func() { removeAll() }
+	_ = cleanup
+}
+
+func c35(ctx context.Context, l *logf.Logger, k bool) {
+	l.Warn(ctx, "erase the build cache") // 35 candidate: a call in a branch may not run
+	if k {
+		removeAll()
+	}
+}
+
+func c36(ctx context.Context, l *logf.Logger, k bool) {
+	l.Warn(ctx, "erase the build cache") // 36 candidate: a short-circuited operand may not run
+	_ = k && confirmed()
+}
+
+func c37(ctx context.Context, l *logf.Logger) {
+	l.Warn(ctx, "erase the build cache") // 37 candidate: a deferred call runs later
+	defer removeAll()
+}
+
+func c38() {
+	log.Fatal("erase the build cache and start over") // 38 candidate: fatal exits before the next statement
+	removeAll()
+}
+
+func c39() {
+	log.Panic("erase the build cache and start over") // 39 candidate: panic leaves before the next statement
+	removeAll()
+}
+
+func c40(ctx context.Context, l *logf.Logger, s *store) {
+	l.Warn(ctx, "erase the build cache") // 40 candidate: an argument is called first
+	_ = s.Drop(mustName())
+}
+
+func c41(ctx context.Context, l *logf.Logger) {
+	l.Warn(ctx, "erase the build cache") // 41 candidate: the receiver is made by a call first
+	_ = mustStore().Drop("x")
+}
+
+func c42(ctx context.Context, l *logf.Logger, s *store) {
+	l.Warn(ctx, "erase the build cache") // 42 candidate: a func literal argument
+	_ = s.Drop(func() string { return "x" }())
+}
+
+func c43(ctx context.Context, l *logf.Logger, s *store, b []byte) {
+	l.Warn(ctx, "erase the build cache") // 43 candidate: a conversion in an argument is a call expression too
+	_ = s.Drop(string(b))
+}
+
+func c44(ctx context.Context, l *logf.Logger, h *holder, err error) {
+	l.Warn(ctx, "erase the build cache") // 44 candidate: assigning to a field evaluates its operand first
+	h.s, err = nil, h.s.Drop("x")
+	_ = err
+}
+
+func c45(ctx context.Context, l *logf.Logger, s *store) (int, error) {
+	l.Warn(ctx, "the cache entries are stale and get dropped") // 45 candidate: x, err := call
+	n, err := s.Load()
+	return n, err
+}
+
+func c46(ctx context.Context, l *logf.Logger, h *holder) error {
+	l.Warn(ctx, "the cache entries are stale and get dropped") // 46 candidate: return of a call through a field chain
+	return (h.s.Drop("x"))
+}
+
+func c47(ctx context.Context, l *logf.Logger, s *store) {
+	l.Warn(ctx, "erase the build cache") // 47 candidate: a call in an if condition, no init
+	if s.Drop("x") != nil {
+		return
+	}
+}
+
+func c48(ctx context.Context, l *logf.Logger, ch <-chan bool) {
+	select {
+	case <-ch:
+		l.Warn(ctx, "the cache entries are stale and get dropped") // 48 candidate: in a select clause
+		removeAll()
+	default:
+	}
+}
+
+func c49(ctx context.Context, l *logf.Logger, k bool) {
+	if k {
+		l.Warn(ctx, "erase the build cache") // 49 candidate: last in its block, the outer call is not borrowed
+	}
+	removeAll()
+}
+
+func c50(ctx context.Context, l *logf.Logger) {
+	l.Info(ctx, "operator: erase the build cache by hand and restart") // 50 none: explicit advice at info is out of scope by design
+}
+
+func c51(ctx context.Context, l *logf.Logger, s *store) {
+	l.Warn(ctx, "erase the build cache")             // 51 candidate: the next statement starts with another log call
+	l.Error(ctx, "and again", logf.String("k", "v")) // 51 candidate: the log after it does get the call
+	_ = s.Drop("x")
 }

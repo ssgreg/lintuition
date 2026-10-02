@@ -5,15 +5,15 @@
 //
 // Code finds error constructors (errors.New, fmt.Errorf, pkg/errors) and log calls at warn level
 // and above or without a level, resolved through go/types, with a constant text of at least one
-// word, and asks about every one. Debug and info logs are not read: there the program narrates its
-// own steps ("purge temp files" right before purging them), and an imperative there is a report of
-// the program's action, not an instruction to a person. There is no keyword prefilter: "format the
+// word, and asks about every one. Debug and info logs are not read, to cut the false positives of a
+// program narrating its own steps ("purge temp files" right before purging them); a destructive
+// instruction at those levels is a coverage limit. There is no keyword prefilter: "format the
 // data volume", "overwrite the database" and "run mkfs" advise destruction in words no list
 // anticipates, and a missed text looks checked. The cost is a request per constant message;
 // semantic.budget bounds it.
 //
-// The classifier reads the text, the log level, and the function the program calls in the
-// statement right after a log call, when there is one, so that a warning followed by the deletion
+// The classifier reads the text, the log level, and the function the program certainly calls right
+// after a log call, when code can establish it, so that a warning followed by the deletion
 // it names reads as the program's own step. It is asked whether the text advises the reader or
 // names the program's own action, and separately whether it says what would be lost or how to
 // preserve it first.
@@ -122,19 +122,26 @@ func candidate(pass *analysis.Pass, call *ast.CallExpr, stack []ast.Node) *sdk.C
 	c.Payload.Fact("kind", kind)
 	if level != "" {
 		c.Payload.Fact("level", level)
-		if next, ok := nextCall(pass, stack); ok {
+		if next, ok := nextCall(pass, level, stack); ok {
 			c.Payload.Fact("next_call", next)
 		}
 	}
 	return c
 }
 
-// nextCall names the function the statement after the log call's statement calls first, skipping
-// log calls: "Client.DeleteVM" for a method, "os.RemoveAll" for a function. It is false when the
-// log call is not a statement of its own, is the last one in its block, or the next statement
-// calls nothing that resolves statically.
-func nextCall(pass *analysis.Pass, stack []ast.Node) (string, bool) {
-	if len(stack) < 3 {
+// nextCall names the function the statement after the log call's statement certainly calls
+// first: "Store.Drop" for a method, "os.RemoveAll" for a function. It is false, and the fact is
+// left out, whenever that is not established:
+//   - the log call terminates (fatal, panic), is not a statement of its own (defer, go), or is the
+//     last statement of its block;
+//   - the next statement is not a call, an assignment or return of exactly one call, or an if
+//     statement whose init is one (a call in a branch, a stored func literal, a defer or go, a
+//     short-circuited operand runs maybe, later, or never);
+//   - the call's receiver or arguments make calls of their own, which Go evaluates first and which
+//     may not return (DeletePath(MustConfirm()), MustStore().Drop());
+//   - the callee does not resolve statically, or is a log call.
+func nextCall(pass *analysis.Pass, level string, stack []ast.Node) (string, bool) {
+	if level == facts.LevelFatal || level == facts.LevelPanic || len(stack) < 3 {
 		return "", false
 	}
 	es, ok := stack[len(stack)-2].(*ast.ExprStmt)
@@ -158,31 +165,84 @@ func nextCall(pass *analysis.Pass, stack []ast.Node) (string, bool) {
 			next = list[i+1]
 		}
 	}
-	if next == nil {
+	if is, ok := next.(*ast.IfStmt); ok {
+		next = is.Init
+	}
+	call, ok := soleCall(next)
+	if !ok || !plainCallee(call.Fun) {
 		return "", false
 	}
-	var name string
-	ast.Inspect(next, func(n ast.Node) bool {
-		if name != "" {
-			return false
+	for _, a := range call.Args {
+		if makesCall(a) {
+			return "", false
 		}
-		call, ok := n.(*ast.CallExpr)
-		if !ok {
+	}
+	if _, isLog := facts.AsLogCall(pass.TypesInfo, call); isLog {
+		return "", false
+	}
+	fn := facts.Callee(pass.TypesInfo, call)
+	if fn == nil {
+		return "", false
+	}
+	name := funcName(fn)
+	return name, facts.FactSafe(name)
+}
+
+// soleCall returns the call a statement is made of: f(), x = f(), x, err := f(), return f().
+func soleCall(s ast.Stmt) (*ast.CallExpr, bool) {
+	var e ast.Expr
+	switch s := s.(type) {
+	case *ast.ExprStmt:
+		e = s.X
+	case *ast.AssignStmt:
+		if len(s.Rhs) != 1 {
+			return nil, false
+		}
+		for _, l := range s.Lhs {
+			if _, ok := ast.Unparen(l).(*ast.Ident); !ok {
+				return nil, false // x.f = g() and m[k] = g() evaluate operands first
+			}
+		}
+		e = s.Rhs[0]
+	case *ast.ReturnStmt:
+		if len(s.Results) != 1 {
+			return nil, false
+		}
+		e = s.Results[0]
+	default:
+		return nil, false
+	}
+	call, ok := ast.Unparen(e).(*ast.CallExpr)
+	return call, ok
+}
+
+// plainCallee reports whether a call's function is a name or a chain of selectors on a name,
+// os.RemoveAll or s.store.Drop, so evaluating it calls nothing.
+func plainCallee(e ast.Expr) bool {
+	for {
+		switch x := ast.Unparen(e).(type) {
+		case *ast.Ident:
 			return true
-		}
-		if _, isLog := facts.AsLogCall(pass.TypesInfo, call); isLog {
+		case *ast.SelectorExpr:
+			e = x.X
+		default:
 			return false
 		}
-		if fn := facts.Callee(pass.TypesInfo, call); fn != nil {
-			name = funcName(fn)
-			return false
-		}
-		return true
-	})
-	if name == "" || !facts.FactSafe(name) {
-		return "", false
 	}
-	return name, true
+}
+
+// makesCall reports whether evaluating e may call a function: any call or conversion in it, a
+// func literal included.
+func makesCall(e ast.Expr) bool {
+	found := false
+	ast.Inspect(e, func(n ast.Node) bool {
+		switch n.(type) {
+		case *ast.CallExpr, *ast.FuncLit:
+			found = true
+		}
+		return !found
+	})
+	return found
 }
 
 // funcName is Type.Method for a method of a named type, pkg.Func for a package function, and the

@@ -245,13 +245,16 @@ return errors.New("state is corrupted, delete the data directory and restart")
 ```
 
 **Reads:** constant texts of error constructors, and of log calls at warn, error, fatal or panic
-level or with no level (`log.Printf`). Debug and info logs are left out: there a program narrates its
-own steps, and "purge temp files" logged right before the purge is a report of what it does, not an
-instruction to a person. Real advice to an operator sits in an error or a warning.
+level or with no level (`log.Printf`). Debug and info logs are left out to cut the false positives
+of a program narrating its own steps ("purge temp files" logged right before the purge). That is a
+coverage limit, chosen on purpose: a destructive instruction logged at debug or info is not read.
 
-**Sends:** the text, the kind (error or log message), the log level, and for a log call that is a
-statement of its own, the function the next statement calls (`Store.Drop`, `os.RemoveAll`), so a
-warning followed by the deletion it names reads as the program's own step.
+**Sends:** the text, the kind (error or log message), the log level, and, when code can establish
+it, the function the program calls right after the log call (`Store.Drop`, `os.RemoveAll`), so a
+warning followed by the deletion it names reads as the program's own step. That fact is sent only
+when the next statement is a call, an assignment or return of one call, or an if whose init is one,
+and the call's receiver and arguments call nothing; it is left out after a fatal or panic log and
+for anything that runs maybe, later or never (a branch, a func literal, `defer`, `go`, `&&`).
 
 **Asks two questions:** whether the text gives destructive advice, safe advice, names an action the
 program itself is doing or must do, or gives no advice; and whether it says what would be lost or

@@ -1,10 +1,14 @@
 package destructiveadvice
 
 import (
+	"context"
 	"fmt"
 	"go/ast"
 	"go/parser"
 	"go/token"
+	"io"
+	"net/http"
+	"net/http/httptest"
 	"os"
 	"path/filepath"
 	"sort"
@@ -13,6 +17,8 @@ import (
 
 	"golang.org/x/tools/go/analysis/analysistest"
 
+	"github.com/ssgreg/lintuition/classifiers/jev"
+	"github.com/ssgreg/lintuition/internal/classify"
 	"github.com/ssgreg/lintuition/sdk"
 )
 
@@ -42,7 +48,10 @@ func TestExtraction(t *testing.T) {
 	for _, r := range res {
 		cs = append(cs, r.Result.([]*sdk.Candidate)...)
 	}
-	sort.Slice(cs, func(i, j int) bool { return num(caseNo(t, cs[i].Pos)) < num(caseNo(t, cs[j].Pos)) })
+	sort.Slice(cs, func(i, j int) bool {
+		a, b := num(caseNo(t, cs[i].Pos)), num(caseNo(t, cs[j].Pos))
+		return a < b || a == b && cs[i].Pos.Line < cs[j].Pos.Line
+	})
 	var got []string
 	for _, c := range cs {
 		n := caseNo(t, c.Pos)
@@ -90,8 +99,26 @@ func TestExtraction(t *testing.T) {
 		`29 error message "drop the index and rebuild it"`,
 		`30 log message "wipe the workspace" level=warn`,
 		`31 log message "all replicas must be dropped" level=warn next_call=dropper.DropAll`,
-		`32 log message "drop the old shard" level=warn next_call=store.Drop`,
+		`32 log message "drop the old shard" level=warn`,
 		`33 unsupported: the log message is not a constant string`,
+		`34 log message "erase the build cache" level=warn`,
+		`35 log message "erase the build cache" level=warn`,
+		`36 log message "erase the build cache" level=warn`,
+		`37 log message "erase the build cache" level=warn`,
+		`38 log message "erase the build cache and start over" level=fatal`,
+		`39 log message "erase the build cache and start over" level=panic`,
+		`40 log message "erase the build cache" level=warn`,
+		`41 log message "erase the build cache" level=warn`,
+		`42 log message "erase the build cache" level=warn`,
+		`43 log message "erase the build cache" level=warn`,
+		`44 log message "erase the build cache" level=warn`,
+		`45 log message "the cache entries are stale and get dropped" level=warn next_call=store.Load`,
+		`46 log message "the cache entries are stale and get dropped" level=warn next_call=store.Drop`,
+		`47 log message "erase the build cache" level=warn`,
+		`48 log message "the cache entries are stale and get dropped" level=warn next_call=a.removeAll`,
+		`49 log message "erase the build cache" level=warn`,
+		`51 log message "erase the build cache" level=warn`,
+		`51 log message "and again" level=error next_call=store.Drop`,
 	}
 	if strings.Join(got, "\n") != strings.Join(want, "\n") {
 		t.Fatalf("candidates:\n%s\n\nwant:\n%s", strings.Join(got, "\n"), strings.Join(want, "\n"))
@@ -231,5 +258,89 @@ func TestFixtureTextsCarryNoHints(t *testing.T) {
 			}
 			return true
 		})
+	}
+}
+
+// TestJevDistributionMass runs Jev answers through the adapter and the shared validation into the
+// rule: an overfull distribution never reaches the clean sum, a valid split does.
+func TestJevDistributionMass(t *testing.T) {
+	for _, tc := range []struct {
+		name, advice string
+		valid, clean bool
+	}{
+		{"overfull, clean picked", `"choice":"safe_advice","probabilities":{"safe_advice":0.6,"own_action":0.4,"destructive_advice":0.5}`, false, false},
+		{"overfull, destructive mass hidden", `"choice":"safe_advice","probabilities":{"safe_advice":0.5,"own_action":0.4,"destructive_advice":0.9}`, false, false},
+		{"valid split", `"choice":"no_advice","probabilities":{"no_advice":0.59,"own_action":0.41,"destructive_advice":0,"safe_advice":0,"unclear":0}`, true, true},
+		{"partial, below the threshold", `"choice":"no_advice","probabilities":{"no_advice":0.6,"own_action":0.2}`, true, false},
+	} {
+		srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+			_, _ = io.WriteString(w, `{"answers":{"advice":{"type":"choice",`+tc.advice+`},"states_loss":{"type":"noul","noul":0.1}},"usage":{"input_tokens":1}}`)
+		}))
+		backend, err := jev.New(jev.Settings{Endpoint: srv.URL, Model: "stub"}, func(string) string { return "test-key" })
+		if err != nil {
+			t.Fatal(err)
+		}
+		r := &rule{threshold: 0.85}
+		c := &sdk.Candidate{Local: map[string]string{"text": "x"}}
+		qs := r.Questions(c)
+		resp, err := backend.Classify(context.Background(), sdk.Request{Questions: qs})
+		srv.Close()
+		if err != nil {
+			t.Fatalf("%s: %v", tc.name, err)
+		}
+		byID, err := classify.Check(qs, resp)
+		if (err == nil) != tc.valid {
+			t.Errorf("%s: validation %v", tc.name, err)
+			continue
+		}
+		if err != nil {
+			continue
+		}
+		d := r.Decide(c, byID)
+		if clean := !d.Report && d.Abstained == ""; clean != tc.clean || d.Report {
+			t.Errorf("%s: %+v", tc.name, d)
+		}
+	}
+}
+
+// TestDecideGrid walks every distribution over the five answers on a 0.05 grid, the classifier
+// picking its most probable option: a clean result never hides more than 0.15 of destructive mass,
+// and destructive advice at 0.85 or more with no stated loss is always reported.
+func TestDecideGrid(t *testing.T) {
+	r := &rule{threshold: 0.85}
+	keys := []string{"destructive_advice", "safe_advice", "own_action", "no_advice", "unclear"}
+	n := 0
+	var walk func(i, left int, v []int)
+	walk = func(i, left int, v []int) {
+		if i == len(keys)-1 {
+			v = append(v, left)
+			ps := map[string]float64{}
+			best := 0
+			for j, x := range v {
+				ps[keys[j]] = float64(x) / 20
+				if x > v[best] {
+					best = j
+				}
+			}
+			d := r.Decide(&sdk.Candidate{}, map[string]sdk.Answer{
+				"advice":      {QuestionID: "advice", Choice: keys[best], Probabilities: ps},
+				"states_loss": {QuestionID: "states_loss", Yes: f(0.1)},
+			})
+			if v[0] >= 17 && !d.Report {
+				t.Errorf("%v: destructive advice not reported: %+v", ps, d)
+			}
+			if !d.Report && d.Abstained == "" && v[0] > 3 {
+				t.Errorf("%v: clean with destructive mass %.2f", ps, ps["destructive_advice"])
+			}
+			n++
+			return
+		}
+		for x := 0; x <= left; x++ {
+			walk(i+1, left-x, append(v, x))
+		}
+	}
+	walk(0, 20, nil)
+	if n != 10626 {
+		t.Errorf("walked %d distributions", n)
 	}
 }
