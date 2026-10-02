@@ -244,18 +244,27 @@ does not say what will be lost.
 return errors.New("state is corrupted, delete the data directory and restart")
 ```
 
-**Reads:** constant texts of error constructors and log calls at any level.
+**Reads:** constant texts of error constructors, and of log calls at warn, error, fatal or panic
+level or with no level (`log.Printf`). Debug and info logs are left out: there a program narrates its
+own steps, and "purge temp files" logged right before the purge is a report of what it does, not an
+instruction to a person. Real advice to an operator sits in an error or a warning.
 
-**Sends:** the text.
+**Sends:** the text, the kind (error or log message), the log level, and for a log call that is a
+statement of its own, the function the next statement calls (`Store.Drop`, `os.RemoveAll`), so a
+warning followed by the deletion it names reads as the program's own step.
 
-**Asks two questions:** whether the text gives destructive advice, safe advice or no advice; and
-whether it says what would be lost or how to keep it.
+**Asks two questions:** whether the text gives destructive advice, safe advice, names an action the
+program itself is doing or must do, or gives no advice; and whether it says what would be lost or
+how to keep it.
 
 **Decides:** reports destructive advice (threshold 0.85) that says nothing about the loss (0.3 or
-below on the second question); abstains in between.
+below on the second question); abstains in between. Safe advice, the program's own action and no
+advice are one outcome: a text is clean when their probabilities together reach the threshold, so
+a text the classifier splits between "no advice" and "own action" is still clean.
 
-This one asks about every constant message, since a keyword filter missed "format" and "mkfs". It is
-the chattiest linter: cheap with Jev, noticeably dearer with an agent backend. Keep a money cap.
+This one asks about every constant message it reads, since a keyword filter missed "format" and
+"mkfs". It is the chattiest linter: cheap with Jev, noticeably dearer with an agent backend. Keep a
+money cap.
 
 ---
 

@@ -4,6 +4,11 @@
 
 - New linter `doc-vs-signature`: a doc comment that promises a returned result or error the
   function's signature does not have.
+- `destructive-remediation` (version 3) no longer reads debug and info logs, sends the log level
+  and the function called right after a log call, has an answer for a message that names the
+  program's own action, and counts its three non-destructive answers together. On 25 repositories
+  its 35 findings were all a program announcing its own deletion ("purge temp files" right before
+  purging them).
 
 ## v0.1.0 (2026-10-02)
 
