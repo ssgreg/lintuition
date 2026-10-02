@@ -13,6 +13,7 @@ import (
 
 	"golang.org/x/tools/go/analysis/analysistest"
 
+	"github.com/ssgreg/lintuition/internal/classify"
 	"github.com/ssgreg/lintuition/sdk"
 )
 
@@ -54,8 +55,16 @@ func TestExtraction(t *testing.T) {
 			t.Errorf("case %s: payload %+v", n, c.Payload)
 		}
 		line := fmt.Sprintf("%s %q call=%s expect=%s", n, c.Payload.Prose["test"], c.Payload.Facts["call"], c.Local["expect"])
-		if su := c.Payload.Facts["setup"]; su != "nothing" {
-			line += fmt.Sprintf(" setup=%q", su)
+		switch su := c.Payload.Facts["setup"]; su {
+		case "the test passes an error value to the call as an argument":
+			line += " error_argument"
+		case "no error argument observed":
+		default:
+			t.Errorf("case %s: setup %q", n, su)
+		}
+		// Every supported payload must pass the policy check the engine applies before sending.
+		if _, err := classify.State(c.Payload, classify.Prose); err != nil {
+			t.Errorf("case %s: %v", n, err)
 		}
 		if d := c.Payload.Prose["doc"]; d != "" {
 			line += fmt.Sprintf(" doc=%q", d)
@@ -103,13 +112,24 @@ func TestExtraction(t *testing.T) {
 		`42 unsupported: the error is checked in a form not read here`,
 		`43 "validate accepts documented" call=Validate expect=no_error doc="this test checks that a plain token passes; TestValidateAcceptsDocumentedToo\nis a different name and stays."`,
 		`44 "validate accepts spaced" call=Validate expect=no_error doc="Every mention is masked: see this test (this test)."`,
-		`45 "wrap nil error" call=Wrap expect=no_error setup="the test passes an error value to Wrap as an argument"`,
+		`45 "wrap nil error" call=Wrap expect=no_error error_argument`,
 		`46 "join nothing" call=Join expect=no_error`,
 		`47 "collect empty" call=Collect expect=no_error`,
-		`48 "store restore keeps cause" call=Restore expect=error setup="the test passes an error value to Restore as an argument"`,
+		`48 "store restore keeps cause" call=Restore expect=error error_argument`,
 		`49 "validate accepts undocumented" call=Validate expect=no_error`,
-		`50 "join one" call=Join expect=no_error setup="the test passes an error value to Join as an argument"`,
+		`50 "join one" call=Join expect=no_error error_argument`,
 		`51 "join spread" call=Join expect=no_error`,
+		`52 "store join through expression" call=Join expect=no_error`,
+		`53 "store join through expression one" call=Join expect=no_error error_argument`,
+		`54 "store join through expression spread" call=Join expect=no_error`,
+		`55 "store prefix through expression" call=Prefix expect=no_error`,
+		`56 "store prefix direct one" call=Prefix expect=no_error error_argument`,
+		`57 "unwrap explicit" call=Unwrap expect=no_error error_argument`,
+		`58 "unwrap inferred" call=Unwrap expect=error error_argument`,
+		`59 "consume forwarded" call=Consume expect=no_error error_argument`,
+		`60 "tally forwarded" call=Tally expect=no_error`,
+		`61 "alias nil error" call=Alias expect=no_error error_argument`,
+		`62 "wrap a very long function name that goes on and on and on until it is longer than any ordinary name would be nil error" call=WrapAVeryLongFunctionNameThatGoesOnAndOnAndOnUntilItIsLongerThanAnyOrdinaryNameWouldBe expect=no_error error_argument`,
 	}
 	if strings.Join(got, "\n") != strings.Join(want, "\n") {
 		t.Fatalf("candidates:\n%s\n\nwant:\n%s", strings.Join(got, "\n"), strings.Join(want, "\n"))

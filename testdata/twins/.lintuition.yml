@@ -117,6 +117,8 @@ semantic:
         - {linter: test-name-vs-assertion, question: name_says, when: "save survives a cache failure", choice: no_error, probability: 0.95}
         - {linter: test-name-vs-assertion, question: name_says, when: '"test":"save cache write failure"', choice: input_only, probability: 0.9}
         - {linter: test-name-vs-assertion, question: name_says, when: '"test":"wrap nil error"', choice: input_only, probability: 0.9}
+        - {linter: test-name-vs-assertion, question: name_says, when: "unquote rejects a single quote", choice: error, probability: 0.95}
+        - {linter: test-name-vs-assertion, question: name_says, when: "unquote accepts a bare word", choice: no_error, probability: 0.95}
         # doc-vs-table
         - {linter: doc-vs-table, question: condition, when: '"situation":"three days late', choice: met, probability: 0.95}
         - {linter: doc-vs-table, question: condition, when: '"situation":"a week before the date', choice: not_met, probability: 0.95}

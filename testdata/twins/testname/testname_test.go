@@ -117,3 +117,23 @@ func TestWrapNilError(t *testing.T) {
 		t.Fatal(got)
 	}
 }
+
+// Defect with a stale doc: the name promises a rejection and the check requires success; the doc
+// was left from the accepting version and agrees with the check, not with the name.
+
+// TestUnquoteRejectsASingleQuote checks that a word in single quotes is unquoted.
+func TestUnquoteRejectsASingleQuote(t *testing.T) { // want `test name expects an error from Unquote, but the test fails when Unquote returns one`
+	if _, err := Unquote(`'abc'`); err != nil {
+		t.Fatal(err)
+	}
+}
+
+// Defect with a stale doc, the reverse: the name says Unquote accepts, the check demands an error,
+// and the doc sides with the check.
+
+// TestUnquoteAcceptsABareWord checks that a word without quotes is refused.
+func TestUnquoteAcceptsABareWord(t *testing.T) { // want `test name expects Unquote to succeed, but the test fails when Unquote returns no error`
+	if _, err := Unquote("abc"); err == nil {
+		t.Fatal("no error")
+	}
+}

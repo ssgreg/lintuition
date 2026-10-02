@@ -182,9 +182,9 @@ func candidate(pass *analysis.Pass, fd *ast.FuncDecl) *sdk.Candidate {
 	c.Payload.AddProse("test", strings.Join(words, " "))
 	c.Payload.AddProse("doc", testDoc(fd))
 	c.Payload.Fact("call", fn.Name())
-	setup := "nothing"
+	setup := "no error argument observed"
 	if passesError(info, calls[fn][0]) {
-		setup = "the test passes an error value to " + fn.Name() + " as an argument"
+		setup = "the test passes an error value to the call as an argument"
 	}
 	c.Payload.Fact("setup", setup)
 	return c
@@ -199,20 +199,42 @@ func testDoc(fd *ast.FuncDecl) string {
 	return sdk.Mask(strings.TrimSpace(fd.Doc.Text()), fd.Name.Name, "this test")
 }
 
-// passesError reports whether the call hands an argument to a parameter of type error: then an
-// error in the test name, as in TestWrapNilError, may name the input rather than the result. A
-// variadic ...error counts for the arguments the call gives it one by one; a slice spread with
+// passesError reports whether the call hands a value to a parameter of type error: then an error
+// in the test name, as in TestWrapNilError, may name the input rather than the result. Arguments
+// are bound to the parameters of the call's own signature, so a method expression's receiver
+// (Store.Join(s)) takes the first parameter and a generic function's parameters are instantiated
+// (Wrap[error]). A sole call argument with several results (Consume(Pair())) supplies one value
+// per result. A variadic ...error counts for the values given one by one; a slice spread with
 // errs... is not an error value.
 func passesError(info *types.Info, call *ast.CallExpr) bool {
+	ft := info.TypeOf(call.Fun)
+	if ft == nil {
+		return false
+	}
+	sig, ok := ft.Underlying().(*types.Signature)
+	if !ok {
+		return false
+	}
+	var args []types.Type
+	for _, a := range call.Args {
+		args = append(args, info.TypeOf(a))
+	}
+	if len(call.Args) == 1 {
+		if tup, ok := args[0].(*types.Tuple); ok {
+			args = args[:0]
+			for i := range tup.Len() {
+				args = append(args, tup.At(i).Type())
+			}
+		}
+	}
 	errType := types.Universe.Lookup("error").Type()
-	sig := facts.Callee(info, call).Type().(*types.Signature)
 	n := sig.Params().Len()
-	for i := range call.Args {
+	for i := range args {
 		var t types.Type
 		switch {
 		case i < n-1 || (i == n-1 && !sig.Variadic()):
 			t = sig.Params().At(i).Type()
-		case sig.Variadic() && call.Ellipsis == token.NoPos:
+		case sig.Variadic() && i >= n-1 && call.Ellipsis == token.NoPos:
 			t = sig.Params().At(n - 1).Type().(*types.Slice).Elem()
 		default:
 			continue
@@ -629,7 +651,7 @@ func (r *rule) Questions(*sdk.Candidate) []sdk.Question {
 	return []sdk.Question{{
 		ID:   "name_says",
 		Kind: sdk.Choice,
-		Text: "Judging by the test name `test` and the test's doc comment `doc` (empty when it has none), should `call`, the call under test, return an error? `setup` lists what the test arranges before the call.",
+		Text: "Judging by the test name `test` and the test's doc comment `doc` (empty when it has none), should `call`, the call under test, return an error? `setup` says whether the test passes `call` an error value as an argument.",
 		Options: []sdk.Option{
 			{Key: expectError, Description: "Yes: the name says `call` itself fails, rejects, refuses or returns an error."},
 			{Key: expectNoError, Description: "No: the name says `call` itself succeeds, accepts, copes with a problem or returns a value."},

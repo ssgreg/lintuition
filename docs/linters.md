@@ -482,7 +482,9 @@ on a word boundary), its error, and the check on it: `if err != nil { t.Fatal }`
 
 **Sends:** the test name as words ("unquote rejects unbalanced quote"), the test's doc comment with
 its own name replaced by "this test" (empty when there is none), the call's name, and whether the
-test passes the call an error argument (by the parameter types of the call's signature).
+test passes the call an error argument (bound to the parameters of the call's own signature: a
+method expression's receiver, an instantiated generic, a forwarded result pair). The last is a fixed
+phrase; "no error argument observed" says nothing about other setup.
 
 **Asks:** whether the name says the call itself should return an error, succeed, or only describes
 the input or the setup. A failure the test arranges elsewhere is setup: `TestSyncUploadTimeout` names
