@@ -347,21 +347,26 @@ Line comments (`PhaseQueued Phase = iota // waiting for a free worker`) are read
 
 **Reads:** comments of constants in a parenthesised block of at least two.
 
-**Sends:** the comment as written, and the block's constant names as the options.
+**Sends:** the comment, and the block's constant names as the options. A comment that opens with its
+own constant's name (`// ModeFast skips the checksum.`) is sent with that opening replaced by "this
+constant": a classifier trusts a name over the text around it, and the description is what can be
+wrong. Every other comment is sent as written, so a neighbour's name it opens with, or its own name
+further on ("If trace is set"), stays visible.
 
 **Asks:** which constant the comment describes, or none (a heading or a note).
 
-**Decides:** reports a different constant at 0.8 or above, when no other option gets more than
-0.2.
+**Decides:** reports a different constant at 0.8 or above. An answer whose pick does not lead every
+other option, or that gives another option more than 0.2, abstains; for a distribution that adds up
+to 1 the threshold already implies both.
 
-**Quiet on:** a comment that names its own constant (`// ModeFast skips the checksum.`, or "If trace
-is set" on `trace`). It is taken at its word and not asked, and that covers a comment over a group
-that names its constants. The cost: a description gone stale under the right name is not caught.
-
-**Unsupported:** several constants on one line, blocks of more than 20 constants, and a comment that
-differs from another comment of the block in one word at most ("block after ForStmt", "block after
-IfStmt"; or two limits that differ only in the number). What tells such comments apart is matched to
-a constant by the block's convention or by the value, and the classifier sees neither.
+**Unsupported:** several constants on one line; blocks of more than 20 constants; a comment that
+opens with several names (`// ReadIdle and WriteIdle ...`), which describes a group; and a comment
+that matches another constant's comment word for word, or but for one word that names no single
+constant ("block after ForStmt" and "block after IfStmt", two limits that differ in the number).
+What tells such comments apart is matched to a constant by the block's convention or by the value,
+and the classifier sees neither. When the differing words name different constants ("permits reads"
+on `AccessRead`, "permits writes" on `AccessWrite`), the comments are asked. A comment that opens with
+another constant's name is never held back this way: it says which constant it is about.
 
 ### doc-vs-signature
 

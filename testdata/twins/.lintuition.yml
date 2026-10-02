@@ -111,6 +111,16 @@ semantic:
         - {linter: enum-comment-shift, question: describes, when: "replica tier kept for a while", choice: TierWarm, probability: 0.5}
         - {linter: enum-comment-shift, question: describes, when: "Stall limits, in seconds", choice: none, probability: 0.9}
         - {linter: enum-comment-shift, question: describes, when: "Turn on extra assertions while developing", choice: assertions, probability: 0.9}
+        - {linter: enum-comment-shift, question: describes, when: "When tracing is set", choice: tracing, probability: 0.9}
+        - {linter: enum-comment-shift, question: describes, when: "this constant waits for a free runner", choice: TaskPending, probability: 0.9}
+        - {linter: enum-comment-shift, question: describes, when: "this constant means the output is saved", choice: TaskFinished, probability: 0.9}
+        - {linter: enum-comment-shift, question: describes, when: "AccessFull allows reads and writes", choice: AccessFull, probability: 0.9}
+        - {linter: enum-comment-shift, question: describes, when: "this constant lets nothing through", choice: GateShut, probability: 0.9}
+        - {linter: enum-comment-shift, question: describes, when: "this constant lets a trickle through", choice: GateAjar, probability: 0.9}
+        - {linter: enum-comment-shift, question: describes, when: "this constant lets everything through", choice: GateWide, probability: 0.9}
+        - {linter: enum-comment-shift, question: describes, when: "this constant is a replication job waiting", choice: PhaseQueued, probability: 0.95}
+        # (a twin's want comment is a line comment on its constant too: a note, no constant)
+        - {linter: enum-comment-shift, question: describes, when: "want `comment describes", choice: none, probability: 0.9}
         # (the sentinel of test-name-vs-assertion's twin package: name and text agree)
         - {linter: sentinel-name-vs-text, question: condition, when: "unbalanced quote", choice: same, probability: 0.9}
         # test-name-vs-assertion

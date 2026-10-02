@@ -2,12 +2,15 @@ package enumcomment
 
 import (
 	"fmt"
+	"go/ast"
+	"go/parser"
 	"go/token"
 	"os"
 	"sort"
 	"strings"
 	"testing"
 
+	"golang.org/x/tools/go/analysis"
 	"golang.org/x/tools/go/analysis/analysistest"
 
 	"github.com/ssgreg/lintuition/sdk"
@@ -56,8 +59,8 @@ func TestExtraction(t *testing.T) {
 				got = append(got, line{n, fmt.Sprintf("%d %s unsupported: %s", n, c.Subject, c.Unsupported)})
 				continue
 			}
-			if c.Payload.Prose["comment"] != c.Local["comment"] {
-				t.Errorf("case %d %s: the comment is not sent as written: %q", n, c.Subject, c.Payload.Prose["comment"])
+			if c.Local["comment"] == "" || c.Local["name"] == "" {
+				t.Errorf("case %d %s: local facts missing: %v", n, c.Subject, c.Local)
 			}
 			var keys []string
 			for _, o := range r.Questions(c)[0].Options {
@@ -81,71 +84,181 @@ func TestExtraction(t *testing.T) {
 		`1 StateRunning/line "the job finished and its result is stored" [StateIdle StateRunning StateDone none]`,
 		`4 A/line unsupported: the comment is on a line of several constants`,
 		`6 none/line unsupported: a constant is named like an answer option`,
+		`6 other/line unsupported: a constant is named like an answer option`,
 		`7 unclear/line unsupported: a constant is named like an answer option`,
 		`8 LocalA/doc "inside a function" [LocalA LocalB none]`,
-		`10 debug/doc "Enable extra checks while developing." [debug trace none]`,
-		`12 PhaseCopying/doc "PhaseVerified means every block was checked." [PhaseCopying PhaseVerified none]`,
-		`13 P/doc "A placeholder until the value is known." [P Q none]`,
-		`14 Run/doc "Running jobs are counted here." [Run Stop none]`,
-		`15 limitBody/doc unsupported: the comment differs from another comment of the block in one word at most`,
-		`15 limitLink/doc unsupported: the comment differs from another comment of the block in one word at most`,
-		`15 limitTitle/doc unsupported: the comment differs from another comment of the block in one word at most`,
-		`16 codeOne/doc unsupported: the comment differs from another comment of the block in one word at most`,
-		`16 codeSix/line "a value of its own" [codeOne codeTwo codeSix none]`,
-		`16 codeTwo/line unsupported: the comment differs from another comment of the block in one word at most`,
-		`17 inTimeout/line "read timeout" [inTimeout outTimeout none]`,
-		`17 outTimeout/line "write timeout" [inTimeout outTimeout none]`,
-		`18 kindBody/line "body of switch" [kindHead kindTail kindBody none]`,
-		`18 kindHead/line "head of loop" [kindHead kindTail kindBody none]`,
-		`18 kindTail/line "block after loop" [kindHead kindTail kindBody none]`,
-		`19 ruleRead/line unsupported: the comment differs from another comment of the block in one word at most`,
-		`19 ruleWrite/line unsupported: the comment differs from another comment of the block in one word at most`,
-		`20 FlagOn/line "turned off by the operator" [FlagOn FlagOff none]`,
-		`22 K01/line unsupported: the block has more than 20 constants to offer as options`,
+		`9 ModeFast/doc "this constant skips the checksum; ModeFast is the default." [ModeFast ModeSafe none]`,
+		`9 ModeSafe/doc "this constant: verifies the checksum of every block." [ModeFast ModeSafe none]`,
+		`10 PhaseCopying/doc "this constant means every block was copied and checked." [PhaseCopying PhaseChecked none]`,
+		`11 debug/doc "Enable extra checks while developing." [debug trace none]`,
+		`11 trace/doc "If trace is set, debugging output is printed." [debug trace none]`,
+		`12 StepCopying/doc "StepVerified means every block was checked." [StepCopying StepVerified none]`,
+		`13 ReadOnly/doc "ReadWrite permits reads and writes, and everything ReadOnly permits." [ReadOnly ReadWrite none]`,
+		`14 anyIdle/doc unsupported: the comment opens with several constants' names`,
+		`14 readIdle/doc unsupported: the comment opens with several constants' names`,
+		`14 writeIdle/doc unsupported: the comment opens with several constants' names`,
+		`15 LevelHigh/doc "this constant is like LevelLow, but louder." [LevelLow LevelHigh none]`,
+		`15 LevelLow/doc "this constant is quiet." [LevelLow LevelHigh none]`,
+		`16 P/doc "A placeholder until the value is known." [P Q none]`,
+		`16 Q/doc "P is a letter here." [P Q none]`,
+		`17 Run/doc "Running jobs are counted here." [Run Stop none]`,
+		`18 Ready/doc "PréReady describes a queued job." [ÉtatPrêt StatoΩ Ready PréReady none]`,
+		`18 StatoΩ/doc "this constant is the idle state." [ÉtatPrêt StatoΩ Ready PréReady none]`,
+		`18 ÉtatPrêt/doc "this constant means the worker can take a job." [ÉtatPrêt StatoΩ Ready PréReady none]`,
+		`19 limitBody/doc unsupported: the comment matches another constant's comment but for one word that names no constant`,
+		`19 limitLink/doc unsupported: the comment matches another constant's comment but for one word that names no constant`,
+		`19 limitTitle/doc unsupported: the comment matches another constant's comment but for one word that names no constant`,
+		`20 codeOne/doc unsupported: the comment matches another constant's comment word for word`,
+		`20 codeSix/line "a value of its own" [codeOne codeTwo codeSix none]`,
+		`20 codeTwo/line unsupported: the comment matches another constant's comment word for word`,
+		`21 WorkRunning/doc "the operation completed successfully" [WorkRunning WorkDone none]`,
+		`22 CopyDone/doc "this constant means the copy completed successfully." [CopyRunning CopyDone none]`,
+		`22 CopyRunning/doc "CopyDone means the copy completed successfully." [CopyRunning CopyDone none]`,
+		`23 AccessRead/doc "the operation permits writes" [AccessWrite AccessRead none]`,
+		`23 AccessWrite/doc "the operation permits reads" [AccessWrite AccessRead none]`,
+		`24 KindForBody/line "body of ForStmt" [KindForDone KindIfDone KindForBody none]`,
+		`24 KindForDone/line unsupported: the comment matches another constant's comment but for one word that names no constant`,
+		`24 KindIfDone/line unsupported: the comment matches another constant's comment but for one word that names no constant`,
+		`25 readFast/line unsupported: the comment matches another constant's comment but for one word that names no constant`,
+		`25 writeFast/line unsupported: the comment matches another constant's comment but for one word that names no constant`,
+		`26 inTimeout/line "read timeout" [inTimeout outTimeout none]`,
+		`26 outTimeout/line "write timeout" [inTimeout outTimeout none]`,
+		`27 kindBody/line "body of switch" [kindHead kindTail kindBody none]`,
+		`27 kindHead/line "head of loop" [kindHead kindTail kindBody none]`,
+		`27 kindTail/line "block after loop" [kindHead kindTail kindBody none]`,
+		`28 SlotL/doc unsupported: the comment matches another constant's comment but for one word that names no constant`,
+		`28 SlotR/doc unsupported: the comment matches another constant's comment but for one word that names no constant`,
+		`29 ruleRead/line unsupported: the comment matches another constant's comment but for one word that names no constant`,
+		`29 ruleWrite/line unsupported: the comment matches another constant's comment but for one word that names no constant`,
+		`30 FlagOn/doc "this constant is set by default." [FlagOn FlagOff none]`,
+		`30 FlagOn/line "turned off by the operator" [FlagOn FlagOff none]`,
+		`32 KindPrint/line "behaves like fmt.Print" [KindPrint KindPrintf none]`,
+		`32 KindPrintf/line "behaves like fmt.Printf" [KindPrint KindPrintf none]`,
+		`33 K01/line unsupported: the block has more than 20 constants to offer as options`,
+		`33 K02/line unsupported: the block has more than 20 constants to offer as options`,
 	}
 	if strings.Join(gs, "\n") != strings.Join(want, "\n") {
 		t.Fatalf("candidates:\n%s\n\nwant:\n%s", strings.Join(gs, "\n"), strings.Join(want, "\n"))
 	}
 }
 
-func TestNamesWord(t *testing.T) {
+func TestWords(t *testing.T) {
+	names := map[string]bool{"StateIdle": true, "trace": true, "ÉtatPrêt": true, "Run": true, "PréRun": true, "A": true, "KA": true, "KB": true}
 	for _, tc := range []struct {
-		text, name string
-		want       bool
+		text, subj string
+		group      bool
 	}{
-		{"StateIdle is a job nobody has picked up.", "StateIdle", true},
-		{"If trace is set, output is printed.", "trace", true},
-		{"see [StateIdle].", "StateIdle", true},
-		{"Running jobs are counted.", "Run", false},
-		{"StateIdleSince is the start of the wait.", "StateIdle", false},
-		{"A placeholder.", "A", false},
-		{"no mention here", "StateIdle", false},
+		{"StateIdle is a job nobody has picked up.", "StateIdle", false},
+		{"StateIdle: waiting.", "StateIdle", false},
+		{"If trace is set, output is printed.", "", false},
+		{"ÉtatPrêt means ready.", "ÉtatPrêt", false},
+		{"PréRun describes a queued job.", "PréRun", false},
+		{"Running jobs are counted.", "", false},
+		{"StateIdleSince is the start.", "", false},
+		{"A placeholder.", "", false},
+		{"KA and KB cut a stalled connection.", "KA", true},
+		{"KA, KB: both restart.", "KA", true},
+		{"KA, and KB too.", "KA", true},
+		{"KA or KB, whichever is first.", "KA", true},
+		{"KA and then more.", "KA", false},
+		{"[KA] is linked.", "", false},
+		{"", "", false},
 	} {
-		if got := namesWord(tc.text, tc.name); got != tc.want {
-			t.Errorf("namesWord(%q, %q) = %v", tc.text, tc.name, got)
+		subj, group := subject(tokenize(tc.text), names)
+		if subj != tc.subj || group != tc.group {
+			t.Errorf("subject(%q) = %q %v", tc.text, subj, group)
+		}
+	}
+	if got := fmt.Sprint(template(tokenize("Same rule as KA, for (reads); 5 ÉtatPrêt."), names)); got != "[same rule as \x00 for reads 5 \x00]" {
+		t.Errorf("template: %q", got)
+	}
+	for in, want := range map[string]string{
+		"KindForDone":    "[kind for done]",
+		"maxURLLenRunes": "[max url len runes]",
+		"read_fast":      "[read fast]",
+		"HTTPServer":     "[http server]",
+		"ÉtatPrêt":       "[état prêt]",
+		"K01":            "[k01]",
+	} {
+		if got := fmt.Sprint(splitName(in)); got != want {
+			t.Errorf("splitName(%s) = %s, want %s", in, got, want)
+		}
+	}
+	parts := nameParts([]string{"AccessRead", "AccessWrite", "KindPrint", "KindPrintf"})
+	if got := singles("reads", nameParts([]string{"AccessRead", "readFast"})); got != "" {
+		t.Errorf("reads fits two constants, got %q", got)
+	}
+	for w, want := range map[string]string{
+		"reads":   "AccessRead",
+		"writes":  "AccessWrite",
+		"print":   "KindPrint",
+		"printf":  "KindPrintf",
+		"read":    "AccessRead",
+		"access":  "",
+		"readers": "",
+		"512":     "",
+	} {
+		if got := singles(w, parts); got != want {
+			t.Errorf("singles(%s) = %q, want %q", w, got, want)
+		}
+	}
+	for _, tc := range []struct {
+		a, b string
+		want int
+	}{
+		{"a b c", "a b c", -1},
+		{"a b c", "a x c", 1},
+		{"a b c", "x y c", -2},
+		{"a b", "a b c", -2},
+	} {
+		if got := differing(strings.Fields(tc.a), strings.Fields(tc.b)); got != tc.want {
+			t.Errorf("differing(%q, %q) = %d", tc.a, tc.b, got)
 		}
 	}
 }
 
-func TestNearDuplicate(t *testing.T) {
-	names := []string{"KA", "KB", "KC"}
-	for _, tc := range []struct {
-		a, b string
-		want bool
-	}{
-		{"block after for", "block after if", true},
-		{"block after for", "body of for", false},
-		{"Read timeout.", "read timeout", true},
-		{"read timeout", "write timeout", false}, // two words
-		{"like KA, for reads", "like KC for writes", true},
-		{"like KA", "like KB", true}, // the same once names are one placeholder
-		{"one two three", "one two three four", false},
-		{"", "", false},
-	} {
-		words := [][]string{template(tc.a, names), template(tc.b, names)}
-		if got := nearDuplicate(words, 0); got != tc.want {
-			t.Errorf("nearDuplicate(%q, %q) = %v", tc.a, tc.b, got)
-		}
+// bigBlock is one const block of n constants, each with a doc comment that opens with its name.
+func bigBlock(t testing.TB, n int) (*analysis.Pass, *ast.GenDecl) {
+	var src strings.Builder
+	src.WriteString("package p\nconst (\n")
+	for i := 0; i < n; i++ {
+		fmt.Fprintf(&src, "// Value%04d is a generated value.\nValue%04d = %d\n", i, i, i)
+	}
+	src.WriteString(")\n")
+	fs := token.NewFileSet()
+	f, err := parser.ParseFile(fs, "p.go", src.String(), parser.ParseComments)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return &analysis.Pass{Fset: fs}, f.Decls[0].(*ast.GenDecl)
+}
+
+// A block over the options bound is unsupported before any word work: its cost grows with the
+// number of comments, not with comments times names.
+func TestLargeBlockIsCheap(t *testing.T) {
+	pass, gd := bigBlock(t, 400)
+	if cs := block(pass, gd); len(cs) != 400 || cs[0].Unsupported == "" {
+		t.Fatalf("%d candidates, first %+v", len(cs), cs[0])
+	}
+	if a := testing.AllocsPerRun(5, func() { block(pass, gd) }); a > 400*20 {
+		t.Errorf("%.0f allocations for a 400-constant block", a)
+	}
+	// A block at the bound compares every pair of comments, and still stays small.
+	pass, gd = bigBlock(t, maxConstants)
+	if a := testing.AllocsPerRun(5, func() { block(pass, gd) }); a > maxConstants*60 {
+		t.Errorf("%.0f allocations for a %d-constant block", a, maxConstants)
+	}
+}
+
+func BenchmarkBlock(b *testing.B) {
+	for _, n := range []int{maxConstants, 100, 400} {
+		b.Run(fmt.Sprint(n), func(b *testing.B) {
+			pass, gd := bigBlock(b, n)
+			b.ReportAllocs()
+			for i := 0; i < b.N; i++ {
+				block(pass, gd)
+			}
+		})
 	}
 }
 
@@ -226,6 +339,17 @@ func TestDecide(t *testing.T) {
 			t.Errorf("%+v: got %+v", tc.answers["describes"], d)
 		}
 	}
+	// At a lowered threshold the pick must still lead every other option.
+	low := &rule{threshold: 0.4}
+	if d := low.Decide(c, dist("StateDone", map[string]float64{"StateDone": 0.45, "StateRunning": 0.5, "none": 0.05})); d.Abstained == "" {
+		t.Errorf("a pick that does not lead decided: %+v", d)
+	}
+	if d := low.Decide(c, dist("StateDone", map[string]float64{"StateDone": 0.45, "StateRunning": 0.45, "none": 0.1})); d.Abstained == "" {
+		t.Errorf("a tie decided: %+v", d)
+	}
+	if d := low.Decide(c, dist("StateDone", map[string]float64{"StateDone": 0.5, "StateRunning": 0.4, "none": 0.1})); !d.Report {
+		t.Errorf("a leading pick at 0.5 over 0.4 did not report: %+v", d)
+	}
 	if d := r.Decide(c, describes("StateDone", 0.9)); d.Message != `comment describes StateDone, not StateRunning: "the job finished"` {
 		t.Errorf("message: %s", d.Message)
 	}
@@ -240,7 +364,7 @@ func TestThresholdSetting(t *testing.T) {
 		if l.Name != Name {
 			continue
 		}
-		if l.Version != "2" {
+		if l.Version != "3" {
 			t.Errorf("version %s", l.Version)
 		}
 		rl, err := l.New(l.NewSettings())

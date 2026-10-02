@@ -1,6 +1,6 @@
 package a
 
-// 22 a block of more than 20 constants is unsupported, unless the comment names its own constant
+// 33 a block of more than 20 constants is unsupported, whatever its comments say
 const (
 	K01 = iota // the first of many
 	K02        // K02 is the second

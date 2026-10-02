@@ -102,7 +102,36 @@ const (
 	stepBranch = 3 // block after BranchStmt
 )
 
-// Negative, a comment over a group that names both constants: taken at its word, not asked.
+// Defect: the description went stale under the right name; it describes the next state.
+
+const (
+	// TaskPending waits for a free runner.
+	TaskPending Job = iota + 10
+	// TaskActive means the output is saved and the task never runs again.
+	TaskActive // want `comment describes TaskFinished, not TaskActive`
+	TaskFinished
+)
+
+// Defect: the comment opens with the neighbour's name and only compares itself with its own.
+
+const (
+	// AccessFull allows reads and writes, everything AccessView allows and more.
+	AccessView Mode = iota + 10 // want `comment describes AccessFull, not AccessView`
+	AccessFull
+)
+
+// Fixed twin: Go-style comments, each opening with its own name.
+
+const (
+	// GateShut lets nothing through.
+	GateShut Mode = iota + 20
+	// GateAjar lets a trickle through, half of what GateWide does.
+	GateAjar
+	// GateWide lets everything through.
+	GateWide
+)
+
+// Negative, a comment over a group that names both constants: unsupported, not asked.
 
 const (
 	// readStallLimit and writeStallLimit cut a connection that stops moving data; the clock restarts
@@ -120,7 +149,8 @@ const (
 	writeStallSeconds = 60
 )
 
-// Negative, a comment that names its own constant while its other words fit the neighbour.
+// Negative, a comment that names its own constant further on while its other words fit the
+// neighbour: the name stays visible.
 
 const (
 	// Turn on extra assertions while developing.

@@ -10,20 +10,23 @@
 //	)
 //
 // Code finds the shape: a comment (above the constant, or at the end of its line) on a single
-// constant of a parenthesised const block of at least two constants. A comment that names its own
-// constant is taken at its word and is not a candidate. A comment that differs from another comment
-// of the block in one word at most is unsupported: what tells such comments apart (a number, a
-// type name) is matched to a constant by the block's convention, which the classifier does not see.
-// The classifier reads the remaining comments as written and picks which constant of the block each
-// describes; the block's constant names are its options, with "none" for a section heading or a
-// note. Go code reports when the pick is another constant.
+// constant of a parenthesised const block of at least two constants, and reads how it opens. A
+// comment that opens with its own constant's name ("StateIdle is ...") is sent with that opening
+// replaced by "this constant", so the name cannot outvote the description; any other comment is sent
+// as written, so a neighbour's name it opens with, or its own name further on ("If trace is set"),
+// stays visible. A comment that opens with several constants' names describes a group and is
+// unsupported, and so is one that matches another constant's comment word for word, or but for one
+// word that does not single out a constant by name: what tells such comments apart (a number, a type
+// name) is matched to a constant by the block's convention, which the classifier does not see. The
+// classifier picks which constant of the block the comment describes; the block's constant names are
+// its options, with "none" for a section heading or a note. Go code reports when the pick is another
+// constant.
 package enumcomment
 
 import (
 	"fmt"
 	"go/ast"
 	"go/token"
-	"regexp"
 	"strings"
 
 	"golang.org/x/tools/go/analysis"
@@ -61,7 +64,7 @@ func init() {
 		Name:        Name,
 		Doc:         "a comment in a const block describes a neighbouring constant, not its own",
 		Standard:    true,
-		Version:     "2",
+		Version:     "3",
 		Analyzer:    Analyzer,
 		NewSettings: func() any { return &Settings{} },
 		New: func(s any) (sdk.Rule, error) {
@@ -98,6 +101,14 @@ type comment struct {
 	text string
 }
 
+// verdict is what block decided about one comment.
+type verdict struct {
+	skip        bool
+	unsupported string
+	prose       string // what is sent
+	own         string
+}
+
 func block(pass *analysis.Pass, gd *ast.GenDecl) []*sdk.Candidate {
 	var names []string
 	var comments []comment
@@ -124,90 +135,127 @@ func block(pass *analysis.Pass, gd *ast.GenDecl) []*sdk.Candidate {
 	if len(names) < 2 {
 		return nil
 	}
-	words := make([][]string, len(comments))
-	for i, cm := range comments {
-		words[i] = template(cm.text, names)
-	}
+	vs := judge(comments, names)
 	var out []*sdk.Candidate
 	for i, cm := range comments {
-		vs := cm.spec
+		v := vs[i]
+		if v.skip {
+			continue
+		}
 		// The finding is on the constant the comment is attached to.
-		c := &sdk.Candidate{Pos: pass.Fset.Position(vs.Names[0].Pos()), Subject: vs.Names[0].Name + "/" + cm.kind}
-		if len(vs.Names) != 1 {
-			c.Unsupported = "the comment is on a line of several constants"
-			out = append(out, c)
-			continue
+		c := &sdk.Candidate{Pos: pass.Fset.Position(cm.spec.Names[0].Pos()), Subject: cm.spec.Names[0].Name + "/" + cm.kind}
+		if v.unsupported != "" {
+			c.Unsupported = v.unsupported
+		} else {
+			c.Local = map[string]string{"name": v.own, "comment": cm.text, "constants": strings.Join(names, " ")}
+			c.Payload.AddProse("comment", v.prose)
 		}
-		own := vs.Names[0].Name
-		if own == "_" || namesWord(cm.text, own) {
-			continue
-		}
-		switch {
-		case len(names) > maxConstants:
-			c.Unsupported = fmt.Sprintf("the block has more than %d constants to offer as options", maxConstants)
-		case contains(names, none) || contains(names, sdk.Unclear):
-			c.Unsupported = "a constant is named like an answer option"
-		case nearDuplicate(words, i):
-			c.Unsupported = "the comment differs from another comment of the block in one word at most"
-		}
-		if c.Unsupported != "" {
-			out = append(out, c)
-			continue
-		}
-		c.Local = map[string]string{"name": own, "comment": cm.text, "constants": strings.Join(names, " ")}
-		c.Payload.AddProse("comment", cm.text)
 		out = append(out, c)
 	}
 	return out
 }
 
-// namesWord reports whether text has name as a whole word. A one-letter name is never matched: it
-// would match the article "A".
-func namesWord(text, name string) bool {
-	if len(name) < 2 {
-		return false
+// judge decides, for every comment of a block, whether it is skipped, unsupported or asked, and what
+// is sent. Block-wide reasons come first, so a block that cannot be asked about costs no word work.
+func judge(comments []comment, names []string) []verdict {
+	out := make([]verdict, len(comments))
+	var blockReason string
+	switch {
+	case len(names) > maxConstants:
+		blockReason = fmt.Sprintf("the block has more than %d constants to offer as options", maxConstants)
+	case contains(names, none) || contains(names, sdk.Unclear):
+		blockReason = "a constant is named like an answer option"
 	}
-	return regexp.MustCompile(`\b` + regexp.QuoteMeta(name) + `\b`).MatchString(text)
-}
-
-// constWord stands for any constant name of the block in a template.
-const constWord = "\x00"
-
-// template returns the comment's words, lower-cased, without surrounding punctuation, and with
-// every constant name of the block replaced by one placeholder.
-func template(text string, names []string) []string {
-	m := map[string]string{}
+	set := map[string]bool{}
 	for _, n := range names {
-		m[n] = constWord
+		set[n] = true
 	}
-	var out []string
-	for _, w := range strings.Fields(sdk.MaskAll(text, m)) {
-		if w = strings.Trim(strings.ToLower(w), ".,;:!?()[]{}\"'`"); w != "" {
-			out = append(out, w)
+	// compared holds the comments that take part in the template check, with their words.
+	type entry struct {
+		i     int
+		own   string
+		words []string
+	}
+	var compared []entry
+	for i, cm := range comments {
+		v := &out[i]
+		if len(cm.spec.Names) != 1 {
+			v.unsupported = "the comment is on a line of several constants"
+			continue
+		}
+		own := cm.spec.Names[0].Name
+		v.own = own
+		if own == "_" {
+			v.skip = true
+			continue
+		}
+		if blockReason != "" {
+			v.unsupported = blockReason
+			continue
+		}
+		toks := tokenize(cm.text)
+		subj, group := subject(toks, set)
+		switch {
+		case group:
+			v.unsupported = "the comment opens with several constants' names"
+			continue
+		case subj != "" && subj != own:
+			// It says outright which constant it is about: asked as written, whatever it resembles.
+			v.prose = cm.text
+			continue
+		case subj == own:
+			v.prose = "this constant" + cm.text[toks[0].end:]
+		default:
+			v.prose = cm.text
+		}
+		w := template(toks, set)
+		// A doc and a line comment that say the same on one constant are one description.
+		dup := false
+		for _, e := range compared {
+			if e.own == own && differing(e.words, w) == -1 {
+				dup = true
+				break
+			}
+		}
+		if dup {
+			v.skip = true
+			continue
+		}
+		compared = append(compared, entry{i, own, w})
+	}
+	if len(compared) < 2 {
+		return out
+	}
+	parts := nameParts(names)
+	for a := range compared {
+		for b := a + 1; b < len(compared); b++ {
+			x, y := compared[a], compared[b]
+			if x.own == y.own {
+				continue
+			}
+			d := differing(x.words, y.words)
+			switch {
+			case d == -2:
+				continue
+			case d >= 0 && len(x.words) < 3:
+				continue
+			case d >= 0:
+				// "permits reads" against "permits writes" on AccessRead and AccessWrite: the
+				// differing words name different constants, so the names carry the distinction.
+				cx, cy := singles(x.words[d], parts), singles(y.words[d], parts)
+				if cx != "" && cy != "" && cx != cy {
+					continue
+				}
+			}
+			for _, e := range []entry{x, y} {
+				out[e.i].unsupported = "the comment matches another constant's comment but for one word that names no constant"
+				if d == -1 {
+					out[e.i].unsupported = "the comment matches another constant's comment word for word"
+				}
+			}
 		}
 	}
 	return out
-}
-
-// nearDuplicate reports whether comment i has the same words as another comment of the block, or,
-// in comments of three words or more, all but one at the same positions.
-func nearDuplicate(words [][]string, i int) bool {
-	a := words[i]
-	for j, b := range words {
-		if j == i || len(a) != len(b) || len(a) == 0 {
-			continue
-		}
-		diff := 0
-		for k := range a {
-			if a[k] != b[k] {
-				diff++
-			}
-		}
-		if diff == 0 || (diff == 1 && len(a) >= 3) {
-			return true
-		}
-	}
-	return false
 }
 
 func contains(ss []string, s string) bool {
@@ -248,11 +296,18 @@ func (r *rule) Decide(c *sdk.Candidate, answers map[string]sdk.Answer) sdk.Decis
 	if p < r.threshold {
 		return sdk.Abstain(fmt.Sprintf("%s at %.2f is below the threshold %.2f", a.Choice, p, r.threshold))
 	}
-	// The pick must stand clear of every other option. In a distribution that adds up to 1 this
-	// follows from the threshold; an answer that also gives another option more than 1-threshold
-	// contradicts itself.
+	// Consistency guards, not extra precision: in a distribution that adds up to 1 a pick at the
+	// default threshold already leads and leaves every other option at most 1-threshold. An answer
+	// whose pick does not lead, or that also gives another option more than 1-threshold, contradicts
+	// itself.
 	for k, q := range a.Probabilities {
-		if k != a.Choice && q > 1-r.threshold+1e-9 {
+		if k == a.Choice {
+			continue
+		}
+		if q >= p {
+			return sdk.Abstain(fmt.Sprintf("%s at %.2f does not lead %s at %.2f", a.Choice, p, k, q))
+		}
+		if q > 1-r.threshold+1e-9 {
 			return sdk.Abstain(fmt.Sprintf("%s at %.2f also gives %s %.2f", a.Choice, p, k, q))
 		}
 	}
