@@ -10,8 +10,16 @@
 lintuition finds places where code says one thing and does another: log messages, test names,
 comments or metric Help that contradict the surrounding code.
 
-It runs built-in linters and lets you add your own. A model interprets the wording; each linter
-checks it against facts extracted by Go analysis.
+It runs built-in linters and lets you add your own. You choose a classifier to interpret the wording;
+each linter checks its answers against facts extracted by Go analysis.
+
+Our quickstart uses [Jev](https://typesafe.ai). TypeSafe says it "returns typed decisions with
+calibrated probabilities" and lists a price of $42 per billion input tokens. In our
+[showcase measurement](docs/classifiers.md#how-the-backends-compare), Jev caught all 17 marked
+findings in each of three runs at an estimated $0.0006 a run.
+
+LLMs work too: an OpenAI-compatible API with logprobs support (including local models through
+Ollama), or Claude Code and Codex. See [classifiers](docs/classifiers.md).
 
 This function logs success before it knows whether the save worked:
 
@@ -62,12 +70,12 @@ func TestUnquoteRejectsUnbalancedQuote(t *testing.T) {
 - **Unsure means quiet.** Below a linter's confidence threshold it stays silent whichever way the
   answer leans. Code it cannot read, like a message built at run time, is counted as unsupported in
   the summary instead of being guessed at.
-- **Measured cost, with a budget.** On the [showcase](examples/showcase), Jev caught all 17 marked
-  findings in each of 3 runs for about $0.0006 a run
-  ([measured 2026-10-02](docs/classifiers.md#how-the-backends-compare)).
-  `semantic.budget.max-cost-usd` stops new requests once reported spending reaches the limit;
-  requests already in flight can take the total above it, and everything found so far is
-  still reported. Valid cached answers are reused on the next run.
+- **Measured cost, with a budget.** On an
+  [earlier six-case suite](docs/classifiers.md#how-the-backends-compare), both Jev and Claude Code
+  haiku caught all six defects. Jev took about a second at an estimated $0.0003 a run; Claude Code
+  haiku took 66 seconds and reported about $0.13. `semantic.budget.max-cost-usd` stops new requests
+  once reported spending reaches the limit; requests already in flight can take the total above it,
+  and everything found so far is still reported. Valid cached answers are reused on the next run.
 
 Findings are review hints with their evidence, not proofs.
 
@@ -100,8 +108,7 @@ lintuition run ./...
 The quickstart config exits 0 even when it finds something, so a first run in CI does not fail the
 build; remove `run.issues-exit-code: 0` to make findings fail it.
 
-No Jev key? A local model through Ollama, or Claude Code and Codex under your own login, work too:
-see [classifiers](docs/classifiers.md).
+No Jev key? Set up another classifier from [classifiers](docs/classifiers.md).
 
 > Status: v0.x. Until v1.0, a minor release may change the config, the command line and the `sdk`
 > API; [CHANGELOG.md](CHANGELOG.md) says what changed.
