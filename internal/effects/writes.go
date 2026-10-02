@@ -418,7 +418,8 @@ type restoration struct {
 //
 //   - P is a place made of identifiers, field selections and dereferences, no index, so its
 //     spelling names one location; if the path dereferences anything beyond the root variable
-//     itself (*s.next, s.next.n), no call may run in between, since a callee could repoint it;
+//     itself (*s.next, s.next.n, or s.n promoted through an embedded pointer), no call may run in
+//     between, since a callee could repoint it;
 //   - the root's address is never taken in the body, so no callee can reassign it;
 //   - between the two, nothing returns, jumps out or calls panic, and old is left alone, its fields
 //     and elements included;
@@ -481,6 +482,9 @@ func stableRoot(info *types.Info, e ast.Expr) (types.Object, bool, bool) {
 			if _, onRoot := ast.Unparen(x.X).(*ast.Ident); !onRoot && (sel.Indirect() || isPointer(info.TypeOf(x.X))) {
 				deep = true
 			}
+			if throughEmbeddedPointer(info.TypeOf(x.X), sel.Index()) {
+				deep = true // s.N promoted through an embedded *Small: a callee can repoint s.Small
+			}
 			e = x.X
 		case *ast.StarExpr:
 			if _, onRoot := ast.Unparen(x.X).(*ast.Ident); !onRoot {
@@ -491,6 +495,26 @@ func stableRoot(info *types.Info, e ast.Expr) (types.Object, bool, bool) {
 			return nil, false, false
 		}
 	}
+}
+
+// throughEmbeddedPointer reports a promoted field selection that passes through an embedded field
+// of pointer type on its way to the field.
+func throughEmbeddedPointer(t types.Type, index []int) bool {
+	for _, i := range index[:max(len(index)-1, 0)] {
+		if p, ok := t.Underlying().(*types.Pointer); ok {
+			t = p.Elem()
+		}
+		st, ok := t.Underlying().(*types.Struct)
+		if !ok {
+			return false
+		}
+		f := st.Field(i).Type()
+		if isPointer(f) {
+			return true
+		}
+		t = f
+	}
+	return false
 }
 
 // addressTaken reports &root anywhere in the body, closures included.
@@ -545,6 +569,24 @@ func rootedAt(info *types.Info, e ast.Expr, obj types.Object) bool {
 	}
 }
 
+// mayShare reports an argument through which a callee can write the storage it names: a slice
+// expression or an address of it, or a value of pointer, slice, map, channel or function type.
+func mayShare(info *types.Info, e ast.Expr) bool {
+	switch x := ast.Unparen(e).(type) {
+	case *ast.SliceExpr:
+		return true
+	case *ast.UnaryExpr:
+		if x.Op == token.AND {
+			return true
+		}
+	}
+	switch info.TypeOf(e).Underlying().(type) {
+	case *types.Pointer, *types.Slice, *types.Map, *types.Chan, *types.Signature, *types.Interface:
+		return true
+	}
+	return false
+}
+
 // leavesAlone reports statements that neither return, jump out nor call panic, that leave old and
 // its fields and elements alone, closures included, and, when deep is set, that make no call.
 func leavesAlone(info *types.Info, stmts []ast.Stmt, old types.Object, deep bool) bool {
@@ -590,6 +632,19 @@ func leavesAlone(info *types.Info, stmts []ast.Stmt, old types.Object, deep bool
 					ok = false
 				}
 			case *ast.CallExpr:
+				// A call that can reach old's storage may change it: a slice of it, its address, a
+				// pointer, map or slice in it, or a method called on it (clear(old[:]), old.Reset()).
+				for _, a := range n.Args {
+					if rootedAt(info, a, old) && mayShare(info, a) {
+						ok = false
+					}
+				}
+				if sel, isSel := ast.Unparen(n.Fun).(*ast.SelectorExpr); isSel && rootedAt(info, sel.X, old) {
+					ok = false
+				}
+				if !ok {
+					return false
+				}
 				if id, isID := ast.Unparen(n.Fun).(*ast.Ident); isID {
 					if b, isB := info.Uses[id].(*types.Builtin); isB {
 						if b.Name() == "panic" {
