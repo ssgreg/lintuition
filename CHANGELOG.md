@@ -16,6 +16,14 @@
   backend; a sum just above 1 within that rounding is normalized to 1 before rules decide.
 - New linter `read-only-promise`: a doc comment that promises a function changes nothing while its
   body writes the receiver, a parameter or a package-level variable.
+- `normal-event-at-error` stops reading a structured failure as a routine event: in
+  `logger.Error("closing the listener", zap.Error(err))` the message only names the operation and
+  the error says it failed. It now sends whether the call logs a value of type error and what the
+  code checked about that error where it logs (not nil, `errors.Is(err, context.Canceled)`,
+  `err == io.EOF`, `os.IsNotExist(err)`), or the error it logs by name. When the code checked the
+  error is set without singling it out, a second question asks whether the message only names an
+  action; if it does, the line is taken as a failure report and is not a finding, a recall
+  trade-off.
 
 ## v0.1.0 (2026-10-02)
 
