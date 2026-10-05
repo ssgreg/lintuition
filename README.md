@@ -190,7 +190,10 @@ lintuition config verify                      # unknown keys, linters and settin
   shape plus a `semantic` section for the classifier. Every key with its default is in
   [.lintuition.reference.yml](.lintuition.reference.yml).
 - **Formats:** `text`, `json`, `sarif`, `checkstyle`, `code-climate`, `junit-xml` and
-  `github-actions`.
+  `github-actions`. A built-in linter's finding links to its section in
+  [docs/linters.md](docs/linters.md), for the docs of the version you run: the SARIF rule's
+  `helpUri`, the second line of a GitHub Actions annotation, and `DocURL` in the JSON report's
+  `Linters`. Text output stays without links.
 - **Suppressing:** `//nolint:premature-success // why it is fine here`, with the same scopes as
   golangci-lint. The directive must name the linter and give a reason; a bare `//nolint` does not
   suppress.

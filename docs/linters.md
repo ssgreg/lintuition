@@ -334,7 +334,9 @@ var ErrQuotaExceeded = errors.New("tenant record not found")
 
 **Unsupported:** a sentinel that wraps another error, a message built at run time, an empty message.
 
-### error-needs-type (policy, off by default)
+### error-needs-type
+
+A policy linter, off by default.
 
 **Finds:** a plain string error for a condition a caller will want to branch on: not found, already
 exists, permission denied, timeout, closed.

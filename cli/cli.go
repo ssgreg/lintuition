@@ -200,6 +200,10 @@ func runCmd(code *int) *cobra.Command {
 			if err != nil {
 				return err
 			}
+			ver := lintuitionVersion()
+			for i := range res.Run.Linters {
+				res.Run.Linters[i].DocURL = report.DocURL(ver, res.Run.Linters[i].Name)
+			}
 			if err := report.Write(c, res.Issues, res.Run, cmd.OutOrStdout(), cmd.ErrOrStderr()); err != nil {
 				return err
 			}
@@ -383,6 +387,30 @@ func configCmd() *cobra.Command {
 	}
 	cmd.AddCommand(verify, path)
 	return cmd
+}
+
+// lintuitionVersion is the version of lintuition in this binary: Version, else the module's own
+// version, which in a custom binary is a dependency of the generated main. A module replaced by a
+// local directory has no version.
+func lintuitionVersion() string {
+	if Version != "" {
+		return Version
+	}
+	bi, ok := debug.ReadBuildInfo()
+	if !ok {
+		return ""
+	}
+	mods := append([]*debug.Module{&bi.Main}, bi.Deps...)
+	for _, m := range mods {
+		if m.Path != "github.com/ssgreg/lintuition" {
+			continue
+		}
+		if m.Replace != nil {
+			return m.Replace.Version
+		}
+		return m.Version
+	}
+	return ""
 }
 
 func versionCmd() *cobra.Command {

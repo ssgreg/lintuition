@@ -11,11 +11,14 @@ import (
 
 func TestFormats(t *testing.T) {
 	sample(t)
-	code, _, errs := run("run",
+	code, out, errs := run("run",
 		"--output.sarif.path", "r.sarif", "--output.checkstyle.path", "r.xml", "--output.code-climate.path", "r.cc.json",
 		"--output.junit-xml.path", "r.junit.xml", "--output.github-actions.path", "stdout", "./...")
 	if code != 1 {
 		t.Fatalf("exit %d %s", code, errs)
+	}
+	if !strings.Contains(out, "%0Ahttps://github.com/ssgreg/lintuition/blob/") || !strings.Contains(out, "/docs/linters.md#metric-type-vs-help\n") {
+		t.Fatalf("github-actions annotation without the linter's docs:\n%s", out)
 	}
 	var sarif struct {
 		Version string
