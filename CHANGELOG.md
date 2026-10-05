@@ -1,58 +1,53 @@
 # Changelog
 
-## Unreleased
+## v0.2.0 (2026-10-05)
 
-- `doc-vs-signature` (version 2) tells an HTTP handler's "returns the build version", said about
-  the response it writes, from a value or an error promised to the Go caller. For a function with
-  no results it finds, through the types, an `http.ResponseWriter` the function can reach (a
-  parameter or receiver, or one reached from it through fields and methods without arguments, as
-  on gin-style and echo-style contexts), sends a fact naming it as a capability, and asks two
-  questions instead of one: does the doc promise an error, and does it promise a value to the Go
-  caller rather than in the response. A plain `io.Writer` (a test's `t.Output()`, a trace writer)
-  gives no fact, so ordinary stale promises next to one are asked as before.
-- `openai`: `reasoning-effort`, so a model that thinks first (qwen3.x, gemma4 on Ollama) answers
-  with its first token; a confident answer no longer fails on a confidence a rounding error above 1.
-- New linter `doc-vs-signature`: a doc comment that promises a returned result or error the
-  function's signature does not have.
-- `destructive-remediation` (version 3) no longer reads debug and info logs, sends the log level
-  and the function called right after a log call, has an answer for a message that names the
-  program's own action, and counts its three non-destructive answers together. On 25 repositories
-  its 35 findings were all a program announcing its own deletion ("purge temp files" right before
-  purging them).
-- Answers to a choice question whose probabilities add up to more than 1, beyond what rounding to
-  two decimals explains (0.005 per positive entry), are rejected as invalid, for every linter and
-  backend; a sum just above 1 within that rounding is normalized to 1 before rules decide.
-- New linter `read-only-promise`: a doc comment that promises a function changes nothing while its
-  body writes the receiver, a parameter or a package-level variable.
-- `normal-event-at-error` stops reading a structured failure as a routine event: in
-  `logger.Error("closing the listener", zap.Error(err))` the message only names the operation and
-  the error says it failed. It now sends whether the call logs a value of type error and what the
-  code checked about that error where it logs (not nil, `errors.Is(err, context.Canceled)`,
-  `err == io.EOF`, `os.IsNotExist(err)`), or the error it logs by name. When the code checked the
-  error is set without singling it out, a second question asks whether the message only names an
-  action; if it does, the line is taken as a failure report and is not a finding, a recall
-  trade-off.
-- `test-name-vs-assertion` no longer reads a failure the test arranges, or an error passed in, as
-  the call's own: the request now carries the test's doc comment and whether the test passes the
-  call an error, and the question asks about the call itself. Version 2.
-- `doc-vs-table` no longer reports a row whose case name only labels its input: a second question
-  asks whether the name states the facts the doc's condition depends on, and a contradiction found
-  in a name that does not abstains. Version 2.
+Two new linters, and the false positives of the first ones fixed. On 25 real repositories (16
+public, 9 private) the standard linters made 27 true findings and 97 false ones with v0.1.0; each
+linter below was fixed against that set and a held-out set written after its design.
+
+New linters:
+
+- `doc-vs-signature`: a doc comment that promises a returned result or error the function's
+  signature does not have. An HTTP handler whose doc says "returns X" about the response it writes
+  is told apart from a value or an error promised to the Go caller.
+- `read-only-promise`: a doc comment that promises a function changes nothing while its body writes
+  the receiver, a parameter or a package-level variable. It stands on a new effects model,
+  `internal/effects`, which finds the writes a caller can see.
+
+Fewer false positives:
+
+- `destructive-remediation` (version 3) no longer reads debug and info logs, where the program
+  narrates its own steps ("purge temp files" right before purging them), and has an answer for a
+  message that names the program's own action. Its 35 findings on the 25 repositories were all
+  of that kind; now there are none.
 - `suppression-rationale` (version 3) compares a reason that names a gosec, staticcheck or revive
-  rule (`G304`, `SA1019`, `var-naming:`) with that rule's own title from the linter's
-  documentation, asks whether the reason argues about the reported thing rather than whether it
-  mentions it, and abstains below 0.9 instead of 0.8. A reason naming several rules or a rule it
-  does not know is unsupported. On 25 repositories its 19 findings were all reasons that answer
-  their rule, most of them by saying where a path or a command comes from; now there is one.
-- `severe-event-understated` stops reading expected events as lost work: an absent optional file,
-  a requested stop or cancel, the program's own recovery. It now sends the log level and a list of
-  what the code checked on the way to the log (an error test with `errors.Is` or `os.IsNotExist`
-  while that error is still the one at hand, a receive from a context's Done channel or a signal
-  channel), and its question has an answer for each of those cases.
-- `enum-comment-shift` masks its own constant's name only where a comment opens with it, sends
-  every other comment as written, and marks group comments and comments that match a neighbour's
-  but for a number or another word that names no constant as unsupported. Near-identical neighbours
-  and masked mid-sentence names made false findings on real code.
+  rule (`G304`, `SA1019`, `var-naming:`) with that rule's own title, asks whether the reason
+  argues about the reported thing rather than whether it mentions it, and abstains below 0.9.
+  19 findings, all reasons that answer their rule, became one.
+- `severe-event-understated` (version 2) tells an absent optional file, a requested stop or
+  cancel and the program's own recovery from lost work, with what the code checked on the way to
+  the log (`errors.Is`, `os.IsNotExist`, a context's Done channel, a signal channel).
+- `normal-event-at-error` (version 3) reads the error a log call carries: in
+  `logger.Error("closing the listener", zap.Error(err))` the message names the operation and the
+  error says it failed. It sends what the code checked about that error where it logs.
+- `enum-comment-shift` (version 3) masks its own constant's name only where a comment opens with
+  it, marks group comments and near-identical neighbours as unsupported, and ignores `// want`
+  test marks.
+- `test-name-vs-assertion` (version 2) no longer reads a failure the test arranges, or an error
+  it passes in, as the call's own; it reads the test's doc and whether the call gets an error.
+- `doc-vs-table` (version 2) abstains when a case name only labels its input.
+- `table-case-vs-expectation` is unchanged: its 3 false findings depend on the input value, which
+  is Go source and is not sent.
+
+Classifiers and decisions:
+
+- A choice answer whose probabilities add up to more than 1, beyond what rounding to two decimals
+  explains, is rejected for every linter and backend; a sum just above 1 is normalized, and
+  probabilities are added in a fixed order, so a cached answer decides the same way every time.
+- `openai`: `reasoning-effort`, so a model that thinks first (qwen3.x, gemma4 on Ollama) answers
+  with its first token; a confident answer no longer fails on a confidence a rounding error
+  above 1.
 
 ## v0.1.0 (2026-10-02)
 
