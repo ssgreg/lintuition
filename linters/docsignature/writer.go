@@ -1,0 +1,232 @@
+package docsignature
+
+import (
+	"go/types"
+	"regexp"
+	"strconv"
+	"strings"
+)
+
+// An HTTP handler's doc often says "returns X" about what it writes to the client, on a function
+// with no results. To let the classifier tell that from a value given back to the Go caller, the
+// result claim carries a fact naming an output the function can write to, when the signature has
+// one: a parameter or the receiver whose type implements io.Writer or http.ResponseWriter, or a
+// value reached from one through exported (or same-package) fields and methods without arguments,
+// such as a framework context's Writer field or Response() method. The output is found through the
+// types only: a writer the function captures in a closure or reads from a package variable, or one
+// behind an interface such as any, is not seen, and the candidate is asked as it always was.
+
+// maxWriterHops bounds the path from a parameter to its writer: c.Writer is one hop,
+// c.Ctx.Writer two. maxWriterNodes bounds the whole walk from one parameter. A walk that runs out
+// finds nothing, which leaves the candidate as it was without the fact.
+const (
+	maxWriterHops  = 3
+	maxWriterNodes = 5000
+)
+
+var ioWriter = func() *types.Interface {
+	p := types.NewVar(0, nil, "p", types.NewSlice(types.Typ[types.Byte]))
+	n := types.NewVar(0, nil, "n", types.Typ[types.Int])
+	err := types.NewVar(0, nil, "err", types.Universe.Lookup("error").Type())
+	sig := types.NewSignatureType(nil, nil, nil, types.NewTuple(p), types.NewTuple(n, err), false)
+	return types.NewInterfaceType([]*types.Func{types.NewFunc(0, nil, "Write", sig)}, nil).Complete()
+}()
+
+// writerKind names the output interface t implements, "http.ResponseWriter" or "io.Writer", or
+// returns "" for neither. A value whose pointer implements it counts too: a parameter, a receiver
+// or a field reached through a pointer is addressable, so its pointer methods can be called.
+func writerKind(t types.Type) string {
+	t = types.Unalias(t)
+	if _, ok := t.(*types.TypeParam); ok {
+		return "" // its constraint is not the value: a writer constraint is rare, and missing it is safe
+	}
+	for _, c := range []types.Type{t, pointerTo(t)} {
+		if c == nil || !types.Implements(c, ioWriter) {
+			continue
+		}
+		if implementsResponseWriter(c) {
+			return "http.ResponseWriter"
+		}
+		return "io.Writer"
+	}
+	return ""
+}
+
+// pointerTo returns *t for a type whose pointer may have more methods, or nil.
+func pointerTo(t types.Type) types.Type {
+	if _, ok := t.(*types.Pointer); ok || types.IsInterface(t) {
+		return nil
+	}
+	return types.NewPointer(t)
+}
+
+// implementsResponseWriter reports whether t implements net/http.ResponseWriter. The interface is
+// built from the Header type t's own Header method returns, so the check needs no import of
+// net/http: a type without such a method cannot implement it.
+func implementsResponseWriter(t types.Type) bool {
+	obj, _, _ := types.LookupFieldOrMethod(t, false, nil, "Header")
+	m, ok := obj.(*types.Func)
+	if !ok {
+		return false
+	}
+	sig := m.Type().(*types.Signature)
+	if sig.Params().Len() != 0 || sig.Results().Len() != 1 {
+		return false
+	}
+	h, ok := types.Unalias(sig.Results().At(0).Type()).(*types.Named)
+	if !ok || h.Obj().Pkg() == nil || h.Obj().Pkg().Path() != "net/http" || h.Obj().Name() != "Header" {
+		return false
+	}
+	header := types.NewSignatureType(nil, nil, nil, nil, types.NewTuple(types.NewVar(0, nil, "", h)), false)
+	code := types.NewSignatureType(nil, nil, nil, types.NewTuple(types.NewVar(0, nil, "code", types.Typ[types.Int])), nil, false)
+	rw := types.NewInterfaceType([]*types.Func{
+		types.NewFunc(0, nil, "Header", header),
+		ioWriter.Method(0),
+		types.NewFunc(0, nil, "WriteHeader", code),
+	}, nil).Complete()
+	return types.Implements(t, rw)
+}
+
+// writerFact returns the fact naming the first output the signature reaches: the receiver first,
+// then the parameters in order, each by the shortest path. It returns "" when there is none. In a
+// declared function a blank or unnamed parameter is skipped, since the body cannot use it; an
+// interface method's parameters are often unnamed and are named by position.
+func writerFact(pkg *types.Package, sig *types.Signature, declared bool) string {
+	type root struct {
+		label, name string
+		t           types.Type
+	}
+	var roots []root
+	if r := sig.Recv(); r != nil && usable(r.Name(), declared) {
+		if r.Name() == "" || r.Name() == "_" {
+			// An interface method's receiver is the interface value.
+			roots = append(roots, root{"the receiver", "", r.Type()})
+		} else {
+			roots = append(roots, root{"receiver " + r.Name(), r.Name(), r.Type()})
+		}
+	}
+	for i := 0; i < sig.Params().Len(); i++ {
+		p := sig.Params().At(i)
+		if sig.Variadic() && i == sig.Params().Len()-1 {
+			continue // a slice of values, not one output
+		}
+		if !usable(p.Name(), declared) {
+			continue
+		}
+		if name := p.Name(); name != "" && name != "_" {
+			roots = append(roots, root{"parameter " + name, name, p.Type()})
+		} else {
+			roots = append(roots, root{"parameter " + strconv.Itoa(i+1), "", p.Type()})
+		}
+	}
+	for _, r := range roots {
+		kind, path := findWriter(pkg, r.t)
+		var fact string
+		switch {
+		case kind == "":
+			continue
+		case path == "":
+			fact = r.label + ", an " + kind
+		case r.name == "":
+			fact = r.label + ", holds an " + kind + " in " + path
+		default:
+			fact = r.label + ", holds an " + kind + " in " + r.name + "." + path
+		}
+		if !plainFact.MatchString(fact) {
+			return "" // a non-ASCII identifier or a long path: no fact rather than one the policy refuses
+		}
+		return fact
+	}
+	return ""
+}
+
+// plainFact is what a fact string may look like under the payload policy: short, identifiers and
+// punctuation only.
+var plainFact = regexp.MustCompile(`^[A-Za-z0-9_ .,()]{1,120}$`)
+
+func usable(name string, declared bool) bool {
+	return !declared || name != "" && name != "_"
+}
+
+// findWriter walks from t breadth first, through fields of structs (behind pointers too) and the
+// results of methods without arguments, and returns the writer kind and the path of the first
+// value that is a writer: "" for t itself, "Writer" or "Response()" or "Ctx.Writer" below it.
+// Breadth first, a type is first met on its shortest path, so each named type is expanded once
+// and the answer does not depend on which field comes first; that also ends every type cycle.
+func findWriter(pkg *types.Package, t types.Type) (kind, path string) {
+	type node struct {
+		t    types.Type
+		path []string
+	}
+	queue := []node{{t: t}}
+	seen := map[types.Type]bool{}
+	nodes := 0
+	for len(queue) > 0 {
+		n := queue[0]
+		queue = queue[1:]
+		if nodes++; nodes > maxWriterNodes {
+			return "", ""
+		}
+		if k := writerKind(n.t); k != "" {
+			return k, strings.Join(n.path, ".")
+		}
+		if len(n.path) == maxWriterHops {
+			continue
+		}
+		base := types.Unalias(n.t)
+		if p, ok := base.(*types.Pointer); ok {
+			base = types.Unalias(p.Elem())
+		}
+		if _, ok := base.(*types.TypeParam); ok {
+			continue
+		}
+		if named, ok := base.(*types.Named); ok {
+			if seen[named] {
+				continue
+			}
+			seen[named] = true
+		}
+		next := func(t types.Type, step string) {
+			queue = append(queue, node{t: t, path: append(append([]string(nil), n.path...), step)})
+		}
+		if s, ok := base.Underlying().(*types.Struct); ok {
+			for i := 0; i < s.NumFields(); i++ {
+				if f := s.Field(i); visible(pkg, f) {
+					next(f.Type(), f.Name())
+				}
+			}
+		}
+		for _, m := range methods(base) {
+			if !visible(pkg, m) {
+				continue
+			}
+			sig := m.Type().(*types.Signature)
+			if sig.Params().Len() == 0 && sig.Results().Len() == 1 {
+				next(sig.Results().At(0).Type(), m.Name()+"()")
+			}
+		}
+	}
+	return "", ""
+}
+
+// methods returns the methods callable on an addressable value of type t, in name order.
+func methods(t types.Type) []*types.Func {
+	var ms *types.MethodSet
+	if types.IsInterface(t) {
+		ms = types.NewMethodSet(t)
+	} else {
+		ms = types.NewMethodSet(types.NewPointer(t))
+	}
+	out := make([]*types.Func, 0, ms.Len())
+	for i := 0; i < ms.Len(); i++ {
+		if f, ok := ms.At(i).Obj().(*types.Func); ok {
+			out = append(out, f)
+		}
+	}
+	return out
+}
+
+// visible reports a field or method the analysed package can use: exported, or its own.
+func visible(pkg *types.Package, obj types.Object) bool {
+	return obj.Exported() || obj.Pkg() == pkg
+}

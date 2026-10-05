@@ -17,6 +17,12 @@
 // return word (return, returns, yields, reports whether, tells the caller whether, gives back) or an error word (error, errors, err,
 // ErrX). A result that carries an error inside it (chan error, func() error, a struct with an error
 // field, a type parameter) is unsupported for the error claim: the doc may mean that error.
+//
+// For the result claim, a function with an output it writes to (an io.Writer or
+// http.ResponseWriter parameter or receiver, or one reached from it through fields and methods
+// without arguments, see writer.go) is asked a question of its own with a fact naming that output,
+// so the classifier can tell an HTTP handler's "returns the version", which is about the response,
+// from a value or an error promised to the Go caller.
 package docsignature
 
 import (
@@ -59,7 +65,7 @@ func init() {
 		Name:        Name,
 		Doc:         "a doc comment that promises a returned result or error the function's signature does not have",
 		Standard:    true,
-		Version:     "1",
+		Version:     "2",
 		Analyzer:    Analyzer,
 		NewSettings: func() any { return &Settings{} },
 		New: func(s any) (sdk.Rule, error) {
@@ -102,7 +108,7 @@ func run(pass *analysis.Pass) (any, error) {
 				if sig.Recv() != nil && isErrorType(sig.Recv().Type()) {
 					continue
 				}
-				out = appendCandidate(out, pass, fd.Doc, fd.Name, sig)
+				out = appendCandidate(out, pass, fd.Doc, fd.Name, sig, true)
 			}
 		}
 		// Interface declarations anywhere in the file, local ones and parenthesised ones included.
@@ -123,7 +129,7 @@ func run(pass *analysis.Pass) (any, error) {
 					continue // an embedded interface or constraint term
 				}
 				if obj, ok := pass.TypesInfo.Defs[m.Names[0]].(*types.Func); ok {
-					out = appendCandidate(out, pass, m.Doc, m.Names[0], obj.Type().(*types.Signature))
+					out = appendCandidate(out, pass, m.Doc, m.Names[0], obj.Type().(*types.Signature), false)
 				}
 			}
 			return true
@@ -162,7 +168,9 @@ func isTestingFunc(pass *analysis.Pass, fd *ast.FuncDecl) bool {
 	return false
 }
 
-func appendCandidate(out []*sdk.Candidate, pass *analysis.Pass, doc *ast.CommentGroup, id *ast.Ident, sig *types.Signature) []*sdk.Candidate {
+// appendCandidate adds the candidate for one documented function; declared is false for an
+// interface method, which has no body.
+func appendCandidate(out []*sdk.Candidate, pass *analysis.Pass, doc *ast.CommentGroup, id *ast.Ident, sig *types.Signature, declared bool) []*sdk.Candidate {
 	if doc == nil {
 		return out
 	}
@@ -197,6 +205,12 @@ func appendCandidate(out []*sdk.Candidate, pass *analysis.Pass, doc *ast.Comment
 				c.Unsupported = "a result may hold an error (an interface, a type parameter, an error inside it); the doc may mean that error"
 				return append(out, c)
 			}
+		}
+	}
+	if claim == claimResult {
+		if w := writerFact(pass.Pkg, sig, declared); w != "" {
+			c.Payload.Fact("writer", w)
+			c.Local["writer"] = w
 		}
 	}
 	c.Payload.AddProse("doc", sdk.Mask(text, id.Name, self))
@@ -301,7 +315,28 @@ func excludesError(it *types.Interface) bool {
 
 type rule struct{ threshold float64 }
 
+// A function with an output it writes to, named by the `writer` fact, is asked two questions
+// instead of returns_result. An HTTP handler's "returns the version" is about the response, which
+// questionWriter lets the classifier say; a promised error is not, since an error value never
+// reaches a client, and questionWriterError asks about it alone, so a doc that promises one is not
+// lost in the reading of the rest. Either answer is enough for a finding.
+const (
+	questionWriter      = "returns_to_caller"
+	questionWriterError = "returns_error_to_caller"
+)
+
 func (r *rule) Questions(c *sdk.Candidate) []sdk.Question {
+	if c.Local["claim"] == claimResult && c.Local["writer"] != "" {
+		return []sdk.Question{{
+			ID:   questionWriterError,
+			Kind: sdk.Noul,
+			Text: "Does any sentence of `doc` state that the documented function returns an error value to its caller, as in \"returns an error if the file is missing\" or \"returns the parsed value and an error\"? One such sentence is enough. These do not count: an error the sentence says is written or sent to a client, in a response or to an output; an error the function logs, records, panics with or passes on; an error another function returns; errors mentioned in general.",
+		}, {
+			ID:   questionWriter,
+			Kind: sdk.Noul,
+			Text: "The documented function has no results, and `writer` names an output it writes to, such as the response an HTTP handler sends to its client. In the doc of such a function, \"returns X\" often means that X is written to that output. Does any sentence of `doc` promise something that only a Go return value could give the function's caller: an error value, or a value the doc says the caller gets back? One such sentence is enough. An error counts, alone or next to other values, as in \"returns an error if the upload fails\": an error value is never written to a client. A count or a flag the caller gets back counts, as in \"returns the number of bytes written\". These do not count: what the function returns, responds with or serves through that output, as in \"returns the list of users\" or \"returns the current configuration\" on a handler; a value the sentence says is written or sent to a client or an output; when or how it returns; returning something into a pool or to an owner; a value delivered another way, such as sent on a channel or passed to a callback; what it does; what another function or a request returns; a statement that it returns nothing.",
+		}}
+	}
 	if c.Local["claim"] == claimResult {
 		return []sdk.Question{{
 			ID:   "returns_result",
@@ -317,23 +352,44 @@ func (r *rule) Questions(c *sdk.Candidate) []sdk.Question {
 }
 
 func (r *rule) Decide(c *sdk.Candidate, answers map[string]sdk.Answer) sdk.Decision {
-	id, what := "returns_result", "a result"
-	if c.Local["claim"] == claimError {
-		id, what = "returns_error", "an error"
-	}
-	y := answers[id].Yes
-	switch {
-	case y == nil:
-		return sdk.Abstain("the classifier gave no probability of yes")
-	case *y >= r.threshold:
-	case *y <= 1-r.threshold:
-		return sdk.Clean()
-	default:
-		return sdk.Abstain(fmt.Sprintf("yes at %.2f is neither ruled out nor established (threshold %.2f)", *y, r.threshold))
-	}
 	name := c.Local["name"]
-	if c.Local["claim"] == claimError {
-		return sdk.Report("doc of %s says it returns %s, but %s has no error result", name, what, name)
+	switch {
+	case c.Local["claim"] == claimError:
+		return r.decide(answers, []string{"returns_error"}, func(string) sdk.Decision {
+			return sdk.Report("doc of %s says it returns an error, but %s has no error result", name, name)
+		})
+	case c.Local["writer"] != "":
+		return r.decide(answers, []string{questionWriterError, questionWriter}, func(id string) sdk.Decision {
+			if id == questionWriterError {
+				return sdk.Report("doc of %s says it returns an error, but %s returns nothing", name, name)
+			}
+			return sdk.Report("doc of %s says it returns a result, but %s returns nothing", name, name)
+		})
 	}
-	return sdk.Report("doc of %s says it returns %s, but %s returns nothing", name, what, name)
+	return r.decide(answers, []string{"returns_result"}, func(string) sdk.Decision {
+		return sdk.Report("doc of %s says it returns a result, but %s returns nothing", name, name)
+	})
+}
+
+// decide reports when any of the questions is answered yes at the threshold, naming the first such
+// question; it is clean when every one is answered no at the threshold, and abstains otherwise.
+func (r *rule) decide(answers map[string]sdk.Answer, ids []string, report func(id string) sdk.Decision) sdk.Decision {
+	allNo := true
+	var weak []string
+	for _, id := range ids {
+		y := answers[id].Yes
+		switch {
+		case y == nil:
+			return sdk.Abstain("the classifier gave no probability of yes")
+		case *y >= r.threshold:
+			return report(id)
+		case *y > 1-r.threshold:
+			allNo = false
+			weak = append(weak, fmt.Sprintf("%s at %.2f", id, *y))
+		}
+	}
+	if allNo {
+		return sdk.Clean()
+	}
+	return sdk.Abstain(fmt.Sprintf("yes (%s) is neither ruled out nor established (threshold %.2f)", strings.Join(weak, ", "), r.threshold))
 }

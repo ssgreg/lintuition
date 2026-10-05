@@ -5,6 +5,7 @@ import (
 	"go/ast"
 	"go/parser"
 	"go/token"
+	"go/types"
 	"os"
 	"path/filepath"
 	"sort"
@@ -13,6 +14,7 @@ import (
 
 	"golang.org/x/tools/go/analysis/analysistest"
 
+	"github.com/ssgreg/lintuition/internal/classify"
 	"github.com/ssgreg/lintuition/sdk"
 )
 
@@ -118,6 +120,14 @@ func yes(id string, p float64) map[string]sdk.Answer {
 	return map[string]sdk.Answer{id: {QuestionID: id, Yes: &p}}
 }
 
+// both answers the two questions of a candidate with an output: the error one, then the other.
+func both(errYes, valueYes float64) map[string]sdk.Answer {
+	return map[string]sdk.Answer{
+		questionWriterError: {QuestionID: questionWriterError, Yes: &errYes},
+		questionWriter:      {QuestionID: questionWriter, Yes: &valueYes},
+	}
+}
+
 func TestQuestions(t *testing.T) {
 	r := &rule{threshold: 0.85}
 	for claim, id := range map[string]string{claimResult: "returns_result", claimError: "returns_error"} {
@@ -129,12 +139,26 @@ func TestQuestions(t *testing.T) {
 			t.Errorf("claim %s: %v", claim, err)
 		}
 	}
+	// The writer fact switches the result claim to its own question, and only the result claim.
+	qs := r.Questions(&sdk.Candidate{Local: map[string]string{"claim": claimResult, "writer": "parameter w, an io.Writer"}})
+	if len(qs) != 2 || qs[0].ID != questionWriterError || qs[1].ID != questionWriter || !strings.Contains(qs[1].Text, "`writer`") {
+		t.Errorf("writer: %+v", qs)
+	}
+	for _, q := range qs {
+		if err := q.Validate(); err != nil || q.Kind != sdk.Noul || !strings.Contains(q.Text, "`doc`") {
+			t.Errorf("writer: %s: %v", q.ID, err)
+		}
+	}
+	if qs := r.Questions(&sdk.Candidate{Local: map[string]string{"claim": claimError, "writer": "x"}}); qs[0].ID != "returns_error" {
+		t.Errorf("error claim with a writer: %+v", qs)
+	}
 }
 
 func TestDecide(t *testing.T) {
 	r := &rule{threshold: 0.85}
 	result := &sdk.Candidate{Local: map[string]string{"name": "Sync", "claim": claimResult}}
 	errc := &sdk.Candidate{Local: map[string]string{"name": "Validate", "claim": claimError}}
+	writer := &sdk.Candidate{Local: map[string]string{"name": "Proxy", "claim": claimResult, "writer": "parameter w, an http.ResponseWriter"}}
 	for _, tc := range []struct {
 		name            string
 		c               *sdk.Candidate
@@ -153,6 +177,16 @@ func TestDecide(t *testing.T) {
 		{"error: not promised", errc, yes("returns_error", 0.1), false, false},
 		{"error: weak abstains", errc, yes("returns_error", 0.5), false, true},
 		{"error: missing answer", errc, map[string]sdk.Answer{}, false, true},
+		{"writer: a value promised to the caller", writer, both(0.05, 0.9), true, false},
+		{"writer: an error promised to the caller", writer, both(0.9, 0.05), true, false},
+		{"writer: an error, the rest weak", writer, both(0.9, 0.5), true, false},
+		{"writer: what goes to the client", writer, both(0.05, 0.05), false, false},
+		{"writer: both at the no threshold", writer, both(0.15, 0.15), false, false},
+		{"writer: weak value abstains", writer, both(0.05, 0.5), false, true},
+		{"writer: weak error abstains", writer, both(0.5, 0.05), false, true},
+		{"writer: one answer missing", writer, yes(questionWriter, 0.05), false, true},
+		{"writer: the plain result question is ignored", writer, yes("returns_result", 0.99), false, true},
+		{"result: the writer questions are ignored", result, both(0.99, 0.99), false, true},
 	} {
 		d := r.Decide(tc.c, tc.answers)
 		if d.Report != tc.report || (d.Abstained != "") != tc.abstain {
@@ -160,6 +194,12 @@ func TestDecide(t *testing.T) {
 		}
 	}
 	if d := r.Decide(result, yes("returns_result", 0.9)); d.Message != "doc of Sync says it returns a result, but Sync returns nothing" {
+		t.Errorf("message: %s", d.Message)
+	}
+	if d := r.Decide(writer, both(0.05, 0.9)); d.Message != "doc of Proxy says it returns a result, but Proxy returns nothing" {
+		t.Errorf("message: %s", d.Message)
+	}
+	if d := r.Decide(writer, both(0.9, 0.9)); d.Message != "doc of Proxy says it returns an error, but Proxy returns nothing" {
 		t.Errorf("message: %s", d.Message)
 	}
 	if d := r.Decide(errc, yes("returns_error", 0.9)); d.Message != "doc of Validate says it returns an error, but Validate has no error result" {
@@ -216,16 +256,105 @@ func TestFixtureDocsCarryNoHints(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
-		for _, d := range f.Decls {
-			fd, ok := d.(*ast.FuncDecl)
-			if !ok || fd.Doc == nil {
-				continue
+		check := func(doc *ast.CommentGroup, id *ast.Ident) {
+			if doc == nil {
+				return
 			}
 			for _, hint := range []string{"Defect", "Fixed twin", "Negative", "doc-vs-signature", "want"} {
-				if strings.Contains(fd.Doc.Text(), hint) {
-					t.Errorf("%s: the doc of %s carries %q", name, fd.Name.Name, hint)
+				if strings.Contains(doc.Text(), hint) {
+					t.Errorf("%s: the doc of %s carries %q", name, id.Name, hint)
 				}
 			}
 		}
+		ast.Inspect(f, func(n ast.Node) bool {
+			switch n := n.(type) {
+			case *ast.FuncDecl:
+				check(n.Doc, n.Name)
+			case *ast.InterfaceType:
+				for _, m := range n.Methods.List {
+					if len(m.Names) == 1 {
+						check(m.Doc, m.Names[0])
+					}
+				}
+			}
+			return true
+		})
+	}
+}
+
+func TestWriterExtraction(t *testing.T) {
+	res := analysistest.Run(t, analysistest.TestData(), Analyzer, "w")
+	var cs []*sdk.Candidate
+	for _, r := range res {
+		cs = append(cs, r.Result.([]*sdk.Candidate)...)
+	}
+	sort.SliceStable(cs, func(i, j int) bool { return num(caseNo(t, cs[i].Pos)) < num(caseNo(t, cs[j].Pos)) })
+	var got []string
+	for _, c := range cs {
+		n := caseNo(t, c.Pos)
+		if len(c.Payload.Source) > 0 || c.Unsupported != "" {
+			t.Errorf("case %s: source %v, unsupported %q", n, c.Payload.Source, c.Unsupported)
+		}
+		w, _ := c.Payload.Facts["writer"].(string)
+		if w != c.Local["writer"] || len(c.Payload.Facts) > 1 || (w == "") != (len(c.Payload.Facts) == 0) {
+			t.Errorf("case %s: facts %v, local writer %q", n, c.Payload.Facts, c.Local["writer"])
+		}
+		if _, err := classify.State(c.Payload, classify.Prose); err != nil {
+			t.Errorf("case %s: the payload is refused: %v", n, err)
+		}
+		if w == "" {
+			got = append(got, n+" "+c.Local["claim"])
+			continue
+		}
+		got = append(got, fmt.Sprintf("%s %s %q", n, c.Local["claim"], w))
+	}
+	want := []string{
+		`1 result "parameter w, an http.ResponseWriter"`,
+		`2 result "parameter out, an io.Writer"`,
+		`3 result "parameter f, an io.Writer"`,
+		`4 result "receiver s, an io.Writer"`,
+		`5 result "parameter s, an io.Writer"`,
+		`6 result "receiver r, holds an http.ResponseWriter in r.w"`,
+		`7 result "parameter c, holds an http.ResponseWriter in c.Writer"`,
+		`8 result "parameter o, holds an http.ResponseWriter in o.in.resp.w"`,
+		`9 result "parameter c, holds an http.ResponseWriter in c.Response()"`,
+		`10 result "parameter 1, an http.ResponseWriter"`,
+		`11 result`,
+		`12 result`,
+		`14 result`,
+		`15 result`,
+		`16 result`,
+		`17 result`,
+		`18 result`,
+		`19 result`,
+		`20 result "parameter m, holds an io.Writer in m.buf"`,
+		`21 result "parameter a, holds an http.ResponseWriter in a.in.resp.w"`,
+		`22 result "parameter s, holds an http.ResponseWriter in s.Short"`,
+		`23 result "the receiver, an io.Writer"`,
+		`24 result`,
+		`25 result`,
+		`26 result`,
+	}
+	if strings.Join(got, "\n") != strings.Join(want, "\n") {
+		t.Fatalf("candidates:\n%s\n\nwant:\n%s", strings.Join(got, "\n"), strings.Join(want, "\n"))
+	}
+}
+
+// TestWriterWalkBounds checks that a walk that runs out of nodes finds nothing rather than a writer
+// past the bound, and that a writer within it is found.
+func TestWriterWalkBounds(t *testing.T) {
+	fields := func(n int) *types.Struct {
+		var fs []*types.Var
+		for i := 0; i < n; i++ {
+			fs = append(fs, types.NewField(0, nil, fmt.Sprintf("F%d", i), types.Typ[types.Int], false))
+		}
+		fs = append(fs, types.NewField(0, nil, "W", ioWriter, false))
+		return types.NewStruct(fs, nil)
+	}
+	if k, p := findWriter(nil, fields(10)); k != "io.Writer" || p != "W" {
+		t.Errorf("small: %q %q", k, p)
+	}
+	if k, p := findWriter(nil, fields(maxWriterNodes)); k != "" || p != "" {
+		t.Errorf("past the node bound: %q %q", k, p)
 	}
 }

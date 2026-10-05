@@ -261,7 +261,7 @@ semantic:
         - {linter: doc-vs-signature, question: returns_result, when: "returns any errors, and returns the entry to a pool", yes: 0.9}
         - {linter: doc-vs-signature, question: returns_result, when: "returns all descriptions of the collector", yes: 0.9}
         - {linter: doc-vs-signature, question: returns_result, when: "returns all observations through ch", yes: 0.05}
-        - {linter: doc-vs-signature, question: returns_result, when: "writes the state as JSON to w", yes: 0.05}
+        - {linter: doc-vs-signature, question: returns_to_caller, when: "writes the state as JSON to w", yes: 0.05}
         - {linter: doc-vs-signature, question: returns_result, when: "yields every item to yield", yes: 0.1}
         - {linter: doc-vs-signature, question: returns_result, when: "blocks and returns when ctx is done", yes: 0.05}
         - {linter: doc-vs-signature, question: returns_result, when: "returns c into the pool", yes: 0.05}
@@ -275,6 +275,17 @@ semantic:
         - {linter: doc-vs-signature, question: returns_error, when: "wraps the message of an error", yes: 0.1}
         - {linter: doc-vs-signature, question: returns_error, when: "how many times Do returned an error", yes: 0.05}
         - {linter: doc-vs-signature, question: returns_result, when: "returns once the queue is empty", yes: 0.5}
+        - {linter: doc-vs-signature, question: returns_error_to_caller, when: "returns the upstream status code and an error", yes: 0.9}
+        - {linter: doc-vs-signature, question: returns_error_to_caller, when: "returns an error if the body exceeds the limit", yes: 0.9}
+        - {linter: doc-vs-signature, question: returns_error_to_caller, yes: 0.05}
+        - {linter: doc-vs-signature, question: returns_to_caller, when: "returns the upstream status code and an error", yes: 0.9}
+        - {linter: doc-vs-signature, question: returns_to_caller, when: "returns an error if the body exceeds the limit", yes: 0.9}
+        - {linter: doc-vs-signature, question: returns_to_caller, when: "returns how many entries were committed", yes: 0.9}
+        - {linter: doc-vs-signature, question: returns_to_caller, when: "how long the service has been running", yes: 0.05}
+        - {linter: doc-vs-signature, question: returns_to_caller, when: "most recent probe outcome", yes: 0.05}
+        - {linter: doc-vs-signature, question: returns_to_caller, when: "orders of the current account", yes: 0.05}
+        - {linter: doc-vs-signature, question: returns_to_caller, when: "profile of the signed-in member", yes: 0.05}
+        - {linter: doc-vs-signature, question: returns_to_caller, when: "still accepted by the vault", yes: 0.05}
         # (normal-event-at-error's twin: its doc mentions an error, the function returns a string)
         - {linter: doc-vs-signature, question: returns_error, when: "a cache miss is the cache working as designed", yes: 0.05}
         # read-only-promise

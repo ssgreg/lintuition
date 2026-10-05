@@ -8,6 +8,7 @@ import (
 	"context"
 	"fmt"
 	"io"
+	"net/http"
 )
 
 type Buffer struct{ data []byte }
@@ -185,3 +186,79 @@ func Drain(q chan int) {
 
 // Watch returns a channel that receives an error when the watch fails.
 func Watch() chan error { return nil }
+
+type Gateway struct{ client *http.Client }
+
+// Defect: a handler whose doc still states the Go contract it had before it wrote the response
+// itself; an error never reaches an HTTP client.
+
+// Forward relays the request to target, returns the upstream status code and an error.
+func (g *Gateway) Forward(w http.ResponseWriter, r *http.Request, target string) { // want `doc of Forward says it returns (an error|a result), but Forward returns nothing`
+	w.WriteHeader(http.StatusBadGateway)
+}
+
+type Store struct{ limit int64 }
+
+// Defect: a handler doc promising an error to its caller.
+
+// Upload saves the posted file and returns an error if the body exceeds the limit.
+func (s *Store) Upload(w http.ResponseWriter, r *http.Request) { // want `doc of Upload says it returns (an error|a result), but Upload returns nothing`
+	w.WriteHeader(http.StatusCreated)
+}
+
+type Journal struct{ pending []byte }
+
+func (j *Journal) Write(p []byte) (int, error) {
+	j.pending = append(j.pending, p...)
+	return len(p), nil
+}
+
+// Defect: the receiver is a writer, but the count is promised to the caller.
+
+// Commit appends the pending entries to the log file and returns how many entries were committed.
+func (j *Journal) Commit() { j.pending = nil } // want `doc of Commit says it returns a result, but Commit returns nothing`
+
+// Negative: a handler's doc says what goes to the client.
+
+// Uptime returns how long the service has been running.
+func (g *Gateway) Uptime(w http.ResponseWriter, r *http.Request) { fmt.Fprint(w, "1h") }
+
+// Negative: the same, with the subject of the response named.
+
+// Probe returns the most recent probe outcome of the node in the path.
+func (g *Gateway) Probe(w http.ResponseWriter, r *http.Request) { fmt.Fprint(w, "ok") }
+
+type Context struct {
+	Writer  http.ResponseWriter
+	Request *http.Request
+}
+
+type API struct{}
+
+// Negative: a framework context holding the response writer in a field.
+
+// Orders returns the orders of the current account.
+func (a *API) Orders(c *Context) { fmt.Fprint(c.Writer, "[]") }
+
+type Reply struct{ W http.ResponseWriter }
+
+func (r *Reply) Header() http.Header         { return r.W.Header() }
+func (r *Reply) Write(b []byte) (int, error) { return r.W.Write(b) }
+func (r *Reply) WriteHeader(code int)        { r.W.WriteHeader(code) }
+
+type Ctx interface {
+	Reply() *Reply
+	Param(name string) string
+}
+
+// Negative: a framework context whose method gives the response writer.
+
+// Profile returns the profile of the signed-in member.
+func (a *API) Profile(c Ctx) { fmt.Fprint(c.Reply(), "{}") }
+
+type Keys interface {
+	// Negative: an interface method answering a request.
+
+	// KeyState returns whether the stored key is still accepted by the vault.
+	KeyState(w http.ResponseWriter, r *http.Request)
+}

@@ -2,6 +2,15 @@
 
 ## Unreleased
 
+- `doc-vs-signature` (version 2) tells an HTTP handler's "returns the build version", said about
+  the response it writes, from a value or an error promised to the Go caller. For a function with
+  no results it finds, through the types, an output the function writes to (an `io.Writer` or
+  `http.ResponseWriter` parameter or receiver, or one reached from it through fields and methods
+  without arguments, as on gin-style and echo-style contexts), sends a fact naming it, and asks two
+  questions instead of one: does the doc promise an error, and does it promise a value to the Go
+  caller rather than to the output. On 25 repositories 11 of 28 findings went away, all HTTP
+  handlers or response helpers labelled unclear or false before (5 clean, 6 abstain), and every
+  true finding stayed, a stale "returns the status and an error" on a handler among them.
 - `openai`: `reasoning-effort`, so a model that thinks first (qwen3.x, gemma4 on Ollama) answers
   with its first token; a confident answer no longer fails on a confidence a rounding error above 1.
 - New linter `doc-vs-signature`: a doc comment that promises a returned result or error the
