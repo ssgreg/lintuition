@@ -15,7 +15,7 @@ each linter checks its answers against facts extracted by Go analysis.
 
 Our quickstart uses [Jev](https://typesafe.ai). TypeSafe says it "returns typed decisions with
 calibrated probabilities" and lists a price of $42 per billion input tokens. In our
-[showcase measurement](docs/classifiers.md#how-the-backends-compare), Jev caught all 17 marked
+[showcase measurement](docs/classifiers.md#how-the-backends-compare), Jev caught all 18 marked
 findings in each of three runs at an estimated $0.0006 a run.
 
 LLMs work too: an OpenAI-compatible API with logprobs support (including local models through
@@ -167,6 +167,7 @@ How each one reads your code, what it sends and how it decides, with an example:
 | units, comments | `human-unit-contradiction` | a printf message names a different unit than the duration it prints |
 | | `enum-comment-shift` | a comment in a const block that describes a neighbouring constant |
 | | `doc-vs-signature` | a doc that promises a result or an error the function's signature does not have |
+| | `read-only-promise` | a doc that promises no change while the body writes the receiver, a parameter or a package variable |
 | tests | `test-name-vs-assertion` | a test named for a failure that asserts success, or the reverse |
 | | `table-case-vs-expectation` | a table case whose name says the opposite of its boolean `want` |
 | | `doc-vs-table` | a table case whose `want` contradicts the tested function's doc |

@@ -18,6 +18,7 @@ import (
 	_ "github.com/ssgreg/lintuition/linters/metrictypevshelp"
 	_ "github.com/ssgreg/lintuition/linters/normalaterror"
 	_ "github.com/ssgreg/lintuition/linters/prematuresuccess"
+	_ "github.com/ssgreg/lintuition/linters/readonlypromise"
 	_ "github.com/ssgreg/lintuition/linters/sentinelname"
 	_ "github.com/ssgreg/lintuition/linters/severeunderstated"
 	_ "github.com/ssgreg/lintuition/linters/suppressionreason"
