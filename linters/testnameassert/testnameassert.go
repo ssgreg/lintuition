@@ -10,8 +10,10 @@
 // Code binds the test to the call under test by the test's name (TestValidate... calls Validate,
 // TestStore_Save... calls (Store).Save), takes the one call of it whose error result is kept, and
 // reads what the test asserts about that error: `if err != nil { t.Fatal }` and NoError expect no
-// error, `if err == nil { t.Fatal }` and Error expect one. The classifier reads only the test name,
-// as words, and says whether it states that the call should fail. Go code compares the two.
+// error, `if err == nil { t.Fatal }` and Error expect one. The classifier reads the test name, as
+// words, the test's doc comment and whether the test passes the call an error argument, and says
+// whether the name states that the call itself should fail, or only describes the input or a
+// failure the test arranges elsewhere. Go code compares the answer with the assertion.
 //
 // Anything ambiguous is unsupported: two functions the name matches equally, several calls of the
 // bound function, an error variable written again, an error checked in a form not read here, or
@@ -58,7 +60,7 @@ func init() {
 		Name:        Name,
 		Doc:         "a test whose name says the call should fail while it asserts no error, or the reverse",
 		Standard:    true,
-		Version:     "1",
+		Version:     "2",
 		Analyzer:    Analyzer,
 		NewSettings: func() any { return &Settings{} },
 		New: func(s any) (sdk.Rule, error) {
@@ -178,8 +180,70 @@ func candidate(pass *analysis.Pass, fd *ast.FuncDecl) *sdk.Candidate {
 	}
 	c.Local["expect"] = expect
 	c.Payload.AddProse("test", strings.Join(words, " "))
+	c.Payload.AddProse("doc", testDoc(fd))
 	c.Payload.Fact("call", fn.Name())
+	setup := "no error argument observed"
+	if passesError(info, calls[fn][0]) {
+		setup = "the test passes an error value to the call as an argument"
+	}
+	c.Payload.Fact("setup", setup)
 	return c
+}
+
+// testDoc is the test's own doc comment, with the test's name replaced by "this test" so the
+// classifier reads what the doc says and not the name again; empty when the test has none.
+func testDoc(fd *ast.FuncDecl) string {
+	if fd.Doc == nil {
+		return ""
+	}
+	return sdk.Mask(strings.TrimSpace(fd.Doc.Text()), fd.Name.Name, "this test")
+}
+
+// passesError reports whether the call hands a value to a parameter of type error: then an error
+// in the test name, as in TestWrapNilError, may name the input rather than the result. Arguments
+// are bound to the parameters of the call's own signature, so a method expression's receiver
+// (Store.Join(s)) takes the first parameter and a generic function's parameters are instantiated
+// (Wrap[error]). A sole call argument with several results (Consume(Pair())) supplies one value
+// per result. A variadic ...error counts for the values given one by one; a slice spread with
+// errs... is not an error value.
+func passesError(info *types.Info, call *ast.CallExpr) bool {
+	ft := info.TypeOf(call.Fun)
+	if ft == nil {
+		return false
+	}
+	sig, ok := ft.Underlying().(*types.Signature)
+	if !ok {
+		return false
+	}
+	var args []types.Type
+	for _, a := range call.Args {
+		args = append(args, info.TypeOf(a))
+	}
+	if len(call.Args) == 1 {
+		if tup, ok := args[0].(*types.Tuple); ok {
+			args = args[:0]
+			for i := range tup.Len() {
+				args = append(args, tup.At(i).Type())
+			}
+		}
+	}
+	errType := types.Universe.Lookup("error").Type()
+	n := sig.Params().Len()
+	for i := range args {
+		var t types.Type
+		switch {
+		case i < n-1 || (i == n-1 && !sig.Variadic()):
+			t = sig.Params().At(i).Type()
+		case sig.Variadic() && i >= n-1 && call.Ellipsis == token.NoPos:
+			t = sig.Params().At(n - 1).Type().(*types.Slice).Elem()
+		default:
+			continue
+		}
+		if types.Identical(t, errType) {
+			return true
+		}
+	}
+	return false
 }
 
 // matchLen returns how much of the test name, after Test, names the function: Validate, or
@@ -580,15 +644,18 @@ func expectation(info *types.Info, body *ast.BlockStmt, e errExpr) (string, stri
 
 type rule struct{ threshold float64 }
 
+// The question is about the call under test itself, apart from the input and the setup:
+// TestSyncUploadTimeout names a failure the test arranges, and the test may require Sync to retry
+// and succeed.
 func (r *rule) Questions(*sdk.Candidate) []sdk.Question {
 	return []sdk.Question{{
 		ID:   "name_says",
 		Kind: sdk.Choice,
-		Text: "Judging only by the test name `test`, should the call under test return an error?",
+		Text: "Judging by the test name `test` and the test's doc comment `doc` (empty when it has none), should `call`, the call under test, return an error? `setup` says whether the test passes `call` an error value as an argument.",
 		Options: []sdk.Option{
-			{Key: expectError, Description: "Yes: the name says the call must fail, reject, refuse or return an error."},
-			{Key: expectNoError, Description: "No: the name says the call accepts, succeeds or returns a value."},
-			{Key: "input_only", Description: "The name only describes the input (bad quoting, empty list), not whether the call should fail."},
+			{Key: expectError, Description: "Yes: the name says `call` itself fails, rejects, refuses or returns an error."},
+			{Key: expectNoError, Description: "No: the name says `call` itself succeeds, accepts, copes with a problem or returns a value."},
+			{Key: "input_only", Description: "The name only describes the input or the setup (a nil or bad value passed in, a missing file, a dependency that fails), not whether `call` itself returns an error."},
 		},
 	}}
 }

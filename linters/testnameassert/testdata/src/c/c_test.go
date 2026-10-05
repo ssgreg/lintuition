@@ -339,3 +339,137 @@ func TestValidateAcceptsCallText(t *testing.T) { // 42 unsupported: Error() on a
 		t.Fatal(errFn().Error())
 	}
 }
+
+// TestValidateAcceptsDocumented checks that a plain token passes; TestValidateAcceptsDocumentedToo
+// is a different name and stays.
+func TestValidateAcceptsDocumented(t *testing.T) { // 43 candidate: the doc is sent, the test's own name masked
+	if err := Validate("x"); err != nil {
+		t.Fatal(err)
+	}
+}
+
+// Every mention is masked: see TestValidateAcceptsSpaced (TestValidateAcceptsSpaced).
+func TestValidateAcceptsSpaced(t *testing.T) { // 44 candidate: every mention of the name is masked
+	if err := Validate("x"); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func TestWrapNilError(t *testing.T) { // 45 candidate: a nil error passed to an error parameter
+	var err error
+	if got := Wrap(err, "p"); got != nil {
+		t.Fatal(got)
+	}
+}
+
+func TestJoinNothing(t *testing.T) { // 46 candidate: ...error given no argument passes no error
+	if err := Join(); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func TestCollectEmpty(t *testing.T) { // 47 candidate: a []error parameter is not an error
+	if err := Collect(nil); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func TestStore_RestoreKeepsCause(t *testing.T) { // 48 candidate: a method that takes an error
+	var s Store
+	if err := s.Restore(ErrEmpty); err == nil {
+		t.Fatal("no error")
+	}
+}
+
+// A note for the reader of this file, kept apart by a blank line.
+
+func TestValidateAcceptsUndocumented(t *testing.T) { // 49 candidate: a comment above a blank line is not the doc
+	if err := Validate("x"); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func TestJoinOne(t *testing.T) { // 50 candidate: an argument to ...error is an error value
+	if err := Join(ErrEmpty); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func TestJoinSpread(t *testing.T) { // 51 candidate: a slice spread into ...error is not an error value
+	errs := []error{ErrEmpty}
+	if err := Join(errs...); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func TestStore_JoinThroughExpression(t *testing.T) { // 52 candidate: a method expression's receiver is not an error argument
+	var s Store
+	if err := Store.Join(s); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func TestStore_JoinThroughExpressionOne(t *testing.T) { // 53 candidate: a method expression with one error
+	var s Store
+	if err := Store.Join(s, ErrEmpty); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func TestStore_JoinThroughExpressionSpread(t *testing.T) { // 54 candidate: a method expression with a spread slice
+	var s Store
+	errs := []error{ErrEmpty}
+	if err := Store.Join(s, errs...); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func TestStore_PrefixThroughExpression(t *testing.T) { // 55 candidate: the receiver and the string take the first two parameters
+	s := &Store{}
+	if err := (*Store).Prefix(s, "p"); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func TestStore_PrefixDirectOne(t *testing.T) { // 56 candidate: a direct method call with one variadic error
+	var s Store
+	if err := s.Prefix("p", ErrEmpty); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func TestUnwrapExplicit(t *testing.T) { // 57 candidate: an explicit instantiation with error
+	if err := Unwrap[error](nil); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func TestUnwrapInferred(t *testing.T) { // 58 candidate: an inferred instantiation with error
+	if err := Unwrap(ErrEmpty); err == nil {
+		t.Fatal("no error")
+	}
+}
+
+func TestConsumeForwarded(t *testing.T) { // 59 candidate: a forwarded result pair supplies the error
+	if err := Consume(Pair()); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func TestTallyForwarded(t *testing.T) { // 60 candidate: a forwarded result pair without an error
+	if err := Tally(Count()); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func TestAliasNilError(t *testing.T) { // 61 candidate: an alias of error is an error parameter
+	if err := Alias(nil); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func TestWrapAVeryLongFunctionNameThatGoesOnAndOnAndOnUntilItIsLongerThanAnyOrdinaryNameWouldBeNilError(t *testing.T) { // 62 candidate: a long name keeps the facts structural
+	if err := WrapAVeryLongFunctionNameThatGoesOnAndOnAndOnUntilItIsLongerThanAnyOrdinaryNameWouldBe(nil); err != nil {
+		t.Fatal(err)
+	}
+}
