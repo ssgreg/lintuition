@@ -193,3 +193,64 @@ func TestIdentityTracksAcceptance(t *testing.T) {
 		t.Error("a stricter min-letter-mass must not reuse answers accepted under a looser one")
 	}
 }
+
+func TestReasoningEffort(t *testing.T) {
+	s, bodies := stub(t, func(string) map[string]float64 { return map[string]float64{"A": 0.9, "B": 0.1} })
+	c, err := New(Settings{BaseURL: s.URL + "/v1", Model: "m", ReasoningEffort: "none"}, func(string) string { return "" })
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := c.Classify(context.Background(), sdk.Request{State: req.State, Questions: req.Questions[:1]}); err != nil {
+		t.Fatal(err)
+	}
+	if got := (*bodies)[0]["reasoning_effort"]; got != "none" {
+		t.Errorf("reasoning_effort sent: %v", got)
+	}
+	plain := newTest(t, s.URL)
+	if _, err := plain.Classify(context.Background(), sdk.Request{State: req.State, Questions: req.Questions[:1]}); err != nil {
+		t.Fatal(err)
+	}
+	if _, sent := (*bodies)[1]["reasoning_effort"]; sent {
+		t.Error("reasoning_effort sent although not configured")
+	}
+	if c.Identity() == plain.Identity() {
+		t.Error("answers given with reasoning off must not be reused for a model that thinks")
+	}
+	if _, err := New(Settings{Model: "m", ReasoningEffort: "None; drop"}, func(string) string { return "" }); err == nil {
+		t.Error("a malformed reasoning-effort was accepted")
+	}
+}
+
+func TestNonAnswerHintsReasoningEffort(t *testing.T) {
+	s, _ := stub(t, func(string) map[string]float64 { return map[string]float64{"<|channel>": 0.99} })
+	c := newTest(t, s.URL)
+	_, err := c.Classify(context.Background(), sdk.Request{State: req.State, Questions: req.Questions[:1]})
+	if err == nil || !strings.Contains(err.Error(), "reasoning-effort: none") {
+		t.Errorf("error: %v", err)
+	}
+}
+
+// TestCertainAnswerRounding: a logprob of -0.0 on the letter plus tiny alternatives sums a hair
+// above 1 in floating point; the answer must still be accepted with a confidence of at most 1.
+func TestCertainAnswerRounding(t *testing.T) {
+	s := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		json.NewEncoder(w).Encode(map[string]any{
+			"choices": []any{map[string]any{"logprobs": map[string]any{"content": []any{map[string]any{"top_logprobs": []any{
+				map[string]any{"token": "A", "logprob": 0.0},
+				map[string]any{"token": "B", "logprob": math.Log(4e-8)},
+			}}}}}},
+			"usage": map[string]any{"prompt_tokens": 10},
+		})
+	}))
+	t.Cleanup(s.Close)
+	c := newTest(t, s.URL)
+	resp, err := c.Classify(context.Background(), sdk.Request{State: req.State, Questions: req.Questions[:1]})
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, a := range resp.Answers {
+		if a.Confidence == nil || *a.Confidence > 1 {
+			t.Errorf("confidence %v", a.Confidence)
+		}
+	}
+}

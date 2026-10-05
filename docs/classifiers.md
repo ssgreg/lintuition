@@ -60,9 +60,23 @@ code.
 | `openai` (Ollama, local) | qwen2.5:7b | 1/6 | 0 | 16 | 4 s | local |
 | `openai` (Ollama, local) | qwen2.5:3b | 0/6 | 0 | 16 | 2 s | local |
 
-On the [showcase](../examples/showcase) (all 16 linters, 17 marked findings), `jev-latest` caught
-every finding in each of 3 runs with no unmarked findings, at 105 requests and ~$0.0019 for the
+On the [showcase](../examples/showcase) (all 17 linters, 18 marked findings), `jev-latest` caught
+every finding in each of 3 runs with no unmarked findings, at 108 requests and ~$0.0019 for the
 three runs (2026-10-02).
+
+Larger local models on the twins of 2026-10-02 (32 marked defects from 16 linters, one run each,
+on an Apple M5 Pro with 48 GB through Ollama, `reasoning-effort: none`), with Jev on the same twins
+and build for reference:
+
+| classifier | model | defects caught | unmarked findings | requests | time | cost |
+|---|---|---|---|---|---|---|
+| `jev` | jev-latest | 31/32 | 1 | 163 | 13 s | ~$0.003 |
+| `openai` (Ollama, local) | gemma4:31b | 29/32 | 5 | 218 | 305 s | local |
+| `openai` (Ollama, local) | qwen3.8:27b | 23/32 | 1 | 218 | 256 s | local |
+
+On the showcase gemma4:31b caught 17/17 and qwen3.8:27b 14/17, in one run each. The openai adapter
+asks each question in its own request, so a linter with two questions costs it two requests where
+Jev needs one.
 
 The small local models mostly answer "the text does not let you tell" or read "config saved to
 disk" as an operation that is starting; the rules then abstain or stay quiet rather than report
@@ -82,8 +96,15 @@ semantic:
   classifiers:
     openai:
       base-url: http://127.0.0.1:11434/v1 # Ollama
-      model: qwen2.5:7b
+      model: gemma4:31b
+      reasoning-effort: none              # for a model that thinks before it answers
 ```
+
+The adapter reads one token, so the model's first token must be the answer letter. A model that
+thinks first spends it on the thinking: on Ollama, qwen3.x starts with its reasoning and gemma4 with
+a channel token, and every request fails the letter check. `reasoning-effort: none` sends
+`reasoning_effort: "none"`, which turns that off; Ollama ignores `think: false` on its
+OpenAI-compatible endpoint.
 
 ## A coding agent
 

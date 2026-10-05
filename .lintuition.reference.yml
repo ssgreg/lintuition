@@ -56,6 +56,9 @@ linters:
     destructive-remediation:
       # Minimum probability that a text advises a destructive step. Default: 0.85.
       threshold: 0.85
+    read-only-promise:
+      # Minimum probability of yes for a finding, and of no for a clean answer. Default: 0.7.
+      threshold: 0.7
     sentinel-name-vs-text:
       # Minimum probability of the answer either way. Default: 0.55.
       threshold: 0.55
@@ -162,6 +165,9 @@ semantic:
       # USD per million input tokens, for estimates and budgets; unset means unknown.
       price-per-mtok: 0
       account: ""
+      # Sent as reasoning_effort when set. A model that thinks first (qwen3.x, gemma4 on Ollama)
+      # needs none: it spends its one answer token on the thinking otherwise.
+      reasoning-effort: ""
     claude-code:
       # The claude executable (default: claude on PATH).
       command: claude

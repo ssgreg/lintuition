@@ -2,7 +2,7 @@ version: "2"
 
 linters:
   default: none
-  enable: [doc-vs-signature, metric-type-vs-help, premature-success, table-case-vs-expectation, sentinel-name-vs-text, error-needs-type, human-unit-contradiction, enum-comment-shift, test-name-vs-assertion, doc-vs-table, suppression-rationale, log-sensitive-field, log-key-value-role, normal-event-at-error, severe-event-understated, destructive-remediation]
+  enable: [doc-vs-signature, read-only-promise, metric-type-vs-help, premature-success, table-case-vs-expectation, sentinel-name-vs-text, error-needs-type, human-unit-contradiction, enum-comment-shift, test-name-vs-assertion, doc-vs-table, suppression-rationale, log-sensitive-field, log-key-value-role, normal-event-at-error, severe-event-understated, destructive-remediation]
 
 semantic:
   classifier: fake
@@ -35,6 +35,16 @@ semantic:
         - {linter: log-sensitive-field, question: role, when: "\"message\":\"cache miss, loading from the database\"", choice: public, probability: 0.9}
         - {linter: log-sensitive-field, question: role, when: "\"message\":\"disk quota exceeded, uploads are paused\"", choice: public, probability: 0.9}
         - {linter: log-sensitive-field, question: role, when: "\"message\":\"failed to save the upload\"", choice: public, probability: 0.9}
+        - {linter: log-sensitive-field, question: role, when: "\"message\":\"client disconnected before the response was written\"", choice: public, probability: 0.9}
+        - {linter: log-sensitive-field, question: role, when: "\"message\":\"streaming search results to the caller\"", choice: public, probability: 0.9}
+        - {linter: log-sensitive-field, question: role, when: "\"message\":\"accept loop finished, the listener was closed for shutdown\"", choice: public, probability: 0.9}
+        - {linter: log-sensitive-field, question: role, when: "\"message\":\"feed poll retry scheduled in 30 seconds\"", choice: public, probability: 0.9}
+        - {linter: log-sensitive-field, question: role, when: "\"message\":\"closing the metrics listener\"", choice: public, probability: 0.9}
+        - {linter: log-sensitive-field, question: role, when: "\"message\":\"applying the new configuration\"", choice: public, probability: 0.9}
+        - {linter: log-sensitive-field, question: role, when: "\"message\":\"replaying the journal\"", choice: public, probability: 0.9}
+        - {linter: log-sensitive-field, question: role, when: "\"message\":\"shutting down the feed poller\"", choice: public, probability: 0.9}
+        - {linter: log-sensitive-field, question: role, when: "\"message\":\"tailing the access log\"", choice: public, probability: 0.9}
+        - {linter: log-sensitive-field, question: role, when: "\"message\":\"tailing the access log was stopped by its caller\"", choice: public, probability: 0.9}
         # log-key-value-role
         - {linter: log-key-value-role, question: role, when: "key remaining_attempts, value elapsedAttempts", choice: conflict, probability: 0.9}
         - {linter: log-key-value-role, question: role, when: "key attempts_made, value elapsedAttempts", choice: same, probability: 0.9}
@@ -44,6 +54,26 @@ semantic:
         - {linter: normal-event-at-error, question: event, when: "disk quota exceeded, uploads are paused", choice: degradation, probability: 0.9}
         - {linter: normal-event-at-error, question: event, when: "queue full, event dropped and not retried", choice: failure, probability: 0.9}
         - {linter: normal-event-at-error, question: event, when: "planned failover to the standby completed", choice: routine, probability: 0.95}
+        - {linter: normal-event-at-error, question: event, when: "client disconnected before the response was written", choice: routine, probability: 0.95}
+        - {linter: normal-event-at-error, question: event, when: "streaming search results to the caller", choice: routine, probability: 0.92}
+        - {linter: normal-event-at-error, question: event, when: "accept loop finished, the listener was closed", choice: routine, probability: 0.95}
+        - {linter: normal-event-at-error, question: event, when: "feed poll retry scheduled", choice: routine, probability: 0.9}
+        - {linter: normal-event-at-error, question: event, when: "closing the metrics listener", choice: failure, probability: 0.95}
+        # read alone, the message is routine; the operation answer with the unidentified error keeps it clean
+        - {linter: normal-event-at-error, question: event, when: "applying the new configuration", choice: routine, probability: 0.95}
+        - {linter: normal-event-at-error, question: event, when: "replaying the journal", choice: failure, probability: 0.9}
+        - {linter: normal-event-at-error, question: event, when: "the journal is unreadable, recovery stopped", choice: failure, probability: 0.95}
+        - {linter: normal-event-at-error, question: event, when: "shutting down the feed poller", choice: routine, probability: 0.95}
+        - {linter: normal-event-at-error, question: event, when: "tailing the access log was stopped by its caller", choice: routine, probability: 0.95}
+        - {linter: normal-event-at-error, question: operation, when: "tailing the access log was stopped by its caller", choice: action, probability: 0.95}
+        - {linter: normal-event-at-error, question: event, when: "tailing the access log", choice: routine, probability: 0.95}
+        - {linter: normal-event-at-error, question: operation, when: "tailing the access log", choice: action, probability: 0.95}
+        # the operation question is asked only for a call that carries an error the code did not identify
+        - {linter: normal-event-at-error, question: operation, when: "feed poll retry scheduled", choice: outcome, probability: 0.95}
+        - {linter: normal-event-at-error, question: operation, when: "closing the metrics listener", choice: action, probability: 0.95}
+        - {linter: normal-event-at-error, question: operation, when: "applying the new configuration", choice: action, probability: 0.9}
+        - {linter: normal-event-at-error, question: operation, when: "replaying the journal", choice: action, probability: 0.9}
+        - {linter: normal-event-at-error, question: operation, when: "disk quota exceeded, uploads are paused", choice: outcome, probability: 0.95}
         # severe-event-understated
         - {linter: severe-event-understated, question: consequence, when: "queue full, event dropped and not retried", choice: unintended_loss, probability: 0.95}
         - {linter: severe-event-understated, question: on_purpose, when: "queue full, event dropped and not retried", yes: 0.1}
@@ -58,6 +88,8 @@ semantic:
         - {linter: severe-event-understated, question: on_purpose, when: "\"message\":\"token rotated\"", yes: 0.5}
         - {linter: severe-event-understated, question: consequence, when: "\"message\":\"cache miss, loading from the database\"", choice: routine, probability: 0.95}
         - {linter: severe-event-understated, question: on_purpose, when: "\"message\":\"cache miss, loading from the database\"", yes: 0.5}
+        - {linter: severe-event-understated, question: consequence, when: "\"message\":\"client disconnected before the response was written\"", choice: routine, probability: 0.95}
+        - {linter: severe-event-understated, question: on_purpose, when: "\"message\":\"client disconnected before the response was written\"", yes: 0.5}
         - {linter: severe-event-understated, question: consequence, when: "\"message\":\"config saved to disk\"", choice: routine, probability: 0.95}
         - {linter: severe-event-understated, question: on_purpose, when: "\"message\":\"config saved to disk\"", yes: 0.5}
         - {linter: severe-event-understated, question: consequence, when: "\"message\":\"saving config to disk\"", choice: routine, probability: 0.95}
@@ -77,14 +109,30 @@ semantic:
         - {linter: destructive-remediation, question: states_loss, when: "lock file was removed by another process", yes: 0.2}
         - {linter: destructive-remediation, question: advice, when: "data volume is unreadable; format it", choice: destructive_advice, probability: 0.95}
         - {linter: destructive-remediation, question: states_loss, when: "data volume is unreadable; format it", yes: 0.1}
-        # destructive-remediation asks about every constant error and log text, every other twin's
-        # too. Those are reports, not advice: one answer for the rest, after the specific ones above.
+        - {linter: destructive-remediation, question: advice, when: "drop the index folder and start the service again", choice: destructive_advice, probability: 0.95}
+        - {linter: destructive-remediation, question: states_loss, when: "drop the index folder and start the service again", yes: 0.1}
+        - {linter: destructive-remediation, question: advice, when: "wipe the ledger and resync from scratch", choice: destructive_advice, probability: 0.95}
+        - {linter: destructive-remediation, question: states_loss, when: "wipe the ledger and resync from scratch", yes: 0.1}
+        - {linter: destructive-remediation, question: advice, when: "removing it loses only cached thumbnails", choice: destructive_advice, probability: 0.9}
+        - {linter: destructive-remediation, question: states_loss, when: "removing it loses only cached thumbnails", yes: 0.9}
+        - {linter: destructive-remediation, question: advice, when: "the replica has to be dropped", choice: own_action, probability: 0.9}
+        - {linter: destructive-remediation, question: states_loss, when: "the replica has to be dropped", yes: 0.1}
+        - {linter: destructive-remediation, question: advice, when: "purge staging bucket: %w", choice: own_action, probability: 0.9}
+        - {linter: destructive-remediation, question: states_loss, when: "purge staging bucket: %w", yes: 0.1}
+        # destructive-remediation does not read info and debug logs: "drop expired archive" and
+        # "purge the upload queue" are never asked, and a rule for them would only hide that.
+        # destructive-remediation asks about every constant error text and every warn-or-above log
+        # text, every other twin's too. Those are reports, not advice: one answer for the rest, after the specific ones above.
         - {linter: destructive-remediation, question: advice, choice: no_advice, probability: 0.9}
         - {linter: destructive-remediation, question: states_loss, yes: 0.5}
         # sentinel-name-vs-text
         - {linter: sentinel-name-vs-text, question: condition, when: "tenant record not found", choice: different, probability: 0.8}
         - {linter: sentinel-name-vs-text, question: condition, when: "tenant storage quota exceeded", choice: same, probability: 0.9}
         - {linter: sentinel-name-vs-text, question: condition, when: "backend hiccup", choice: insufficient, probability: 0.8}
+        - {linter: severe-event-understated, question: consequence, when: "\"message\":\"drop expired archive\"", choice: routine, probability: 0.95}
+        - {linter: severe-event-understated, question: on_purpose, when: "\"message\":\"drop expired archive\"", yes: 0.9}
+        - {linter: severe-event-understated, question: consequence, when: "\"message\":\"purge the upload queue\"", choice: routine, probability: 0.95}
+        - {linter: severe-event-understated, question: on_purpose, when: "\"message\":\"purge the upload queue\"", yes: 0.9}
         - {linter: sentinel-name-vs-text, question: condition, when: "cached lease is outdated", choice: different, probability: 0.5}
         # (the sentinel of error-needs-type's fixed twin)
         - {linter: sentinel-name-vs-text, question: condition, when: "invoice does not exist", choice: same, probability: 0.9}
@@ -123,10 +171,17 @@ semantic:
         - {linter: enum-comment-shift, question: describes, when: "want `comment describes", choice: none, probability: 0.9}
         # (the sentinel of test-name-vs-assertion's twin package: name and text agree)
         - {linter: sentinel-name-vs-text, question: condition, when: "unbalanced quote", choice: same, probability: 0.9}
+        - {linter: sentinel-name-vs-text, question: condition, when: '"text":"disk full"', choice: same, probability: 0.9}
         # test-name-vs-assertion
         - {linter: test-name-vs-assertion, question: name_says, when: "unquote rejects unbalanced quote", choice: error, probability: 0.95}
         - {linter: test-name-vs-assertion, question: name_says, when: "unquote accepts quoted word", choice: no_error, probability: 0.95}
         - {linter: test-name-vs-assertion, question: name_says, when: "unquote empty string", choice: input_only, probability: 0.95}
+        - {linter: test-name-vs-assertion, question: name_says, when: "save fails when the store refuses", choice: error, probability: 0.95}
+        - {linter: test-name-vs-assertion, question: name_says, when: "save survives a cache failure", choice: no_error, probability: 0.95}
+        - {linter: test-name-vs-assertion, question: name_says, when: '"test":"save cache write failure"', choice: input_only, probability: 0.9}
+        - {linter: test-name-vs-assertion, question: name_says, when: '"test":"wrap nil error"', choice: input_only, probability: 0.9}
+        - {linter: test-name-vs-assertion, question: name_says, when: "unquote rejects a single quote", choice: error, probability: 0.95}
+        - {linter: test-name-vs-assertion, question: name_says, when: "unquote accepts a bare word", choice: no_error, probability: 0.95}
         # doc-vs-table
         - {linter: doc-vs-table, question: condition, when: '"situation":"three days late', choice: met, probability: 0.95}
         - {linter: doc-vs-table, question: condition, when: '"situation":"a week before the date', choice: not_met, probability: 0.95}
@@ -178,3 +233,19 @@ semantic:
         - {linter: doc-vs-signature, question: returns_result, when: "returns once the queue is empty", yes: 0.5}
         # (normal-event-at-error's twin: its doc mentions an error, the function returns a string)
         - {linter: doc-vs-signature, question: returns_error, when: "a cache miss is the cache working as designed", yes: 0.05}
+        # read-only-promise
+        - {linter: read-only-promise, question: promises_unchanged, when: "returns the next item without altering the queue", yes: 0.95}
+        - {linter: read-only-promise, question: promises_unchanged, when: "is pure: the same input gives the same result", yes: 0.95}
+        - {linter: read-only-promise, question: promises_unchanged, when: "returns the median of xs, leaving xs unchanged", yes: 0.95}
+        - {linter: read-only-promise, question: promises_unchanged, when: "returns the value for k and does not modify the cache", yes: 0.9}
+        - {linter: read-only-promise, question: promises_unchanged, when: "adds up xs without modifying xs", yes: 0.05}
+        - {linter: read-only-promise, question: promises_unchanged, when: "does not change the file's permissions", yes: 0.05}
+        - {linter: read-only-promise, question: promises_unchanged, when: "the capacity stays unchanged", yes: 0.1}
+        - {linter: read-only-promise, question: promises_unchanged, when: "callers see no change", yes: 0.6}
+        - {linter: read-only-promise, question: promises_unchanged, when: "on an empty queue it returns false and leaves the queue unchanged", yes: 0.1}
+        - {linter: read-only-promise, question: promises_unchanged, when: "it does not modify the flags of the command", yes: 0.1}
+        - {linter: read-only-promise, question: promises_unchanged, when: "returns the command's name and leaves the command untouched", yes: 0.95}
+        - {linter: read-only-promise, question: promises_unchanged, when: "except filling the internal cache", yes: 0.1}
+        - {linter: read-only-promise, question: promises_unchanged, when: "compares n with Limit and leaves Limit unchanged", yes: 0.95}
+        # (other linters' twins whose functions write state: their docs promise nothing about it)
+        - {linter: read-only-promise, question: promises_unchanged, yes: 0.05}
