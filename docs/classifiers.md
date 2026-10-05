@@ -61,8 +61,8 @@ code.
 | `openai` (Ollama, local) | qwen2.5:3b | 0/6 | 0 | 16 | 2 s | local |
 
 On the [showcase](../examples/showcase) (all 17 linters, 18 marked findings), `jev-latest` caught
-every finding in each of 3 runs with no unmarked findings, at 108 requests and ~$0.0019 for the
-three runs (2026-10-02).
+every finding in each of 3 runs with no unmarked findings, at 96 requests and ~$0.0019 for the
+three runs (2026-10-05).
 
 Larger local models on the twins of 2026-10-02 (32 marked defects from 16 linters, one run each,
 on an Apple M5 Pro with 48 GB through Ollama, `reasoning-effort: none`), with Jev on the same twins
