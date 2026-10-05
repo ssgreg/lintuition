@@ -1,5 +1,6 @@
 ---
 worth: later
+rank: 310
 where: internal/effects/writes.go
 added: 2026-10-05
 ---
@@ -9,6 +10,11 @@ A function named like a query (`GetX`, `IsX`, `HasX`, `FindX`) that writes calle
 contract the name does not state. `internal/effects` already finds caller-visible writes for
 `read-only-promise`, so the code side exists; the classifier would only judge whether the name promises
 no side effects.
+
+The prototype (`name-vs-effects`) fired 2 or 3 times per run on logf. The hits were not labelled, but none reads as a bug.
+Three were builder setters such as `SlabSize` on a builder, which read like getters and write by
+design, so builders were then excluded. The fourth was an encoder method writing its own buffer. Its
+write facts also counted writes to fresh local objects, which `internal/effects` does not.
 
 Unknown that settles it: precision on real code. Lazy caches, memoization and counters are common
 writes in getters and read as fine to most reviewers, so the linter may be mostly noise. Measure on the
