@@ -563,9 +563,13 @@ doc or the test is out of date.
 **Sends:** the doc, with the function's name replaced by "this function", and the case name as the
 situation.
 
-**Asks:** whether the situation meets the doc's condition for true, does not, or the doc does not say.
+**Asks:** whether the situation meets the doc's condition for true, does not, or the doc does not say;
+and, yes or no, whether the situation describes the case in enough detail to tell without guessing.
 
-**Decides:** reports when met or not met disagrees with `want`. Threshold 0.8.
+**Decides:** reports when met or not met disagrees with `want`. Threshold 0.8. A disagreement in a
+case name that only labels its input ("ASCII high" for a tilde) abstains when the classifier is at
+least 0.7 sure the name leaves out the facts the condition depends on: its answer about the
+condition is then a guess about the input.
 
 **Unsupported:** everything unsupported above, and a function whose doc is in another package
 (including the usual external `_test` package).
