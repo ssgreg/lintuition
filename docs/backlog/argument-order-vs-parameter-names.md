@@ -1,6 +1,6 @@
 ---
 worth: later
-rank: 20
+rank: 10
 added: 2026-10-05
 ---
 # no linter for arguments passed in an order their names contradict

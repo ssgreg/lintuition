@@ -1,6 +1,6 @@
 ---
 worth: later
-rank: 10
+rank: 20
 where: docs/linters.md:724
 added: 2026-10-05
 ---
