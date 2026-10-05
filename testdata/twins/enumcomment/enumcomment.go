@@ -1,7 +1,9 @@
 // Package enumcomment holds twins for enum-comment-shift.
 //
 // Every explanation is a separate comment, a blank line above the block, so it never reaches the
-// classifier: in a const block, a comment right above a constant is that constant's comment.
+// classifier: in a const block, a comment right above a constant is that constant's comment. A want
+// comment is a line comment of its constant, so it is asked too; its pattern leaves out the
+// neighbour's name, which the classifier would read as the answer.
 package enumcomment
 
 // Phase is a step of a replication job.
@@ -14,7 +16,7 @@ const (
 	// PhaseQueued is a replication job waiting for a free worker.
 	PhaseQueued Phase = iota
 	// PhaseVerified means every block has been copied and checked on the target.
-	PhaseCopying // want `comment describes PhaseVerified, not PhaseCopying`
+	PhaseCopying // want `comment describes \w+, not PhaseCopying`
 	PhaseVerified
 )
 
@@ -27,7 +29,7 @@ const (
 	// waiting in the queue for a free worker
 	JobQueued Job = iota
 	// the result is stored and the job will not run again
-	JobRunning // want `comment describes JobDone, not JobRunning`
+	JobRunning // want `comment describes \w+, not JobRunning`
 	JobDone
 )
 
@@ -39,7 +41,7 @@ type Code int
 const (
 	CodeOK Code = 0
 	// the peer did not answer before the deadline
-	CodeBusy    Code = 1 // want `comment describes CodeTimeout, not CodeBusy`
+	CodeBusy    Code = 1 // want `comment describes \w+, not CodeBusy`
 	CodeTimeout Code = 2
 	// the peer refused the credentials it was given
 	CodeDenied Code = 3
@@ -108,7 +110,7 @@ const (
 	// TaskPending waits for a free runner.
 	TaskPending Job = iota + 10
 	// TaskActive means the output is saved and the task never runs again.
-	TaskActive // want `comment describes TaskFinished, not TaskActive`
+	TaskActive // want `comment describes \w+, not TaskActive`
 	TaskFinished
 )
 
@@ -116,7 +118,7 @@ const (
 
 const (
 	// AccessFull allows reads and writes, everything AccessView allows and more.
-	AccessView Mode = iota + 10 // want `comment describes AccessFull, not AccessView`
+	AccessView Mode = iota + 10 // want `comment describes \w+, not AccessView`
 	AccessFull
 )
 

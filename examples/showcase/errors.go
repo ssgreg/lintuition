@@ -22,12 +22,13 @@ func report(d time.Duration) string {
 // Phase is the state of a copy job.
 type Phase int
 
-// enum-comment-shift: the second comment describes the third constant.
+// enum-comment-shift: the second comment describes the third constant. The want comment is read
+// too, so its pattern leaves out the neighbour's name.
 const (
 	// waiting for a free worker
 	PhaseQueued Phase = iota
 	// every block has been copied and verified
-	PhaseCopying // want `comment describes PhaseVerified, not PhaseCopying`
+	PhaseCopying // want `comment describes \w+, not PhaseCopying`
 	PhaseVerified
 )
 
