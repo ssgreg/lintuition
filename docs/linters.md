@@ -653,7 +653,7 @@ description, and for gosec that covers too much for an implicit answer. "the G30
 is meant to be readable by every test" on an `os.WriteFile(..., 0o644)` suppression answers the
 file mode, but with Jev it is reported as being about something else (3 of 3 runs on the twin in
 `testdata/twins/suppress`). The same reason saying "world-readable file permissions" is not.
-Naming the rule (`G306: ...`) avoids it.
+Naming the rule (`G306: ...`) supplies its specific description instead of the generic gosec one.
 
 **Unsupported:** directives naming several linters, linters the table does not describe, reasons
 that name several rules of one linter, and reasons that name a rule the tables do not describe:
