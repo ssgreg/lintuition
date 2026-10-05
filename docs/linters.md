@@ -550,6 +550,13 @@ reasons that answer their rule.
 **Decides:** reports "only talks about something else". Threshold 0.9, both ways: below it the
 linter abstains.
 
+**Known false positives:** a reason that names no rule is read against the linter's general
+description, and for gosec that covers too much for an implicit answer. "the G304.golden fixture
+is meant to be readable by every test" on an `os.WriteFile(..., 0o644)` suppression answers the
+file mode, but with Jev it is reported as being about something else (3 of 3 runs on the twin in
+`testdata/twins/suppress`). The same reason saying "world-readable file permissions" is not.
+Naming the rule (`G306: ...`) avoids it.
+
 **Unsupported:** directives naming several linters, linters the table does not describe, reasons
 that name several rules of one linter, and reasons that name a rule the tables do not describe:
 a rule from a newer release, a title that cannot be sent as a fact, or gosec's G113 and G307,

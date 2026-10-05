@@ -159,8 +159,19 @@ func readNew(path string) []byte {
 }
 
 // Negative: an ID inside a file name is not a citation, so the reason is read against gosec as a
-// whole, and it answers the file mode.
+// whole, and it answers the file mode. Known false positive: with no rule ID the classifier sees
+// only gosec's general description, does not connect "readable by every test" with file
+// permissions, and Jev reported this reason in 3 of 3 live runs. It stays unmarked, because no
+// finding is the right answer; the scripted answer below is that answer, so the fake suite passes
+// and a live eval shows the miss as an unaccounted finding.
 
 func writeGolden(path string, b []byte) {
+	_ = os.WriteFile(path, b, 0o644) //nolint:gosec // the G304.golden fixture is meant to be readable by every test
+}
+
+// Negative, a control for the case above: the same file mode, a reason that names the
+// permissions.
+
+func writeGoldenExplicit(path string, b []byte) {
 	_ = os.WriteFile(path, b, 0o644) //nolint:gosec // the G304.golden fixture gets world-readable file permissions so every test can read it
 }
