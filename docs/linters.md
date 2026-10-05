@@ -453,17 +453,38 @@ is not one), and so are methods of error types and of interfaces that embed `err
 "error" about the receiver). Interfaces are read wherever they are declared, inside a function or
 in parentheses too.
 
-**Sends:** only the doc, with the function's own name replaced by "the documented function". No
-signature, no types.
+For a function with no results it also looks for an `http.ResponseWriter` the function can reach,
+through `go/types`: a parameter or the receiver whose type (or, when addressable, its pointer)
+implements it, or a value reached from one through fields and methods without arguments, up to
+three steps (`c.Writer` on a gin-style context, `c.Response()` on an echo-style one, a struct field
+holding `w`). Only fields and methods the package can use are followed (blank fields are not),
+every type is walked once, and the first writer on the shortest path wins: the receiver first, then
+the parameters in order. This is reachability, not use: the types do not show that the function
+writes a response. A plain `io.Writer` gives no fact: it is reachable from a test's `t.Output()`, an
+analysis pass's flags or a trace writer, and told only that one was there, the classifier excused
+ordinary stale promises ("returns the stored value") as readily as handler docs. A writer the
+function captures in a closure, reads from a package variable or gets behind `any` is not seen
+either; in all these cases the function is asked as before.
+
+**Sends:** the doc, with the function's own name replaced by "the documented function", and, when
+a response writer was found, one fact naming it as a capability: "parameter w is an
+http.ResponseWriter it could write a response to", "parameter c gives access to an
+http.ResponseWriter at c.Writer", "parameter 1 is an http.ResponseWriter it could write a response
+to" for an unnamed parameter of an interface method. No signature, no other types.
 
 **Asks:** one yes/no question: does any sentence of the doc say the function gives back a value
 (for a function with no results), or that one of its results is an error (for a function with results
 but no error)? These do not count: returning "into a pool", saying when the function returns, a
 value it says it sends on a channel, passes to a callback or writes out, an error it logs or passes
-on, and a value that carries or formats an error.
+on, and a value that carries or formats an error. A function that can reach a response writer gets two
+questions of its own instead, with the writer fact: does the doc say the function returns an error
+value to its caller, and does it say the function gives something back to its Go caller? What a
+handler "returns" as its HTTP response, as in "returns the list of users", does not count for the
+second; a returned error counts for both, also next to a status, since an error value never reaches
+a client.
 
 **Decides:** reports at 0.85 or above, clean at 0.15 or below, abstains in between (setting
-`threshold`).
+`threshold`). With the two writer questions, either yes is a finding, and clean needs both no.
 
 **Unsupported:** the error claim when a result may hold an error: an interface other than `error`
 (`any`, `io.Reader`: its dynamic value may implement `error` too, unless the interface has an `Error`
@@ -474,7 +495,14 @@ depth). The doc may mean that error.
 A doc that says only "returns" about something the function sends on a channel or prints
 ("Describe returns all descriptions" on a method that sends them on `ch`) is reported too. That is a
 wording finding rather than a stale contract: the doc is wrong about how the values reach the caller,
-and the fix is the verb. A doc that names the delivery ("returns them through ch") is clean.
+and the fix is the verb. A doc that names the delivery ("returns them through ch") is clean. An
+HTTP handler is the exception: "returns the version" on a handler that writes it to `w` is how
+handlers are documented, and the writer question lets the classifier answer no to it, while "returns
+the status code and an error" on the same handler stays a finding, since no client receives an error
+value. That split is the classifier's reading, not a check in code, so a handler doc can still be
+reported or abstain. The trade-off runs the other way too: a stale value promise ("returns the
+stored value") on a function whose only output is a reachable `http.ResponseWriter` reads like a
+handler doc, can be excused as a response and may be missed. That recall loss is accepted.
 
 ### read-only-promise
 

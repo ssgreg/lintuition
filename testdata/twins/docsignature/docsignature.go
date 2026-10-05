@@ -6,8 +6,12 @@ package docsignature
 
 import (
 	"context"
+	"flag"
 	"fmt"
+	"go/token"
 	"io"
+	"net/http"
+	"testing"
 )
 
 type Buffer struct{ data []byte }
@@ -185,3 +189,111 @@ func Drain(q chan int) {
 
 // Watch returns a channel that receives an error when the watch fails.
 func Watch() chan error { return nil }
+
+type Gateway struct{ client *http.Client }
+
+// Defect: a handler whose doc still states the Go contract it had before it wrote the response
+// itself; an error never reaches an HTTP client.
+
+// Forward relays the request to target, returns the upstream status code and an error.
+func (g *Gateway) Forward(w http.ResponseWriter, r *http.Request, target string) { // want `doc of Forward says it returns (an error|a result), but Forward returns nothing`
+	w.WriteHeader(http.StatusBadGateway)
+}
+
+type Store struct{ limit int64 }
+
+// Defect: a handler doc promising an error to its caller.
+
+// Upload saves the posted file and returns an error if the body exceeds the limit.
+func (s *Store) Upload(w http.ResponseWriter, r *http.Request) { // want `doc of Upload says it returns (an error|a result), but Upload returns nothing`
+	w.WriteHeader(http.StatusCreated)
+}
+
+type Journal struct{ pending []byte }
+
+func (j *Journal) Write(p []byte) (int, error) {
+	j.pending = append(j.pending, p...)
+	return len(p), nil
+}
+
+// Defect: the receiver is an io.Writer, but the count is promised to the caller.
+
+// Commit appends the pending entries to the log file and returns how many entries were committed.
+func (j *Journal) Commit() { j.pending = nil } // want `doc of Commit says it returns a result, but Commit returns nothing`
+
+// Negative: a handler's doc says what goes to the client.
+
+// Uptime returns how long the service has been running.
+func (g *Gateway) Uptime(w http.ResponseWriter, r *http.Request) { fmt.Fprint(w, "1h") }
+
+// Negative: the same, with the subject of the response named.
+
+// Probe returns the most recent probe outcome of the node in the path.
+func (g *Gateway) Probe(w http.ResponseWriter, r *http.Request) { fmt.Fprint(w, "ok") }
+
+type Context struct {
+	Writer  http.ResponseWriter
+	Request *http.Request
+}
+
+type API struct{}
+
+// Negative: a framework context holding the response writer in a field.
+
+// Orders returns the orders of the current account.
+func (a *API) Orders(c *Context) { fmt.Fprint(c.Writer, "[]") }
+
+type Reply struct{ W http.ResponseWriter }
+
+func (r *Reply) Header() http.Header         { return r.W.Header() }
+func (r *Reply) Write(b []byte) (int, error) { return r.W.Write(b) }
+func (r *Reply) WriteHeader(code int)        { r.W.WriteHeader(code) }
+
+type Ctx interface {
+	Reply() *Reply
+	Param(name string) string
+}
+
+// Negative: a framework context whose method gives the response writer.
+
+// Profile returns the profile of the signed-in member.
+func (a *API) Profile(c Ctx) { fmt.Fprint(c.Reply(), "{}") }
+
+type Keys interface {
+	// Negative: an interface method answering a request.
+
+	// KeyState returns whether the stored key is still accepted by the vault.
+	KeyState(w http.ResponseWriter, r *http.Request)
+}
+
+// Defect: a test helper can reach a writer through t, but the record was meant for the caller.
+
+// Golden loads the golden file for name and returns the decoded record.
+func Golden(t *testing.T, name string) { t.Helper() } // want `doc of Golden says it returns a result, but Golden returns nothing`
+
+type Analyzer struct{ Flags flag.FlagSet }
+
+type Pass struct {
+	Analyzer *Analyzer
+	Pkg      string
+}
+
+// Defect: an analysis pass can reach a writer through its flags; the scope was meant for the caller.
+
+// Innermost returns the innermost scope enclosing pos.
+func Innermost(pass *Pass, pos token.Pos) { _ = pass.Pkg } // want `doc of Innermost says it returns a result, but Innermost returns nothing`
+
+// Defect: the writer is for tracing; the address was meant for the caller.
+
+// Resolve looks up host and returns its first address.
+func Resolve(host string, trace io.Writer) { fmt.Fprintln(trace, host) } // want `doc of Resolve says it returns a result, but Resolve returns nothing`
+
+type Cache struct {
+	items map[string]string
+	Log   io.Writer
+}
+
+// Defect: the receiver holds a diagnostic writer; the value was meant for the caller.
+
+// Fetch looks key up in the cache and returns the stored value.
+func (c *Cache) Fetch(key string) { fmt.Fprintln(c.Log, key) } // want `doc of Fetch says it returns a result, but Fetch returns nothing`
