@@ -389,23 +389,44 @@ func configCmd() *cobra.Command {
 	return cmd
 }
 
-// lintuitionVersion is the version of lintuition in this binary: Version, else the module's own
-// version, which in a custom binary is a dependency of the generated main. A module replaced by a
-// local directory has no version.
+// lintuitionVersion is the version of lintuition in this binary, for the docs links.
 func lintuitionVersion() string {
-	if Version != "" {
-		return Version
+	bi, _ := debug.ReadBuildInfo()
+	return docVersion(Version, bi)
+}
+
+// docVersion picks the lintuition version whose tag the docs links may use; empty means none, and
+// the links go to main. A build of lintuition itself from a modified tree has none, whatever
+// Version says. Otherwise Version wins, then lintuition's own module: the main module, or in a
+// custom binary a dependency of the generated main, whose vcs settings describe that main and
+// not lintuition. A dependency replaced by a local directory or by another module, a fork, has
+// none.
+func docVersion(stamped string, bi *debug.BuildInfo) string {
+	const path = "github.com/ssgreg/lintuition"
+	if bi != nil && bi.Main.Path == path {
+		if strings.HasSuffix(bi.Main.Version, "+dirty") {
+			return ""
+		}
+		for _, s := range bi.Settings {
+			if s.Key == "vcs.modified" && s.Value == "true" {
+				return ""
+			}
+		}
 	}
-	bi, ok := debug.ReadBuildInfo()
-	if !ok {
-		return ""
+	if stamped != "" || bi == nil {
+		return stamped
 	}
-	mods := append([]*debug.Module{&bi.Main}, bi.Deps...)
-	for _, m := range mods {
-		if m.Path != "github.com/ssgreg/lintuition" {
+	if bi.Main.Path == path {
+		return bi.Main.Version
+	}
+	for _, m := range bi.Deps {
+		if m.Path != path {
 			continue
 		}
 		if m.Replace != nil {
+			if m.Replace.Path != path {
+				return ""
+			}
 			return m.Replace.Version
 		}
 		return m.Version
