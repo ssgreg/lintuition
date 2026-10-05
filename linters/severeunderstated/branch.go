@@ -25,14 +25,17 @@ import (
 //     call that also takes a signal value. This describes the call's shape only; nothing says the
 //     call registers a handler or that a signal arrived.
 //
-// An error condition is kept only while it still describes the value it checked: the checked
-// value must be rooted in a local variable (err, or ctx in ctx.Err()), the variable must not be
-// written between the check and the log, shadowed at the log, written in a function literal or
-// address-taken anywhere in the function, and the log call must not log another error value.
-// Only conditions that hold positively count: the else branch of errors.Is(err, X), or a
-// condition under !, names nothing. The walk stops at a function literal, which may run later
-// with other values. A case that the previous case falls through into, and code after a label a
-// goto can reach, establish nothing.
+// An error condition is kept only while it still describes the value it checked. The checked
+// place is a local variable, a field path below one (p.first) or ctx.Err() on a context; an index
+// or another method's result has no place and checks nothing nameable. The variable must not be
+// written between the check and the log, nor anywhere in a loop around the log that does not run
+// the check again (the write reaches the next pass), nor in a function literal or through its
+// address; it must not be shadowed at the log, the function must have no goto, and the log call
+// must log no error but that same place. Only conditions that hold positively count: the else
+// branch of errors.Is(err, X), or a condition under !, names nothing. The walk stops at a
+// function literal, which may run later with other values. A case that the previous case falls
+// through into (fallthrough as its last non-empty statement), and code after a label, establish
+// nothing.
 //
 // The facts say what the code checked, not why: a not-exist check does not prove that the file was
 // optional, nor a cancellation check that the stop was requested. The classifier weighs that.
@@ -42,7 +45,7 @@ func branchFacts(pkg *types.Package, info *types.Info, stack []ast.Node, call *a
 	body := enclosingBody(stack)
 	add := func(cs []cond) {
 		for _, c := range cs {
-			if c.operand != nil && !stillChecked(pkg, info, body, c, call) {
+			if c.operand != nil && !stillChecked(pkg, info, body, stack, c, call) {
 				continue
 			}
 			if c.text != "" && !seen[c.text] && facts.FactSafe(c.text) {
@@ -91,7 +94,10 @@ func branchFacts(pkg *types.Package, info *types.Info, stack []ast.Node, call *a
 type cond struct {
 	text    string
 	operand *types.Var
-	at      token.Pos
+	// path is the checked place below the variable: "" for err itself, ".First" for p.First,
+	// ".Err()" for ctx.Err().
+	path string
+	at   token.Pos
 }
 
 // enclosingBody is the body of the innermost function on the stack.
@@ -109,7 +115,7 @@ func enclosingBody(stack []ast.Node) *ast.BlockStmt {
 
 // stillChecked reports whether the variable a condition checked still holds the checked value at
 // the log call, as far as the code shows, and is the only error value the call logs.
-func stillChecked(pkg *types.Package, info *types.Info, body *ast.BlockStmt, c cond, call *ast.CallExpr) bool {
+func stillChecked(pkg *types.Package, info *types.Info, body *ast.BlockStmt, stack []ast.Node, c cond, call *ast.CallExpr) bool {
 	v := c.operand
 	if body == nil || v.Pkg() == nil || v.Parent() == nil || v.Parent() == v.Pkg().Scope() {
 		return false
@@ -122,9 +128,28 @@ func stillChecked(pkg *types.Package, info *types.Info, body *ast.BlockStmt, c c
 		}
 	}
 	ok := true
+	// A loop around the log that does not also run the check again carries any write in it, before
+	// or after the log, into the next pass: the log then runs with the written value.
+	for _, n := range stack {
+		switch n.(type) {
+		case *ast.ForStmt, *ast.RangeStmt:
+			if n.Pos() > c.at && n.Pos() < call.Pos() {
+				ast.Inspect(n, func(m ast.Node) bool {
+					if writes(info, m, v) {
+						ok = false
+					}
+					return ok
+				})
+			}
+		}
+	}
 	ast.Inspect(body, func(n ast.Node) bool {
 		if !ok {
 			return false
+		}
+		// A goto can make a loop the walk does not see, so its function keeps no error test.
+		if b, isB := n.(*ast.BranchStmt); isB && b.Tok == token.GOTO {
+			ok = false
 		}
 		if lit, isLit := n.(*ast.FuncLit); isLit {
 			ast.Inspect(lit.Body, func(m ast.Node) bool {
@@ -153,8 +178,8 @@ func stillChecked(pkg *types.Package, info *types.Info, body *ast.BlockStmt, c c
 				return ok
 			}
 			if facts.IsError(info.TypeOf(e)) {
-				if rootVar(info, e) != v {
-					ok = false // the line logs another error value
+				if pv, path, known := place(info, e); !known || pv != v || path != c.path {
+					ok = false // the line logs another error value, or one it cannot tell apart
 				}
 				return false
 			}
@@ -206,6 +231,32 @@ func rootVar(info *types.Info, e ast.Expr) *types.Var {
 		return rootVar(info, e.X)
 	}
 	return nil
+}
+
+// place names the checked place an error expression reads, by the variable it starts from and
+// the path below it: err, p.First (field selections only) and ctx.Err() on a context. Anything
+// else, an index, another method's result, a function's, has no place: two of them on one
+// variable can be different errors.
+func place(info *types.Info, e ast.Expr) (*types.Var, string, bool) {
+	switch e := ast.Unparen(e).(type) {
+	case *ast.Ident:
+		v, ok := info.ObjectOf(e).(*types.Var)
+		return v, "", ok
+	case *ast.SelectorExpr:
+		if s, ok := info.Selections[e]; ok && s.Kind() == types.FieldVal {
+			if v, p, ok := place(info, e.X); ok {
+				return v, p + "." + e.Sel.Name, true
+			}
+		}
+	case *ast.CallExpr:
+		sel, ok := ast.Unparen(e.Fun).(*ast.SelectorExpr)
+		if ok && len(e.Args) == 0 && sel.Sel.Name == "Err" && isContext(info.TypeOf(sel.X)) {
+			if v, p, ok := place(info, sel.X); ok {
+				return v, p + ".Err()", true
+			}
+		}
+	}
+	return nil, "", false
 }
 
 func inList(list []ast.Stmt, n ast.Node) bool {
@@ -316,16 +367,16 @@ func predicate(info *types.Info, e ast.Expr) (cond, bool) {
 		return cond{}, false
 	}
 	full := fn.Pkg().Path() + "." + fn.Name()
-	v := rootVar(info, call.Args[0])
-	if v == nil {
+	v, path, ok := place(info, call.Args[0])
+	if !ok {
 		return cond{}, false
 	}
 	if errorPredicates[full] {
-		return cond{text: full, operand: v, at: call.End()}, true
+		return cond{text: full, operand: v, path: path, at: call.End()}, true
 	}
 	if isFuncs[full] && len(call.Args) == 2 {
 		if s := sentinel(info, call.Args[1]); s != "" {
-			return cond{text: "error is " + s, operand: v, at: call.End()}, true
+			return cond{text: "error is " + s, operand: v, path: path, at: call.End()}, true
 		}
 	}
 	return cond{}, false
@@ -335,8 +386,8 @@ func predicate(info *types.Info, e ast.Expr) (cond, bool) {
 func equalsSentinel(info *types.Info, x, y ast.Expr) (cond, bool) {
 	for _, p := range [][2]ast.Expr{{x, y}, {y, x}} {
 		if s := sentinel(info, p[1]); s != "" && facts.IsError(info.TypeOf(p[0])) {
-			if v := rootVar(info, p[0]); v != nil {
-				return cond{text: "error is " + s, operand: v, at: p[0].End()}, true
+			if v, path, ok := place(info, p[0]); ok {
+				return cond{text: "error is " + s, operand: v, path: path, at: p[0].End()}, true
 			}
 		}
 	}
@@ -383,9 +434,17 @@ func caseConditions(info *types.Info, cc *ast.CaseClause, outer []ast.Node) []co
 		if s != cc || i == 0 {
 			continue
 		}
-		if prev, ok := sw.Body.List[i-1].(*ast.CaseClause); ok && len(prev.Body) > 0 {
-			if b, ok := prev.Body[len(prev.Body)-1].(*ast.BranchStmt); ok && b.Tok == token.FALLTHROUGH {
-				return nil
+		if prev, ok := sw.Body.List[i-1].(*ast.CaseClause); ok {
+			// fallthrough is the last statement of the case, but an empty statement may follow it
+			// in source gofmt has not touched: `fallthrough; ;`.
+			for j := len(prev.Body) - 1; j >= 0; j-- {
+				if _, empty := prev.Body[j].(*ast.EmptyStmt); empty {
+					continue
+				}
+				if b, ok := prev.Body[j].(*ast.BranchStmt); ok && b.Tok == token.FALLTHROUGH {
+					return nil
+				}
+				break
 			}
 		}
 	}
@@ -448,7 +507,8 @@ func method(t types.Type, name string) *types.Signature {
 }
 
 // isContext reports whether t implements context.Context, checked by the full signatures of its
-// methods: Deadline() (time.Time, bool), Done() <-chan struct{}, Err() error, Value(any) any.
+// methods with exact types: Deadline() (time.Time, bool), Done() <-chan struct{}, Err() error,
+// Value(any) any.
 // context.Context itself, an alias of it and a type embedding it count; methods that only share
 // the names do not.
 func isContext(t types.Type) bool {
@@ -476,7 +536,7 @@ func isContext(t types.Type) bool {
 		return false
 	}
 	return v.Params().Len() == 1 && v.Results().Len() == 1 && !v.Variadic() &&
-		isEmptyIface(v.Params().At(0).Type()) && isEmptyIface(v.Results().At(0).Type())
+		isAny(v.Params().At(0).Type()) && isAny(v.Results().At(0).Type())
 }
 
 func isNamed(t types.Type, pkg, name string) bool {
@@ -489,9 +549,11 @@ func isBasic(t types.Type, k types.BasicKind) bool {
 	return ok && b.Kind() == k
 }
 
-func isEmptyIface(t types.Type) bool {
-	i, ok := types.Unalias(t).Underlying().(*types.Interface)
-	return ok && i.Empty()
+// isAny reports whether t is any, interface{}, or an alias of them. A defined type, even one
+// whose underlying type is interface{}, is another type, and a method using it has another
+// signature: it does not implement context.Context.
+func isAny(t types.Type) bool {
+	return types.Identical(types.Unalias(t), types.NewInterfaceType(nil, nil))
 }
 
 // isSignal reports whether t is os.Signal or implements it: Signal() and String() string. The

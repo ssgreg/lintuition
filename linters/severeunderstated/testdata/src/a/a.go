@@ -9,6 +9,7 @@ import (
 	"log/slog"
 	"os"
 	"syscall"
+	"time"
 
 	"github.com/ssgreg/logf"
 )
@@ -465,6 +466,119 @@ func c59(sigs chan os.Signal, jobs chan int) {
 		if !ok {
 			slog.Info("buffered rows were thrown away") // 59 no branch: a two-value receive may be a closed channel
 		}
+	case <-jobs:
+	}
+}
+
+// The checked place, not only its variable.
+
+type pair struct{ first, second error }
+
+func c65(p pair) {
+	if stderrors.Is(p.first, context.Canceled) {
+		slog.Info("buffered rows were thrown away", "err", p.second) // 65 no branch: another field of the same variable
+	}
+}
+
+func c66(p pair) {
+	if stderrors.Is(p.first, context.Canceled) {
+		slog.Info("buffered rows were thrown away", "err", p.first) // 66 branch: the same field
+	}
+}
+
+func c67(p []error) {
+	if stderrors.Is(p[0], context.Canceled) {
+		slog.Info("buffered rows were thrown away", "err", p[1]) // 67 no branch: an index has no place to compare
+	}
+}
+
+type source struct{}
+
+func (source) cached() error { return nil }
+func (source) read() error   { return nil }
+
+func c68(r source) {
+	if stderrors.Is(r.cached(), context.Canceled) {
+		slog.Info("buffered rows were thrown away", "err", r.read()) // 68 no branch: a method result is not a place
+	}
+}
+
+func c69(ctx context.Context) {
+	if stderrors.Is(ctx.Err(), context.Canceled) {
+		slog.Info("buffered rows were thrown away", "err", ctx.Err()) // 69 branch: ctx.Err() on a context is the same place
+	}
+}
+
+// Loops and goto.
+
+func c70(err error) {
+	if stderrors.Is(err, context.Canceled) {
+		for i := 0; i < 2; i++ {
+			slog.Info("buffered rows were thrown away", "err", err) // 70 no branch: a write later in the loop reaches the next pass
+			err = io.ErrUnexpectedEOF
+		}
+	}
+}
+
+func c71(err error) {
+	for i := 0; i < 2; i++ {
+		if stderrors.Is(err, context.Canceled) {
+			slog.Info("buffered rows were thrown away", "err", err) // 71 branch: the check runs again on every pass
+		}
+		err = io.ErrUnexpectedEOF
+	}
+}
+
+func c72(err error, errs []error) {
+	if stderrors.Is(err, context.Canceled) {
+		for _, err = range errs {
+			slog.Info("buffered rows were thrown away", "err", err) // 72 no branch: the range writes the checked variable
+		}
+	}
+}
+
+func c73(err error, again bool) {
+	if stderrors.Is(err, context.Canceled) {
+		slog.Info("buffered rows were thrown away", "err", err) // 73 no branch: a goto in the function may loop back
+	}
+	if again {
+		goto done
+	}
+done:
+}
+
+// A Value method on a defined empty interface is not context.Context's.
+
+type anything interface{}
+
+type almost struct{ ch <-chan struct{} }
+
+func (almost) Deadline() (time.Time, bool) { return time.Time{}, false }
+func (a almost) Done() <-chan struct{}     { return a.ch }
+func (almost) Err() error                  { return nil }
+func (almost) Value(anything) anything     { return nil }
+
+func c74(a almost, jobs chan int) {
+	select {
+	case <-a.Done():
+		slog.Info("buffered rows were thrown away") // 74 no branch: Value takes and returns a defined type, not any
+	case <-jobs:
+	}
+}
+
+type anyAlias = any
+
+type nearly struct{ ch <-chan struct{} }
+
+func (nearly) Deadline() (time.Time, bool) { return time.Time{}, false }
+func (c nearly) Done() <-chan struct{}     { return c.ch }
+func (nearly) Err() error                  { return nil }
+func (nearly) Value(anyAlias) interface{}  { return nil }
+
+func c75(c nearly, jobs chan int) {
+	select {
+	case <-c.Done():
+		slog.Info("buffered rows were thrown away") // 75 branch: an alias of any and interface{} are any
 	case <-jobs:
 	}
 }

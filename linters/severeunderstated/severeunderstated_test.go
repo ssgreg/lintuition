@@ -3,15 +3,21 @@ package severeunderstated
 import (
 	"fmt"
 	"go/ast"
+	"go/importer"
 	"go/parser"
 	"go/token"
+	"go/types"
+	"math/rand"
 	"os"
 	"path/filepath"
 	"sort"
 	"strings"
 	"testing"
 
+	"golang.org/x/tools/go/analysis"
 	"golang.org/x/tools/go/analysis/analysistest"
+	"golang.org/x/tools/go/analysis/passes/inspect"
+	"golang.org/x/tools/go/ast/inspector"
 
 	"github.com/ssgreg/lintuition/internal/classify"
 	"github.com/ssgreg/lintuition/sdk"
@@ -134,6 +140,17 @@ func TestExtraction(t *testing.T) {
 		`62 info "buffered rows were thrown away"`,
 		`63 info "buffered rows were thrown away" branch=error is context.Canceled`,
 		`64 info "buffered rows were thrown away"`,
+		`65 info "buffered rows were thrown away"`,
+		`66 info "buffered rows were thrown away" branch=error is context.Canceled`,
+		`67 info "buffered rows were thrown away"`,
+		`68 info "buffered rows were thrown away"`,
+		`69 info "buffered rows were thrown away" branch=error is context.Canceled`,
+		`70 info "buffered rows were thrown away"`,
+		`71 info "buffered rows were thrown away" branch=error is context.Canceled`,
+		`72 info "buffered rows were thrown away"`,
+		`73 info "buffered rows were thrown away"`,
+		`74 info "buffered rows were thrown away"`,
+		`75 info "buffered rows were thrown away" branch=context done`,
 	}
 	if strings.Join(got, "\n") != strings.Join(want, "\n") {
 		t.Fatalf("candidates:\n%s\n\nwant:\n%s", strings.Join(got, "\n"), strings.Join(want, "\n"))
@@ -252,10 +269,9 @@ func TestDecide(t *testing.T) {
 		{"split confident at 0.90, the strict threshold abstains", strict, split(map[string]float64{"routine": 0.6, "recovery": 0.3, "unintended_loss": 0.1}), false, true},
 		{"split confident at 0.97, the strict threshold is clean", strict, split(map[string]float64{"routine": 0.6, "recovery": 0.37, "unintended_loss": 0.03}), false, false},
 		{"loss picked by a hair is not rescued by the clean sum", r, split(map[string]float64{"unintended_loss": 0.4, "routine": 0.35, "recovery": 0.25}), false, true},
-		{"mass above 1: the clean share of the total is below the threshold", r, split(map[string]float64{"routine": 0.43, "recovery": 0.42, "unintended_loss": 0.18}), false, true},
-		{"mass above 1: a clean share of the total above the threshold stays clean", r, split(map[string]float64{"routine": 0.6, "recovery": 0.41, "unintended_loss": 0.01}), false, false},
 		{"mass of exactly 1 is taken as it is", r, split(map[string]float64{"routine": 0.43, "recovery": 0.42, "unintended_loss": 0.15}), false, false},
-		{"mass above 1 counts the unclear share too", r, split(map[string]float64{"routine": 0.5, "recovery": 0.38, "unclear": 0.2}), false, true},
+		{"five clean options adding to the threshold in decimals", r, split(map[string]float64{"routine": 0.32, "expected_absence": 0.13, "requested_stop": 0.34, "recovery": 0.04, "inconvenience": 0.02, "unintended_loss": 0, "unclear": 0.15}), false, false},
+		{"five clean options a cent below the threshold", r, split(map[string]float64{"routine": 0.32, "expected_absence": 0.13, "requested_stop": 0.33, "recovery": 0.04, "inconvenience": 0.02, "unintended_loss": 0, "unclear": 0.16}), false, true},
 		{"consequence missing entirely", r, map[string]sdk.Answer{"on_purpose": {QuestionID: "on_purpose", Yes: f(0.1)}}, false, true},
 	} {
 		d := tc.r.Decide(c, tc.answers)
@@ -299,5 +315,125 @@ func TestFixtureTextsCarryNoHints(t *testing.T) {
 				t.Errorf("%s: %s has a doc comment; keep the explanation detached", fset.Position(fd.Pos()), fd.Name.Name)
 			}
 		}
+	}
+}
+
+// TestUnformattedFallthrough reads source gofmt has not touched, where an empty statement follows
+// fallthrough: the case it falls into still names nothing. The fixture lives in a string so that
+// gofmt over the repository leaves it as it is.
+func TestUnformattedFallthrough(t *testing.T) {
+	const src = `package p
+
+import (
+	"context"
+	"errors"
+	"io"
+	"log/slog"
+)
+
+func tagged(err error) {
+	switch err {
+	case io.EOF:
+		fallthrough; ;
+	case context.Canceled:
+		slog.Info("open batch thrown away", "err", err)
+	}
+}
+
+func tagless(err error) {
+	switch {
+	case err == io.EOF:
+		fallthrough; ;
+	case errors.Is(err, context.Canceled):
+		slog.Info("open batch dropped", "err", err)
+	}
+}
+
+func control(err error) {
+	switch err {
+	case io.EOF:
+		;
+	case context.Canceled:
+		slog.Info("open batch discarded", "err", err)
+	}
+}
+`
+	fset := token.NewFileSet()
+	f, err := parser.ParseFile(fset, "p.go", src, 0)
+	if err != nil {
+		t.Fatal(err)
+	}
+	info := &types.Info{
+		Types: map[ast.Expr]types.TypeAndValue{}, Defs: map[*ast.Ident]types.Object{},
+		Uses: map[*ast.Ident]types.Object{}, Selections: map[*ast.SelectorExpr]*types.Selection{},
+	}
+	pkg, err := (&types.Config{Importer: importer.Default()}).Check("p", fset, []*ast.File{f}, info)
+	if err != nil {
+		t.Fatal(err)
+	}
+	pass := &analysis.Pass{Fset: fset, Files: []*ast.File{f}, Pkg: pkg, TypesInfo: info,
+		ResultOf: map[*analysis.Analyzer]any{inspect.Analyzer: inspector.New([]*ast.File{f})}}
+	out, err := run(pass)
+	if err != nil {
+		t.Fatal(err)
+	}
+	got := map[string]string{}
+	for _, c := range out.([]*sdk.Candidate) {
+		b, _ := c.Payload.Facts["branch"].([]string)
+		got[c.Local["message"]] = strings.Join(b, ", ")
+	}
+	want := map[string]string{
+		"open batch thrown away": "",
+		"open batch dropped":     "",
+		"open batch discarded":   "error is context.Canceled",
+	}
+	if len(got) != len(want) {
+		t.Errorf("candidates: %v", got)
+	}
+	for k, v := range want {
+		if g, ok := got[k]; !ok || g != v {
+			t.Errorf("%s: got %q, want %q", k, g, v)
+		}
+	}
+}
+
+// TestDecideCheckedMass runs answers through the shared answer check, as the engine does, and
+// decides each many times over maps built in different orders: one answer must always give one
+// decision, also when its clean options add up to the threshold exactly in decimals.
+func TestDecideCheckedMass(t *testing.T) {
+	r := &rule{threshold: 0.85}
+	c := &sdk.Candidate{Local: map[string]string{"level": "info", "message": "m"}}
+	keys := []string{"routine", "expected_absence", "requested_stop", "recovery", "inconvenience", "unintended_loss", "unclear"}
+	for _, tc := range []struct {
+		name    string
+		probs   []float64
+		abstain bool
+	}{
+		{"clean options at the threshold", []float64{0.32, 0.13, 0.34, 0.04, 0.02, 0, 0.15}, false},
+		{"clean options a cent below", []float64{0.32, 0.13, 0.33, 0.04, 0.02, 0, 0.16}, true},
+		{"clean options well above", []float64{0.5, 0.1, 0.2, 0.05, 0.05, 0.05, 0.05}, false},
+	} {
+		rng := rand.New(rand.NewSource(1))
+		for trial := 0; trial < 50; trial++ {
+			ps := map[string]float64{}
+			for _, i := range rng.Perm(len(keys)) {
+				ps[keys[i]] = tc.probs[i]
+			}
+			ans := split(ps)
+			checked, err := classify.Check(r.Questions(c), sdk.Response{Answers: []sdk.Answer{ans["consequence"], ans["on_purpose"]}})
+			if err != nil {
+				t.Fatalf("%s: %v", tc.name, err)
+			}
+			for i := 0; i < 2000; i++ {
+				if d := r.Decide(c, checked); (d.Abstained != "") != tc.abstain || d.Report {
+					t.Fatalf("%s, trial %d, decision %d: %+v", tc.name, trial, i, d)
+				}
+			}
+		}
+	}
+	// Mass that rounding cannot explain never reaches Decide: the check refuses it.
+	ans := split(map[string]float64{"routine": 0.43, "recovery": 0.42, "unintended_loss": 0.18})
+	if _, err := classify.Check(r.Questions(c), sdk.Response{Answers: []sdk.Answer{ans["consequence"], ans["on_purpose"]}}); err == nil {
+		t.Error("an overfull distribution passed the check")
 	}
 }

@@ -189,3 +189,20 @@ func TestFactsMustBeStructural(t *testing.T) {
 		t.Fatal(err)
 	}
 }
+
+func TestOptionMass(t *testing.T) {
+	ps := map[string]float64{"a": 0.32, "b": 0.13, "c": 0.34, "d": 0.04, "e": 0.02, "f": 0.15}
+	opts := []string{"e", "a", "d", "b", "c", "missing"}
+	first := OptionMass(ps, opts)
+	if math.Abs(first-0.85) > MassNoise {
+		t.Fatalf("sum %v, want 0.85 within MassNoise", first)
+	}
+	for i := 0; i < 1000; i++ {
+		if got := OptionMass(ps, opts); got != first {
+			t.Fatalf("pass %d: %v, then %v", i, first, got)
+		}
+	}
+	if got := OptionMass(ps, nil); got != 0 {
+		t.Errorf("no options: %v", got)
+	}
+}

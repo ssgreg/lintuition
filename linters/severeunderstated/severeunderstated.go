@@ -27,6 +27,7 @@ import (
 	"golang.org/x/tools/go/analysis/passes/inspect"
 	"golang.org/x/tools/go/ast/inspector"
 
+	"github.com/ssgreg/lintuition/internal/classify"
 	"github.com/ssgreg/lintuition/internal/facts"
 	"github.com/ssgreg/lintuition/sdk"
 )
@@ -153,24 +154,12 @@ func (r *rule) Decide(c *sdk.Candidate, answers map[string]sdk.Answer) sdk.Decis
 	if a.Choice != "unintended_loss" {
 		// Every answer but unintended_loss is one outcome for this rule, so their probabilities add
 		// up: a message the classifier splits between "routine" and "recovery" is still confidently
-		// not a loss. A missing probability counts as 0.
-		//
-		// The sum is only meaningful over a distribution whose mass is at most 1. The shared answer
-		// check rejects a choice whose mass rounding cannot explain and normalizes the rest; should a
-		// mass above 1 reach this point anyway, the clean share is taken of the total, so excess
-		// mass never reads as confidence.
-		var clean, total float64
-		for _, k := range cleanOptions {
-			q, _ := a.Probability(k)
-			clean += q
-		}
-		for _, q := range a.Probabilities {
-			total += q
-		}
-		if total > 1 {
-			clean /= total
-		}
-		if clean < r.threshold {
+		// not a loss. A missing probability counts as 0. The shared answer check has already
+		// rejected a distribution whose mass rounding cannot explain and normalized the rest, so
+		// the sum is at most 1; it is taken in a fixed order with compensation, so a cached answer
+		// always decides the same way, and a sum within MassNoise of the threshold is at it.
+		clean := classify.OptionMass(a.Probabilities, cleanOptions)
+		if clean+classify.MassNoise < r.threshold {
 			return sdk.Abstain(fmt.Sprintf("the answers other than a loss together at %.2f are below the threshold %.2f", clean, r.threshold))
 		}
 		return sdk.Clean()
