@@ -36,6 +36,11 @@
   mentions it, and abstains below 0.9 instead of 0.8. A reason naming several rules or a rule it
   does not know is unsupported. On 25 repositories its 19 findings were all reasons that answer
   their rule, most of them by saying where a path or a command comes from; now there is one.
+- `severe-event-understated` stops reading expected events as lost work: an absent optional file,
+  a requested stop or cancel, the program's own recovery. It now sends the log level and a list of
+  what the code checked on the way to the log (an error test with `errors.Is` or `os.IsNotExist`
+  while that error is still the one at hand, a receive from a context's Done channel or a signal
+  channel), and its question has an answer for each of those cases.
 
 ## v0.1.0 (2026-10-02)
 

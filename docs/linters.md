@@ -252,14 +252,28 @@ slog.Info("events for the last hour are lost, the write to disk was refused")
 
 **Reads:** debug and info logs with a constant message of at least two words.
 
-**Sends:** the message.
+**Sends:** the message, its level, and a `branch` list of what the code checked on the way to the
+log, read through go/types: an error test that held (`errors.Is(err, fs.ErrNotExist)`,
+`os.IsNotExist(err)`, `err == context.Canceled`, also a guard that returns on every other error),
+a receive from a context's Done channel or from a channel of `os.Signal`, and a function literal
+passed along with a signal value. An error test counts only while the checked place (a variable,
+a field of one, or `ctx.Err()`) still holds the checked value at the log: not written or shadowed
+in between, not written later in a loop around the log, not written in a closure or through its
+address, no goto in the function, and the log line logs no other error. The walk stops at a
+function literal, and a case reached by `fallthrough` or code after a label names nothing. A debug "notify
+failed" reads as lost work until you see it sits in the branch where the context was cancelled.
+The facts say what was checked, not why: whether a missing file was optional, or a cancel was
+asked for, is still the classifier's call.
 
-**Asks two questions:** what consequence the message states (routine progress, a temporary
-inconvenience, or unintended loss), and whether it describes something done on purpose (a requested
-deletion, sampling).
+**Asks two questions:** what consequence the message states: routine progress, an expected absence
+(no saved state on the first start), a requested stop, the program's own recovery, a temporary
+inconvenience, or an unintended loss; and whether what went away was meant to go (a requested
+deletion, sampling as configured).
 
-**Decides:** reports when the loss is unintended (threshold 0.85) and "on purpose" is unlikely (0.3
-or below). Between 0.3 and 0.7 on the second question it abstains.
+**Decides:** reports when the loss is unintended (threshold 0.85) and "meant" is unlikely (0.3 or
+below); between 0.3 and 0.7 on the second question it abstains. The answers other than a loss are
+one outcome here, so their probabilities are added before the threshold, in a fixed order, after the
+shared check has refused or normalized a distribution that adds up to more than 1.
 
 ### destructive-remediation
 
