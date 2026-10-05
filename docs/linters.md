@@ -421,6 +421,62 @@ A doc that says only "returns" about something the function sends on a channel o
 wording finding rather than a stale contract: the doc is wrong about how the values reach the caller,
 and the fix is the verb. A doc that names the delivery ("returns them through ch") is clean.
 
+### read-only-promise
+
+**Finds:** a doc that promises the function changes nothing, or leaves its receiver, a parameter or a
+package variable alone, while the body writes it.
+
+```go
+// Peek returns the next job and leaves the queue unchanged.     <- it advances q.head
+func (q *Queue) Peek() string { q.head++; return q.items[q.head-1] }
+```
+
+**Reads:** documented functions and methods, and the writes in their bodies that the caller can
+see. A write counts when the written place is reached from the receiver, a parameter or a
+package-level variable through something the caller shares: a pointer (`q.head` on `q *Queue`), a
+map or slice element (`xs[i]`, `c.m[k]`, also through a generic `S ~[]int`), `delete`, `clear` or
+`copy` into a map or slice the caller passed (`copy(dst[1:], src)`), or a `sync/atomic` store,
+add, swap or compare-and-swap. Not counted:
+
+- a field of a struct received by value, or its address (`v.n = 1`, `atomic.AddInt64(&v.n, 1)` on
+  `v V` change the function's own copy), and a view of an array value (`copy(a[:], src)`);
+- assigning the parameter itself (`xs = append(xs, x)`);
+- a write a proven save and restore undoes: `old := s.result` and later `s.result = old`, both at the
+  top level of the body, with no return or `panic` in between, `old` and its fields left alone, no
+  index in the path, the root's address never taken, and no call in between when the path
+  dereferences more than the root (`*s.next`). A restore in a branch, after an early return or of a
+  changed value proves nothing, and the writes stand;
+- writes through a local alias (`p := q; p.head = 1`), a callee or a stored method value, which are
+  not followed.
+
+A write after the root itself was reassigned (`p = new(int); *p = 1`), or through a generic index
+whose constraint mixes slices and arrays, may not reach the caller and is unsupported, as is a
+write inside a function literal (when it runs is not known). Each root is judged on its own: a
+certain write to `q` is asked about even when a closure writes `p`.
+
+Every documented function with a write is asked; there is no filter on the doc's words, because
+no-change promises take too many forms ("is left as it was", "does not reorder").
+
+**Sends:** the doc, with the function's own name masked, and a description of each written root
+built from identifiers: "the receiver q, a Queue", "the parameter names, a slice", "package-level
+state, the variable calls".
+
+**Asks:** one yes/no question per written root: does the doc promise to leave it, as a whole,
+unchanged? "Changes nothing", "read-only", "pure" and "no side effects" cover every root. These do
+not count: a promise about only part of it ("does not modify the flags of the command" while a
+cache is filled), a promise about something else, one that holds only in some cases ("on failure it
+leaves the queue unchanged"), or a description of what the function does change.
+
+**Decides:** reports at 0.7 or above, clean at 0.3 or below, abstains in between (setting
+`threshold`). The threshold is lower than the other promise linters' because most docs that plainly
+promise no change scored 0.72 to 0.93 on the measured sets; it is tuned on them.
+
+**Unsupported:** a root whose only writes are inside a function literal or uncertain.
+
+A promise about part of a root is out of scope: matching it would need to know which fields the
+promised part covers, so a narrow promise that is really broken (`c.flags["v"] = "1"` under "does
+not modify the flags") is missed rather than guessed at.
+
 ---
 
 ## Tests

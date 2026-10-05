@@ -2,7 +2,7 @@ version: "2"
 
 linters:
   default: none
-  enable: [doc-vs-signature, metric-type-vs-help, premature-success, table-case-vs-expectation, sentinel-name-vs-text, error-needs-type, human-unit-contradiction, enum-comment-shift, test-name-vs-assertion, doc-vs-table, suppression-rationale, log-sensitive-field, log-key-value-role, normal-event-at-error, severe-event-understated, destructive-remediation]
+  enable: [doc-vs-signature, read-only-promise, metric-type-vs-help, premature-success, table-case-vs-expectation, sentinel-name-vs-text, error-needs-type, human-unit-contradiction, enum-comment-shift, test-name-vs-assertion, doc-vs-table, suppression-rationale, log-sensitive-field, log-key-value-role, normal-event-at-error, severe-event-understated, destructive-remediation]
 
 semantic:
   classifier: fake
@@ -179,3 +179,19 @@ semantic:
         - {linter: doc-vs-signature, question: returns_result, when: "returns once the queue is empty", yes: 0.5}
         # (normal-event-at-error's twin: its doc mentions an error, the function returns a string)
         - {linter: doc-vs-signature, question: returns_error, when: "a cache miss is the cache working as designed", yes: 0.05}
+        # read-only-promise
+        - {linter: read-only-promise, question: promises_unchanged, when: "returns the next item without altering the queue", yes: 0.95}
+        - {linter: read-only-promise, question: promises_unchanged, when: "is pure: the same input gives the same result", yes: 0.95}
+        - {linter: read-only-promise, question: promises_unchanged, when: "returns the median of xs, leaving xs unchanged", yes: 0.95}
+        - {linter: read-only-promise, question: promises_unchanged, when: "returns the value for k and does not modify the cache", yes: 0.9}
+        - {linter: read-only-promise, question: promises_unchanged, when: "adds up xs without modifying xs", yes: 0.05}
+        - {linter: read-only-promise, question: promises_unchanged, when: "does not change the file's permissions", yes: 0.05}
+        - {linter: read-only-promise, question: promises_unchanged, when: "the capacity stays unchanged", yes: 0.1}
+        - {linter: read-only-promise, question: promises_unchanged, when: "callers see no change", yes: 0.6}
+        - {linter: read-only-promise, question: promises_unchanged, when: "on an empty queue it returns false and leaves the queue unchanged", yes: 0.1}
+        - {linter: read-only-promise, question: promises_unchanged, when: "it does not modify the flags of the command", yes: 0.1}
+        - {linter: read-only-promise, question: promises_unchanged, when: "returns the command's name and leaves the command untouched", yes: 0.95}
+        - {linter: read-only-promise, question: promises_unchanged, when: "except filling the internal cache", yes: 0.1}
+        - {linter: read-only-promise, question: promises_unchanged, when: "compares n with Limit and leaves Limit unchanged", yes: 0.95}
+        # (other linters' twins whose functions write state: their docs promise nothing about it)
+        - {linter: read-only-promise, question: promises_unchanged, yes: 0.05}
