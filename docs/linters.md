@@ -210,11 +210,37 @@ log.Error("cache miss, loading from the database")
 **Reads:** error and fatal level logs with a constant message. Messages that name a failure as a
 word ("failed", "cannot", "unable", "invalid") are skipped; "failover" and "failback" are asked about.
 
-**Sends:** the message.
+**Sends:** the message, whether the call logs a value of type error (a field such as
+`zap.Error(err)` or slog's `"err", err`, a printf argument, logrus `WithError`, zerolog `Err`), or
+the package-level error it logs by name (`"err", context.Canceled`), and the checks the code made
+on that error on the way to the log call, read through go/types from the enclosing branches:
+`err != nil` gives "not nil", `errors.Is(err, context.Canceled)` "is context.Canceled",
+`!errors.Is(err, net.ErrClosed)` "is not net.ErrClosed", also `err == io.EOF`, `os.IsNotExist(err)`,
+a switch case, and a guard that returns on the other case; at most six, nearest first. In a
+structured log the message often only names the operation, `"closing the listener"`, and the error
+says that it failed; without the error the classifier reads such a message as routine.
 
-**Asks:** whether the event is routine, a recoverable degradation, or a failure.
+A check counts only for the very variable that is logged, only if nothing in its branch can
+rebind it (an assignment, `&err`, a closure that sets it, a `goto`), never across a function literal,
+and not for a case reached by `fallthrough`. A check that depends on more than the binding
+(`errors.Is`, `==`, `os.IsNotExist`) is also dropped when the branch writes a field, an element, a
+pointer target or a package-level variable, since that can change the wrapped cause or the
+compared sentinel. A call that changes them is not seen, so the checks are what the code tested on
+the way, not a proof of the error's value at the log.
 
-**Decides:** reports "routine". Threshold 0.9.
+**Asks:** whether the event is routine (including an operation that stopped on an error the code
+checked to be an expected one: a cancellation, a closed connection, the end of input), a
+recoverable degradation, or a failure. When the call carries an error the code did not single out
+and did not find nil, it also asks, about the message alone, whether it only names an action
+("closing the listener") or says what happened ("cache miss", "retry scheduled").
+
+**Decides:** reports "routine" at threshold 0.9. One override comes first: when the message names
+an action at 0.7 or above and the code checked the error is not nil without singling it out, the
+line is taken as a failure report and is clean, whatever the first answer said. That is a recall
+trade-off, not a proof: it removes the zap-style false findings, and it also misses a routine
+event that happens to be worded as an action with an unexpected error attached. When nothing shows
+the error is set, the same answer abstains instead. A known-nil error or an identified one gets no
+override.
 
 ### severe-event-understated
 
@@ -420,6 +446,62 @@ A doc that says only "returns" about something the function sends on a channel o
 ("Describe returns all descriptions" on a method that sends them on `ch`) is reported too. That is a
 wording finding rather than a stale contract: the doc is wrong about how the values reach the caller,
 and the fix is the verb. A doc that names the delivery ("returns them through ch") is clean.
+
+### read-only-promise
+
+**Finds:** a doc that promises the function changes nothing, or leaves its receiver, a parameter or a
+package variable alone, while the body writes it.
+
+```go
+// Peek returns the next job and leaves the queue unchanged.     <- it advances q.head
+func (q *Queue) Peek() string { q.head++; return q.items[q.head-1] }
+```
+
+**Reads:** documented functions and methods, and the writes in their bodies that the caller can
+see. A write counts when the written place is reached from the receiver, a parameter or a
+package-level variable through something the caller shares: a pointer (`q.head` on `q *Queue`), a
+map or slice element (`xs[i]`, `c.m[k]`, also through a generic `S ~[]int`), `delete`, `clear` or
+`copy` into a map or slice the caller passed (`copy(dst[1:], src)`), or a `sync/atomic` store,
+add, swap or compare-and-swap. Not counted:
+
+- a field of a struct received by value, or its address (`v.n = 1`, `atomic.AddInt64(&v.n, 1)` on
+  `v V` change the function's own copy), and a view of an array value (`copy(a[:], src)`);
+- assigning the parameter itself (`xs = append(xs, x)`);
+- a write a proven save and restore undoes: `old := s.result` and later `s.result = old`, both at the
+  top level of the body, with no return or `panic` in between, `old` and its fields left alone, no
+  index in the path, the root's address never taken, and no call in between when the path
+  dereferences more than the root (`*s.next`). A restore in a branch, after an early return or of a
+  changed value proves nothing, and the writes stand;
+- writes through a local alias (`p := q; p.head = 1`), a callee or a stored method value, which are
+  not followed.
+
+A write after the root itself was reassigned (`p = new(int); *p = 1`), or through a generic index
+whose constraint mixes slices and arrays, may not reach the caller and is unsupported, as is a
+write inside a function literal (when it runs is not known). Each root is judged on its own: a
+certain write to `q` is asked about even when a closure writes `p`.
+
+Every documented function with a write is asked; there is no filter on the doc's words, because
+no-change promises take too many forms ("is left as it was", "does not reorder").
+
+**Sends:** the doc, with the function's own name masked, and a description of each written root
+built from identifiers: "the receiver q, a Queue", "the parameter names, a slice", "package-level
+state, the variable calls".
+
+**Asks:** one yes/no question per written root: does the doc promise to leave it, as a whole,
+unchanged? "Changes nothing", "read-only", "pure" and "no side effects" cover every root. These do
+not count: a promise about only part of it ("does not modify the flags of the command" while a
+cache is filled), a promise about something else, one that holds only in some cases ("on failure it
+leaves the queue unchanged"), or a description of what the function does change.
+
+**Decides:** reports at 0.7 or above, clean at 0.3 or below, abstains in between (setting
+`threshold`). The threshold is lower than the other promise linters' because most docs that plainly
+promise no change scored 0.72 to 0.93 on the measured sets; it is tuned on them.
+
+**Unsupported:** a root whose only writes are inside a function literal or uncertain.
+
+A promise about part of a root is out of scope: matching it would need to know which fields the
+promised part covers, so a narrow promise that is really broken (`c.flags["v"] = "1"` under "does
+not modify the flags") is missed rather than guessed at.
 
 ---
 

@@ -14,6 +14,16 @@
 - Answers to a choice question whose probabilities add up to more than 1, beyond what rounding to
   two decimals explains (0.005 per positive entry), are rejected as invalid, for every linter and
   backend; a sum just above 1 within that rounding is normalized to 1 before rules decide.
+- New linter `read-only-promise`: a doc comment that promises a function changes nothing while its
+  body writes the receiver, a parameter or a package-level variable.
+- `normal-event-at-error` stops reading a structured failure as a routine event: in
+  `logger.Error("closing the listener", zap.Error(err))` the message only names the operation and
+  the error says it failed. It now sends whether the call logs a value of type error and what the
+  code checked about that error where it logs (not nil, `errors.Is(err, context.Canceled)`,
+  `err == io.EOF`, `os.IsNotExist(err)`), or the error it logs by name. When the code checked the
+  error is set without singling it out, a second question asks whether the message only names an
+  action; if it does, the line is taken as a failure report and is not a finding, a recall
+  trade-off.
 - `test-name-vs-assertion` no longer reads a failure the test arranges, or an error passed in, as
   the call's own: the request now carries the test's doc comment and whether the test passes the
   call an error, and the question asks about the call itself. Version 2.
