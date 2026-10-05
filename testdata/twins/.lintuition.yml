@@ -167,8 +167,6 @@ semantic:
         - {linter: enum-comment-shift, question: describes, when: "this constant lets a trickle through", choice: GateAjar, probability: 0.9}
         - {linter: enum-comment-shift, question: describes, when: "this constant lets everything through", choice: GateWide, probability: 0.9}
         - {linter: enum-comment-shift, question: describes, when: "this constant is a replication job waiting", choice: PhaseQueued, probability: 0.95}
-        # (a twin's want comment is a line comment on its constant too: a note, no constant)
-        - {linter: enum-comment-shift, question: describes, when: "want `comment describes", choice: none, probability: 0.9}
         # (the sentinel of test-name-vs-assertion's twin package: name and text agree)
         - {linter: sentinel-name-vs-text, question: condition, when: "unbalanced quote", choice: same, probability: 0.9}
         - {linter: sentinel-name-vs-text, question: condition, when: '"text":"disk full"', choice: same, probability: 0.9}

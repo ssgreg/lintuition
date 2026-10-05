@@ -10,7 +10,9 @@
 //	)
 //
 // Code finds the shape: a comment (above the constant, or at the end of its line) on a single
-// constant of a parenthesised const block of at least two constants, and reads how it opens. A
+// constant of a parenthesised const block of at least two constants, and reads how it opens. A line
+// comment in analysistest's expectation syntax (want and a quoted or backquoted pattern) is a test
+// mark, not the constant's comment, and is not read. A
 // comment that opens with its own constant's name ("StateIdle is ...") is sent with that opening
 // replaced by "this constant", so the name cannot outvote the description; any other comment is sent
 // as written, so a neighbour's name it opens with, or its own name further on ("If trace is set"),
@@ -27,6 +29,7 @@ import (
 	"fmt"
 	"go/ast"
 	"go/token"
+	"regexp"
 	"strings"
 
 	"golang.org/x/tools/go/analysis"
@@ -47,6 +50,10 @@ type Settings struct {
 
 // maxConstants bounds the options of one question: some backends label options with letters.
 const maxConstants = 20
+
+// wantRE matches a trailing comment in analysistest's expectation syntax: want, then a quoted or
+// backquoted pattern.
+var wantRE = regexp.MustCompile("^want\\s+(`[^`]*`|\"(?:[^\"\\\\]|\\\\.)*\")")
 
 // none is the option for a comment that describes no single constant.
 const none = "none"
@@ -126,8 +133,13 @@ func block(pass *analysis.Pass, gd *ast.GenDecl) []*sdk.Candidate {
 			if g.cg == nil {
 				continue
 			}
-			// Directives such as //nolint are dropped by Text.
-			if text := strings.TrimSpace(g.cg.Text()); text != "" {
+			// Directives such as //nolint are dropped by Text. A test expectation marks the line for
+			// analysistest and lintuition eval; it says nothing about the constant.
+			text := strings.TrimSpace(g.cg.Text())
+			if g.kind == "line" && wantRE.MatchString(text) {
+				continue
+			}
+			if text != "" {
 				comments = append(comments, comment{vs, g.kind, text})
 			}
 		}

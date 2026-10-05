@@ -226,6 +226,37 @@ func TestWords(t *testing.T) {
 	}
 }
 
+// Want comments cannot sit in the analysistest fixture, which would expect diagnostics for them, so
+// this block is parsed here.
+func TestWantComments(t *testing.T) {
+	src := "package p\nconst (\n" +
+		"WantA = 1 // want `comment describes WantB, not WantA`\n" +
+		"WantB = 2 // want \"comment describes \\\"x\\\", not WantB\"\n" +
+		"WantC = 3 // wanted by the scheduler\n" +
+		"WantD = 4 // want more retries here\n" +
+		"// want `a doc comment is the constant's comment`\n" +
+		"WantE = 5\n" +
+		"WantF = 6 // want `a pattern` and more\n" +
+		")\n"
+	fs := token.NewFileSet()
+	f, err := parser.ParseFile(fs, "p.go", src, parser.ParseComments)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var got []string
+	for _, c := range block(&analysis.Pass{Fset: fs}, f.Decls[0].(*ast.GenDecl)) {
+		got = append(got, fmt.Sprintf("%s %q %s", c.Subject, c.Payload.Prose["comment"], c.Unsupported))
+	}
+	want := []string{
+		`WantC/line "wanted by the scheduler" `,
+		`WantD/line "want more retries here" `,
+		"WantE/doc \"want `a doc comment is the constant's comment`\" ",
+	}
+	if strings.Join(got, "\n") != strings.Join(want, "\n") {
+		t.Fatalf("candidates:\n%s\n\nwant:\n%s", strings.Join(got, "\n"), strings.Join(want, "\n"))
+	}
+}
+
 // bigBlock is one const block of n constants, each with a doc comment that opens with its name.
 func bigBlock(t testing.TB, n int) (*analysis.Pass, *ast.GenDecl) {
 	var src strings.Builder
