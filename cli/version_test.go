@@ -38,6 +38,9 @@ func TestDocVersion(t *testing.T) {
 		{"local directory replace", "", dep("v0.0.0-00010101000000-000000000000", &debug.Module{Path: "../lintuition"}), ""},
 		{"fork replace", "", dep("v0.3.0", &debug.Module{Path: "example.com/fork/lintuition", Version: "v0.9.9"}), ""},
 		{"same-module replace", "", dep("v0.3.0", &debug.Module{Path: path, Version: "v0.3.1"}), "v0.3.1"},
+		{"stamped, fork replace", "v0.9.10", dep("v0.3.0", &debug.Module{Path: "example.com/fork/lintuition", Version: "v0.9.9"}), ""},
+		{"stamped, local directory replace", "v0.9.10", dep("v0.0.0-00010101000000-000000000000", &debug.Module{Path: "../lintuition"}), ""},
+		{"stamped, same-module replace", "v0.9.10", dep("v0.3.0", &debug.Module{Path: path, Version: "v0.3.1"}), "v0.9.10"},
 		{"no lintuition module", "", &debug.BuildInfo{Main: debug.Module{Path: "example.com/other"}}, ""},
 	} {
 		if got := docVersion(c.stamped, c.bi); got != c.want {
