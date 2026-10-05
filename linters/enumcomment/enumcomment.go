@@ -172,9 +172,9 @@ func judge(comments []comment, names []string) []verdict {
 	}
 	// compared holds the comments that take part in the template check, with their words.
 	type entry struct {
-		i     int
-		own   string
-		words []string
+		i          int
+		own        string
+		words, raw []string
 	}
 	var compared []entry
 	for i, cm := range comments {
@@ -208,7 +208,7 @@ func judge(comments []comment, names []string) []verdict {
 		default:
 			v.prose = cm.text
 		}
-		w := template(toks, set)
+		w, raw := template(toks, set)
 		// A doc and a line comment that say the same on one constant are one description.
 		dup := false
 		for _, e := range compared {
@@ -221,7 +221,7 @@ func judge(comments []comment, names []string) []verdict {
 			v.skip = true
 			continue
 		}
-		compared = append(compared, entry{i, own, w})
+		compared = append(compared, entry{i, own, w, raw})
 	}
 	if len(compared) < 2 {
 		return out
@@ -242,7 +242,7 @@ func judge(comments []comment, names []string) []verdict {
 			case d >= 0:
 				// "permits reads" against "permits writes" on AccessRead and AccessWrite: the
 				// differing words name different constants, so the names carry the distinction.
-				cx, cy := singles(x.words[d], parts), singles(y.words[d], parts)
+				cx, cy := singles(x.raw[d], parts), singles(y.raw[d], parts)
 				if cx != "" && cy != "" && cx != cy {
 					continue
 				}

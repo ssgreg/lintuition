@@ -237,3 +237,13 @@ const (
 	KindPrint  = 1 // behaves like fmt.Print
 	KindPrintf = 2 // behaves like fmt.Printf
 )
+
+// 34 a differing word that is itself an identifier is split like a name
+const (
+	// OptExportFile adds ExportFile.
+	OptExportFile = 1 << iota
+	// OptCompiledFiles adds CompiledFiles.
+	OptCompiledFiles
+	// OptSyntaxTree adds Syntax.
+	OptSyntaxTree
+)

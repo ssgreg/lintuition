@@ -69,19 +69,18 @@ func subject(toks []word, names map[string]bool) (string, bool) {
 const constWord = "\x00"
 
 // template returns the comment's identifier words, lower-cased, with every constant name of the
-// block replaced by one placeholder.
-func template(toks []word, names map[string]bool) []string {
-	var out []string
+// block replaced by one placeholder, and the same words as written.
+func template(toks []word, names map[string]bool) (lower, raw []string) {
 	for _, t := range toks {
 		switch {
 		case !t.ident:
 		case isName(t, names):
-			out = append(out, constWord)
+			lower, raw = append(lower, constWord), append(raw, t.text)
 		default:
-			out = append(out, strings.ToLower(t.text))
+			lower, raw = append(lower, strings.ToLower(t.text)), append(raw, t.text)
 		}
 	}
-	return out
+	return lower, raw
 }
 
 // differing returns the one position where two templates of equal length differ: -1 when they are
@@ -145,21 +144,27 @@ func splitName(n string) []string {
 	return out
 }
 
-// singles returns the one constant whose name has a word matching w, or "" when none or several
-// do. A word of the name that equals w matches; only when none does, a word that w extends by at
-// most two letters ("reads" for Read) matches.
+// singles returns the one constant that a comment word names, or "" when it names none or several.
+// The word is split like a name ("ExportFile" is export, file); each of its parts that matches a word
+// of some constant's name narrows the constants down, and parts that match nothing are ignored. A
+// word of a name matches a part that equals it; only when none does, one that the part extends by at
+// most two letters ("reads" for Read).
 func singles(w string, parts map[string]map[string]bool) string {
-	cs := parts[w]
-	if len(cs) == 0 {
-		found := map[string]bool{}
-		for p, pcs := range parts {
-			if utf8.RuneCountInString(p) >= 3 && strings.HasPrefix(w, p) && utf8.RuneCountInString(w)-utf8.RuneCountInString(p) <= 2 {
-				for c := range pcs {
-					found[c] = true
-				}
+	var cs map[string]bool
+	for _, p := range splitName(w) {
+		m := match(p, parts)
+		if len(m) == 0 {
+			continue
+		}
+		if cs == nil {
+			cs = m
+			continue
+		}
+		for c := range cs {
+			if !m[c] {
+				delete(cs, c)
 			}
 		}
-		cs = found
 	}
 	if len(cs) != 1 {
 		return ""
@@ -168,4 +173,22 @@ func singles(w string, parts map[string]map[string]bool) string {
 		return c
 	}
 	return ""
+}
+
+func match(p string, parts map[string]map[string]bool) map[string]bool {
+	found := map[string]bool{}
+	for c := range parts[p] {
+		found[c] = true
+	}
+	if len(found) > 0 {
+		return found
+	}
+	for q, cs := range parts {
+		if utf8.RuneCountInString(q) >= 3 && strings.HasPrefix(p, q) && utf8.RuneCountInString(p)-utf8.RuneCountInString(q) <= 2 {
+			for c := range cs {
+				found[c] = true
+			}
+		}
+	}
+	return found
 }

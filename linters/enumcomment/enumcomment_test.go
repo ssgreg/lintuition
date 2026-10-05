@@ -136,6 +136,9 @@ func TestExtraction(t *testing.T) {
 		`32 KindPrintf/line "behaves like fmt.Printf" [KindPrint KindPrintf none]`,
 		`33 K01/line unsupported: the block has more than 20 constants to offer as options`,
 		`33 K02/line unsupported: the block has more than 20 constants to offer as options`,
+		`34 OptCompiledFiles/doc "this constant adds CompiledFiles." [OptExportFile OptCompiledFiles OptSyntaxTree none]`,
+		`34 OptExportFile/doc "this constant adds ExportFile." [OptExportFile OptCompiledFiles OptSyntaxTree none]`,
+		`34 OptSyntaxTree/doc "this constant adds Syntax." [OptExportFile OptCompiledFiles OptSyntaxTree none]`,
 	}
 	if strings.Join(gs, "\n") != strings.Join(want, "\n") {
 		t.Fatalf("candidates:\n%s\n\nwant:\n%s", strings.Join(gs, "\n"), strings.Join(want, "\n"))
@@ -169,7 +172,7 @@ func TestWords(t *testing.T) {
 			t.Errorf("subject(%q) = %q %v", tc.text, subj, group)
 		}
 	}
-	if got := fmt.Sprint(template(tokenize("Same rule as KA, for (reads); 5 ÉtatPrêt."), names)); got != "[same rule as \x00 for reads 5 \x00]" {
+	if got := fmt.Sprint(template(tokenize("Same rule as KA, for (reads); 5 ÉtatPrêt."), names)); got != "[same rule as \x00 for reads 5 \x00] [Same rule as KA for reads 5 ÉtatPrêt]" {
 		t.Errorf("template: %q", got)
 	}
 	for in, want := range map[string]string{
@@ -184,19 +187,25 @@ func TestWords(t *testing.T) {
 			t.Errorf("splitName(%s) = %s, want %s", in, got, want)
 		}
 	}
-	parts := nameParts([]string{"AccessRead", "AccessWrite", "KindPrint", "KindPrintf"})
+	parts := nameParts([]string{"AccessRead", "AccessWrite", "KindPrint", "KindPrintf", "NeedFiles", "NeedEmbedFiles", "NeedCompiledGoFiles", "NeedExportFile", "KindForBody", "KindForDone"})
 	if got := singles("reads", nameParts([]string{"AccessRead", "readFast"})); got != "" {
 		t.Errorf("reads fits two constants, got %q", got)
 	}
 	for w, want := range map[string]string{
-		"reads":   "AccessRead",
-		"writes":  "AccessWrite",
-		"print":   "KindPrint",
-		"printf":  "KindPrintf",
-		"read":    "AccessRead",
-		"access":  "",
-		"readers": "",
-		"512":     "",
+		"reads":           "AccessRead",
+		"writes":          "AccessWrite",
+		"print":           "KindPrint",
+		"printf":          "KindPrintf",
+		"read":            "AccessRead",
+		"access":          "",
+		"readers":         "",
+		"512":             "",
+		"ExportFile":      "NeedExportFile",
+		"CompiledGoFiles": "NeedCompiledGoFiles",
+		"EmbedFiles":      "NeedEmbedFiles",
+		"Files":           "", // NeedFiles and two more
+		"ForStmt":         "", // for fits both Kind constants, stmt fits none
+		"Stmt":            "",
 	} {
 		if got := singles(w, parts); got != want {
 			t.Errorf("singles(%s) = %q, want %q", w, got, want)
