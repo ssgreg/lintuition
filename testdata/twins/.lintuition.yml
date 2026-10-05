@@ -204,6 +204,20 @@ semantic:
         - {linter: suppression-rationale, question: about, when: "one flat switch over every opcode", choice: addresses, probability: 0.9}
         - {linter: suppression-rationale, question: about, when: "a URL in a string cannot be wrapped", choice: addresses, probability: 0.95}
         - {linter: suppression-rationale, question: about, when: "the buffer is small // errors from this best-effort cleanup", choice: addresses, probability: 0.9}
+        - {linter: suppression-rationale, question: about, when: "G304: the file is only a few bytes long", choice: elsewhere, probability: 0.95}
+        - {linter: suppression-rationale, question: about, when: "G304: built from the build directory", choice: addresses, probability: 0.95}
+        - {linter: suppression-rationale, question: about, when: "G204: this runs on every request", choice: elsewhere, probability: 0.95}
+        - {linter: suppression-rationale, question: about, when: "the command line is a fixed list of literals", choice: addresses, probability: 0.9}
+        - {linter: suppression-rationale, question: about, when: "G306: legacy code from the first release", choice: elsewhere, probability: 0.95}
+        - {linter: suppression-rationale, question: about, when: "G306: the stamp is public build metadata", choice: addresses, probability: 0.9}
+        - {linter: suppression-rationale, question: about, when: "inherited from the old service", choice: elsewhere, probability: 0.95}
+        - {linter: suppression-rationale, question: about, when: "exported: the loop over the cache is cheap", choice: elsewhere, probability: 0.9}
+        - {linter: suppression-rationale, question: about, when: "var-naming: the name matches the field", choice: addresses, probability: 0.9}
+        - {linter: suppression-rationale, question: about, when: "SA1019: the replacement constant is missing", choice: addresses, probability: 0.95}
+        # Known false positive with Jev (reported in 3 of 3 live runs), scripted as the right answer;
+        # see the twin's explanation and docs/linters.md.
+        - {linter: suppression-rationale, question: about, when: "the G304.golden fixture is meant to be readable", choice: addresses, probability: 0.9}
+        - {linter: suppression-rationale, question: about, when: "the G304.golden fixture gets world-readable file permissions", choice: addresses, probability: 0.9}
         # a reason cut at its second // would match this rule and be reported
         - {linter: suppression-rationale, question: about, when: '"rationale":"the buffer is small"', choice: elsewhere, probability: 0.9}
         # (destructive-remediation's twins are plain string errors, for error-needs-type: none is branchable)

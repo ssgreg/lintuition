@@ -6,7 +6,16 @@
 // errcheck reports an unchecked error; the reason talks about the file's size. The reason is
 // person-written; what the linter reports is a fixed description: the Doc of a lintuition linter,
 // or a short built-in description of a common golangci-lint linter. The classifier is asked only
-// whether the reason is about that reported risk or about something else; Go code decides.
+// whether the reason argues about that reported thing or only about some other property of the
+// code; Go code decides.
+//
+// gosec, staticcheck and revive report many unrelated things under one name, and a reason usually
+// answers the one rule that fired: "G304: a constant file name under the build directory". Their
+// one-line description cannot carry that, so a reason that names a rule (a gosec G-number, a
+// staticcheck SA, S, ST or QF number as a word of its own, a revive rule list in revive's disable
+// syntax or before a colon) is compared with that rule's own title from the linter's documentation
+// instead. A reason that names a rule the table does not describe, or several rules, is
+// unsupported.
 //
 // A directive is read as lintuition and golangci-lint read it: `//nolint:<linters> // <reason>`.
 // The reason is the whole rest of the comment, a second `//` included: a line comment runs to the
@@ -34,11 +43,10 @@ const Name = "suppression-rationale"
 
 // Settings configure the linter.
 type Settings struct {
-	// Threshold is the minimum probability of "elsewhere" for a finding. The default 0.8 is above the
-	// prototype's 0.7: the descriptions of umbrella linters (gosec, staticcheck, govet, gocritic,
-	// revive) are coarse, so a reason that addresses the one check that fired can read as
-	// "something else" to a classifier that sees only the umbrella. Not yet validated on a
-	// labelled set.
+	// Threshold is the minimum probability of the answer for a decision either way (default 0.9).
+	// On 147 labelled reasons with jev-latest, 0.85 reported three reasons that do answer their
+	// rule, two of them a reason the classifier puts at 0.83 to 0.88 from one sample to the next;
+	// 0.9 reported one and kept 15 of 20 reasons about something else.
 	Threshold *float64 `yaml:"threshold"`
 }
 
@@ -55,11 +63,11 @@ func init() {
 		Name:        Name,
 		Doc:         "a nolint reason that explains something other than what the suppressed linter reports",
 		Standard:    true,
-		Version:     "2",
+		Version:     "3",
 		Analyzer:    Analyzer,
 		NewSettings: func() any { return &Settings{} },
 		New: func(s any) (sdk.Rule, error) {
-			t, err := sdk.Threshold(s.(*Settings).Threshold, 0.8)
+			t, err := sdk.Threshold(s.(*Settings).Threshold, 0.9)
 			if err != nil {
 				return nil, err
 			}
@@ -94,6 +102,100 @@ var (
 	// The engine's rule for a fact string; a description that breaks it cannot be sent as one.
 	factRE = regexp.MustCompile(`^[A-Za-z0-9_ .,/()-]{0,120}$`)
 )
+
+// ruleTables are the linters whose reasons name the rule they answer, with each rule's description
+// and how a reason cites rules. A cited rule missing from the description table is unsupported,
+// never replaced by a rule whose name it starts with.
+var ruleTables = map[string]struct {
+	rules map[string]string
+	cite  func(reason string) []string
+}{
+	"gosec":       {gosecRules, citeIDs(`G[0-9]{3}`)},
+	"staticcheck": {staticcheckRules, citeIDs(`(?:SA|ST|QF|S)[0-9]{4}`)},
+	"revive":      {reviveRules, citeRevive},
+}
+
+// citeIDs returns the IDs a reason cites as words of their own: a whitespace-separated word that,
+// without surrounding brackets, quotes and sentence punctuation, is an ID or a list of IDs joined
+// by "," or "/" ("G304:", "(G204)", "G304/G703"). An ID inside a larger word is not a citation:
+// "G304.json" is a file, "BUG-G304" a ticket, "éG304" a word.
+func citeIDs(id string) func(string) []string {
+	// The whole word must be the list: a path made of an ID and slashes ("/G304/", "SA1019/") is
+	// not one.
+	list := regexp.MustCompile(`^(?:` + id + `)(?:[,/](?:` + id + `))*$`)
+	return func(reason string) []string {
+		var out []string
+		for _, w := range strings.Fields(reason) {
+			w = strings.TrimRight(strings.TrimLeft(w, `(["'`), `)]"':,.;!?`)
+			if !list.MatchString(w) {
+				continue
+			}
+			out = append(out, strings.FieldsFunc(w, func(r rune) bool { return r == ',' || r == '/' })...)
+		}
+		return out
+	}
+}
+
+var (
+	// revive's disable syntax, as revive reads it: the whole non-blank field after the colon is a
+	// comma-separated rule list.
+	reviveDisableRE = regexp.MustCompile(`^(?:revive:disable(?:-next-line|-line)?|disable(?:-next-line|-line)):(\S*)`)
+	// A heading: a rule name, or a comma-separated list of them, before a colon and a blank, as
+	// revive prints its findings ("var-naming: ...").
+	reviveHeadingRE = regexp.MustCompile(`^([a-z]+(?:-[a-z0-9]+)*(?:,[a-z]+(?:-[a-z0-9]+)*)*):(?:\s|$)`)
+	reviveNameRE    = regexp.MustCompile(`^[a-z]+(?:-[a-z0-9]+)*$`)
+)
+
+// citeRevive returns the revive rules a reason cites, at the start of the reason or of a clause
+// after "//". The disable syntax always cites: a malformed field is returned whole, so it is
+// unsupported rather than cut down to a known prefix. A heading cites when one of its names is a
+// revive rule (described or not) or has a hyphen as revive's rule names do; a single unknown word
+// ("note:", "todo:") is ordinary prose.
+func citeRevive(reason string) []string {
+	var out []string
+	for _, clause := range strings.Split(reason, "//") {
+		clause = strings.TrimSpace(clause)
+		if m := reviveDisableRE.FindStringSubmatch(clause); m != nil {
+			names := strings.Split(m[1], ",")
+			for _, n := range names {
+				if !reviveNameRE.MatchString(n) {
+					return []string{m[1]} // malformed: cited, and described by nothing
+				}
+			}
+			out = append(out, names...)
+			continue
+		}
+		m := reviveHeadingRE.FindStringSubmatch(clause)
+		if m == nil {
+			continue
+		}
+		names := strings.Split(m[1], ",")
+		for _, n := range names {
+			if _, known := reviveRules[n]; known || reviveUndescribed[n] || strings.Contains(n, "-") {
+				out = append(out, names...)
+				break
+			}
+		}
+	}
+	return out
+}
+
+// citedRule returns the one rule a reason cites, and false when it cites several distinct ones. An
+// empty rule means the reason cites none, or the linter has no rule table.
+func citedRule(linter, reason string) (string, bool) {
+	t, ok := ruleTables[linter]
+	if !ok {
+		return "", true
+	}
+	var rule string
+	for _, id := range t.cite(reason) {
+		if rule != "" && id != rule {
+			return "", false
+		}
+		rule = id
+	}
+	return rule, true
+}
 
 // describe returns what a linter reports: a lintuition linter's Doc, or the built-in description.
 func describe(name string) (string, bool) {
@@ -150,16 +252,32 @@ func candidate(pass *analysis.Pass, c *ast.Comment) *sdk.Candidate {
 		cand.Unsupported = "the directive names several linters; which one the reason addresses is not established"
 		return cand
 	}
-	desc, ok := describe(names[0])
-	switch {
-	case !ok:
-		cand.Unsupported = "no description of what " + names[0] + " reports"
-		return cand
-	case !factRE.MatchString(desc):
-		cand.Unsupported = "the description of " + names[0] + " is not a plain fact"
+	linter := names[0]
+	rule, one := citedRule(linter, reason)
+	if !one {
+		cand.Unsupported = "the reason names several " + linter + " rules; which one it addresses is not established"
 		return cand
 	}
-	cand.Payload.Fact("linter", names[0])
+	desc, ok := describe(linter)
+	if rule != "" {
+		desc, ok = ruleTables[linter].rules[rule]
+	}
+	switch {
+	case !ok && rule != "":
+		cand.Unsupported = "no description of what " + linter + " rule " + rule + " reports"
+		return cand
+	case !ok:
+		cand.Unsupported = "no description of what " + linter + " reports"
+		return cand
+	case !factRE.MatchString(desc):
+		cand.Unsupported = "the description of " + linter + " is not a plain fact"
+		return cand
+	}
+	cand.Payload.Fact("linter", linter)
+	if rule != "" {
+		cand.Payload.Fact("rule", rule)
+		cand.Local["rule"] = rule
+	}
 	cand.Payload.Fact("suppressed", desc)
 	cand.Payload.AddProse("rationale", reason)
 	return cand
@@ -177,15 +295,17 @@ func (r *rule) Questions(*sdk.Candidate) []sdk.Question {
 	return []sdk.Question{{
 		ID:   "about",
 		Kind: sdk.Choice,
-		// Asked what the reason is about, not whether it justifies the suppression: any reason
-		// "justifies" it to a classifier. On eight labelled reasons with jev-latest, the old
-		// question called "this function is short and easy to read" an errcheck justification at
-		// 0.9; this one called every off-topic reason off-topic at 0.98 or more, and no on-topic
-		// reason off-topic.
-		Text: "Does the reason `rationale` mention or address what `suppressed` describes?",
+		// Asked what the reason argues about, not whether it justifies the suppression: any reason
+		// "justifies" it to a classifier, which called "this function is short and easy to read" an
+		// errcheck justification at 0.9. The question before this one asked whether the reason
+		// mentions what `suppressed` describes, and read the subject literally: "G703: a file name
+		// this program generated" was not about "path traversal" to it, because the reason argues
+		// where the path comes from instead of naming the risk. The options now say what an argument about
+		// the report looks like, and what talking about something else looks like.
+		Text: "`suppressed` is what a linter reported on this line, and `rationale` is the reason a person gave for silencing it. Does the reason argue about the reported thing itself, or does it only talk about some other property of the code?",
 		Options: []sdk.Option{
-			{Key: "addresses", Description: "Yes: it is about that very thing."},
-			{Key: "elsewhere", Description: "No: it is about a different subject."},
+			{Key: "addresses", Description: "It argues about the reported thing, or restates it: why that risk does not apply here, where the input or value comes from and why it is safe, or why the construct is needed, intended or unavoidable."},
+			{Key: "elsewhere", Description: "It talks only about something the report is not about, such as the code's size, speed, age, callers or readability, and says nothing about the reported thing."},
 		},
 	}}
 }
@@ -205,6 +325,10 @@ func (r *rule) Decide(c *sdk.Candidate, answers map[string]sdk.Answer) sdk.Decis
 	}
 	if a.Choice != "elsewhere" {
 		return sdk.Clean()
+	}
+	if r := c.Local["rule"]; r != "" {
+		// The rule is the one the reason names; nothing here knows which rule actually fired.
+		return sdk.Report("nolint rationale is about something other than %s %s, the rule it names: %q", c.Local["linter"], r, c.Local["rationale"])
 	}
 	return sdk.Report("nolint rationale is about something other than what %s reports: %q", c.Local["linter"], c.Local["rationale"])
 }
