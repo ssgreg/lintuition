@@ -723,7 +723,7 @@ whose IDs were reassigned to new checks.
 
 ## Not here yet
 
-Four prototype linters wait for v0.2: `error-message-vs-condition`, `diagnostic-subject-mismatch`,
+Four prototype linters are still out: `error-message-vs-condition`, `diagnostic-subject-mismatch`,
 `diagnostic-polarity-mismatch` and `error-to-http-status`. They need a branch condition, and the
 prototype sent it as source. They come back once the condition can be described without its source
 text.
