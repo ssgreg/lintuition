@@ -54,7 +54,15 @@ func TestSARIFEmptyRulesIsAnArray(t *testing.T) {
 	}
 }
 
+// markBuiltin marks a linter built-in for one test, as package builtin does for the real ones.
+func markBuiltin(t *testing.T, linter string) {
+	t.Helper()
+	MarkBuiltin(linter)
+	t.Cleanup(func() { delete(builtins, linter) })
+}
+
 func TestGitHubActionsDocLink(t *testing.T) {
+	markBuiltin(t, "premature-success")
 	var b bytes.Buffer
 	run := Run{Linters: []LinterStatus{{Name: "premature-success", DocURL: DocURL("v0.2.0", "premature-success")}}}
 	is := []Issue{
@@ -73,6 +81,7 @@ func TestGitHubActionsDocLink(t *testing.T) {
 }
 
 func TestSARIFHelpURI(t *testing.T) {
+	markBuiltin(t, "doc-vs-signature")
 	var b bytes.Buffer
 	run := Run{Linters: []LinterStatus{
 		{Name: "doc-vs-signature", Enabled: true, DocURL: DocURL("v0.2.0", "doc-vs-signature")},
@@ -109,6 +118,7 @@ func TestSARIFHelpURI(t *testing.T) {
 }
 
 func TestDocURL(t *testing.T) {
+	markBuiltin(t, "premature-success")
 	for _, c := range []struct{ version, ref string }{
 		{"v0.2.0", "v0.2.0"},
 		{"v1.0.0-rc.1", "v1.0.0-rc.1"},
@@ -128,5 +138,9 @@ func TestDocURL(t *testing.T) {
 	}
 	if got := DocURL("v0.2.0", "todo-owner"); got != "" {
 		t.Errorf("a plugin linter got a link: %q", got)
+	}
+	// A plugin may take a built-in's name in a binary that leaves builtin out; it is not marked.
+	if got := DocURL("v0.2.0", "metric-type-vs-help"); got != "" {
+		t.Errorf("a plugin named like a built-in got the built-in's link: %q", got)
 	}
 }

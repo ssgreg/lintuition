@@ -1,44 +1,41 @@
 package report
 
 import (
+	"sort"
 	"strings"
 
 	"golang.org/x/mod/module"
 	"golang.org/x/mod/semver"
 )
 
-// BuiltinLinters are the linters with a section in docs/linters.md, under a `### <name>` heading, so
-// the name is the anchor. A plugin linter is not here and its findings carry no link. A test in
-// package builtin keeps the list equal to what builtin registers and to the headings.
-var BuiltinLinters = []string{
-	"destructive-remediation",
-	"doc-vs-signature",
-	"doc-vs-table",
-	"enum-comment-shift",
-	"error-needs-type",
-	"human-unit-contradiction",
-	"log-key-value-role",
-	"log-sensitive-field",
-	"metric-type-vs-help",
-	"normal-event-at-error",
-	"premature-success",
-	"read-only-promise",
-	"sentinel-name-vs-text",
-	"severe-event-understated",
-	"suppression-rationale",
-	"table-case-vs-expectation",
-	"test-name-vs-assertion",
+// builtins are the linters package builtin registered. Each has a section in docs/linters.md
+// under a `### <name>` heading, so the name is the anchor. A linter registered by anyone else, a
+// plugin that took a built-in's name in a binary without builtin included, gets no link.
+var builtins = map[string]bool{}
+
+// MarkBuiltin records that package builtin registered the linter; only builtin calls it, from init.
+// With builtin imported a plugin cannot take the name, since registering it twice panics.
+func MarkBuiltin(linter string) {
+	builtins[linter] = true
+}
+
+// Builtins returns the marked linters sorted by name.
+func Builtins() []string {
+	out := make([]string, 0, len(builtins))
+	for name := range builtins {
+		out = append(out, name)
+	}
+	sort.Strings(out)
+	return out
 }
 
 // DocURL is the address of a built-in linter's section in docs/linters.md, at the ref that matches
 // the build version; for any other linter it is empty.
 func DocURL(version, linter string) string {
-	for _, name := range BuiltinLinters {
-		if name == linter {
-			return "https://github.com/ssgreg/lintuition/blob/" + docRef(version) + "/docs/linters.md#" + linter
-		}
+	if !builtins[linter] {
+		return ""
 	}
-	return ""
+	return "https://github.com/ssgreg/lintuition/blob/" + docRef(version) + "/docs/linters.md#" + linter
 }
 
 // docRef is the git ref whose docs describe this build: a release version is its own tag. Anything
