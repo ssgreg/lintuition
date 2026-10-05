@@ -31,7 +31,7 @@ import (
 // written between the check and the log, nor anywhere in a loop around the log that does not run
 // the check again (the write reaches the next pass), nor in a function literal or through its
 // address; it must not be shadowed at the log, the function must have no goto, and the log call
-// must log no error but that same place. Only conditions that hold positively count: the else
+// must log no value whose type implements error but that same place. Only conditions that hold positively count: the else
 // branch of errors.Is(err, X), or a condition under !, names nothing. The walk stops at a
 // function literal, which may run later with other values. A case that the previous case falls
 // through into (fallthrough as its last non-empty statement), and code after a label, establish
@@ -177,7 +177,7 @@ func stillChecked(pkg *types.Package, info *types.Info, body *ast.BlockStmt, sta
 			if !isExpr || !ok {
 				return ok
 			}
-			if facts.IsError(info.TypeOf(e)) {
+			if tv, isTV := info.Types[e]; isTV && tv.IsValue() && implementsError(tv.Type) {
 				if pv, path, known := place(info, e); !known || pv != v || path != c.path {
 					ok = false // the line logs another error value, or one it cannot tell apart
 				}
@@ -187,6 +187,23 @@ func stillChecked(pkg *types.Package, info *types.Info, body *ast.BlockStmt, sta
 		})
 	}
 	return ok
+}
+
+// implementsError reports whether a value of type t is an error value: t implements error, or *t
+// does (a method with a pointer receiver), so customError, *customError and a named interface with
+// Error() string count, not only the error type itself. This is for telling which values a log
+// line logs; the signature checks elsewhere stay exact.
+func implementsError(t types.Type) bool {
+	if t == nil || t == types.Typ[types.Invalid] {
+		return false
+	}
+	if types.Implements(t, errorIface) {
+		return true
+	}
+	if _, isPtr := t.Underlying().(*types.Pointer); isPtr || types.IsInterface(t) {
+		return false
+	}
+	return types.Implements(types.NewPointer(t), errorIface)
 }
 
 // writes reports whether a node assigns to v or to something rooted in it.

@@ -151,6 +151,13 @@ func TestExtraction(t *testing.T) {
 		`73 info "buffered rows were thrown away"`,
 		`74 info "buffered rows were thrown away"`,
 		`75 info "buffered rows were thrown away" branch=context done`,
+		`76 info "buffered rows were thrown away"`,
+		`77 info "buffered rows were thrown away"`,
+		`78 info "buffered rows were thrown away"`,
+		`79 info "buffered rows were thrown away"`,
+		`80 info "buffered rows were thrown away"`,
+		`81 info "buffered rows were thrown away" branch=error is context.Canceled`,
+		`82 info "buffered rows were thrown away" branch=error is context.Canceled`,
 	}
 	if strings.Join(got, "\n") != strings.Join(want, "\n") {
 		t.Fatalf("candidates:\n%s\n\nwant:\n%s", strings.Join(got, "\n"), strings.Join(want, "\n"))

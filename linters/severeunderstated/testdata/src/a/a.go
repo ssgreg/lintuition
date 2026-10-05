@@ -582,3 +582,62 @@ func c75(c nearly, jobs chan int) {
 	case <-jobs:
 	}
 }
+
+// Another error value logged, by any type that implements error.
+
+type smallErr int
+
+func (smallErr) Error() string { return "small" }
+
+type ptrErr struct{ code int }
+
+func (*ptrErr) Error() string { return "ptr" }
+
+type namedError interface{ Error() string }
+
+func c76(err error) {
+	other := smallErr(7)
+	if stderrors.Is(err, context.Canceled) {
+		slog.Info("buffered rows were thrown away", "err", other) // 76 no branch: another error of a concrete type
+	}
+}
+
+func c77(err error) {
+	other := &ptrErr{7}
+	if stderrors.Is(err, context.Canceled) {
+		slog.Info("buffered rows were thrown away", "err", other) // 77 no branch: another error of a pointer type
+	}
+}
+
+func c78(err error) {
+	other := ptrErr{7}
+	if stderrors.Is(err, context.Canceled) {
+		slog.Info("buffered rows were thrown away", "err", other) // 78 no branch: a value whose pointer implements error
+	}
+}
+
+func c79(err error) {
+	var other namedError = smallErr(7)
+	if stderrors.Is(err, context.Canceled) {
+		slog.Info("buffered rows were thrown away", "err", other) // 79 no branch: another error of a named interface
+	}
+}
+
+func c80(err error) {
+	other := smallErr(7)
+	if stderrors.Is(err, context.Canceled) {
+		slog.Info("buffered rows were thrown away", "err", err, "other", other) // 80 no branch: the checked error and another one
+	}
+}
+
+func c81(other smallErr) {
+	if stderrors.Is(other, context.Canceled) {
+		slog.Info("buffered rows were thrown away", "err", other) // 81 branch: the checked value itself, of a concrete type
+	}
+}
+
+func c82(err error, n int) {
+	if stderrors.Is(err, context.Canceled) {
+		slog.Info("buffered rows were thrown away", "err", err, "rows", n) // 82 branch: other logged values are not errors
+	}
+}
