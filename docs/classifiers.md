@@ -60,8 +60,8 @@ code.
 | `openai` (Ollama, local) | qwen2.5:7b | 1/6 | 0 | 16 | 4 s | local |
 | `openai` (Ollama, local) | qwen2.5:3b | 0/6 | 0 | 16 | 2 s | local |
 
-On the [showcase](../examples/showcase) (all 16 linters, 17 marked findings), `jev-latest` caught
-every finding in each of 3 runs with no unmarked findings, at 105 requests and ~$0.0019 for the
+On the [showcase](../examples/showcase) (all 17 linters, 18 marked findings), `jev-latest` caught
+every finding in each of 3 runs with no unmarked findings, at 108 requests and ~$0.0019 for the
 three runs (2026-10-02).
 
 Larger local models on the twins of 2026-10-02 (32 marked defects from 16 linters, one run each,

@@ -43,6 +43,8 @@ semantic:
         - {linter: doc-vs-table, when: "three days late", choice: met, probability: 0.95}
         - {linter: doc-vs-table, when: "not expired before the deadline", choice: not_met, probability: 0.95}
         - {linter: doc-vs-table, when: "expired when the deadline", choice: met, probability: 0.95}
+        - {linter: doc-vs-table, question: stated, yes: 0.8}
         - {linter: test-name-vs-assertion, when: "rejects unbalanced quote", choice: error, probability: 0.95}
         - {linter: suppression-rationale, when: "the file is small", choice: elsewhere, probability: 0.9}
         - {linter: doc-vs-signature, when: "returns an error if the name is empty", yes: 0.95}
+        - {linter: read-only-promise, when: "returns the next job and leaves the queue unchanged", yes: 0.95}
