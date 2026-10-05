@@ -190,7 +190,7 @@ func judge(comments []comment, names []string) []verdict {
 		i          int
 		own        string
 		words, raw []string
-		same       string // the words with names kept, for comments of one constant
+		same       string // the trimmed comment, for comments of one constant
 	}
 	var compared []entry
 	for i, cm := range comments {
@@ -225,9 +225,10 @@ func judge(comments []comment, names []string) []verdict {
 			v.prose = cm.text
 		}
 		w, raw := template(toks, set)
-		// A doc and a line comment that say the same on one constant are one description. Names are
-		// kept here: "Enables ReadMode." and "Enables WriteMode." say different things.
-		same := strings.ToLower(strings.Join(raw, " "))
+		// A doc and a line comment with the same text on one constant are one description. The text is
+		// compared as written: names and their case ("ReadMode", "readMode") and punctuation such as
+		// "< 0" and "> 0" tell descriptions apart.
+		same := cm.text
 		dup := false
 		for _, e := range compared {
 			if e.own == own && e.same == same {

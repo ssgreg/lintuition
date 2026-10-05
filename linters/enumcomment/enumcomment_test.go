@@ -265,7 +265,7 @@ func TestWantComments(t *testing.T) {
 	}
 }
 
-// Comments of one constant are merged only when they say the same, names included.
+// Comments of one constant are merged only when their text is the same, case and punctuation included.
 func TestSameConstantComments(t *testing.T) {
 	for _, tc := range []struct {
 		doc, line string
@@ -273,10 +273,15 @@ func TestSameConstantComments(t *testing.T) {
 	}{
 		{"Enables ReadMode.", "Enables WriteMode.", []string{`ReadMode/doc "Enables ReadMode."`, `ReadMode/line "Enables WriteMode."`}},
 		{"Enables WriteMode.", "Enables ReadMode.", []string{`ReadMode/doc "Enables WriteMode."`, `ReadMode/line "Enables ReadMode."`}},
-		{"Enables ReadMode.", "enables ReadMode", []string{`ReadMode/doc "Enables ReadMode."`}},
+		{"Enables ReadMode.", "enables ReadMode", []string{`ReadMode/doc "Enables ReadMode."`, `ReadMode/line "enables ReadMode"`}},
 		{"the mode is on", "the mode is on", []string{`ReadMode/doc "the mode is on"`}},
+		{"Enables ReadMode.", "Enables readMode.", []string{`ReadMode/doc "Enables ReadMode."`, `ReadMode/line "Enables readMode."`}},
+		{"Enables readMode.", "Enables ReadMode.", []string{`ReadMode/doc "Enables readMode."`, `ReadMode/line "Enables ReadMode."`}},
+		{"Selects values < 0.", "Selects values > 0.", []string{`ReadMode/doc "Selects values < 0."`, `ReadMode/line "Selects values > 0."`}},
+		{"Selects values > 0.", "Selects values < 0.", []string{`ReadMode/doc "Selects values > 0."`, `ReadMode/line "Selects values < 0."`}},
+		{"Selects values < 0.", "Selects values < 0.", []string{`ReadMode/doc "Selects values < 0."`}},
 	} {
-		src := "package p\nconst (\n// " + tc.doc + "\nReadMode = 1 // " + tc.line + "\nWriteMode = 2\n)\n"
+		src := "package p\nconst (\n// " + tc.doc + "\nReadMode = 1 // " + tc.line + "\nWriteMode = 2\nreadMode = 3\n)\n"
 		fs := token.NewFileSet()
 		f, err := parser.ParseFile(fs, "p.go", src, parser.ParseComments)
 		if err != nil {
