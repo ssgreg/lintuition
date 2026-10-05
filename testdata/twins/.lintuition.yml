@@ -109,14 +109,30 @@ semantic:
         - {linter: destructive-remediation, question: states_loss, when: "lock file was removed by another process", yes: 0.2}
         - {linter: destructive-remediation, question: advice, when: "data volume is unreadable; format it", choice: destructive_advice, probability: 0.95}
         - {linter: destructive-remediation, question: states_loss, when: "data volume is unreadable; format it", yes: 0.1}
-        # destructive-remediation asks about every constant error and log text, every other twin's
-        # too. Those are reports, not advice: one answer for the rest, after the specific ones above.
+        - {linter: destructive-remediation, question: advice, when: "drop the index folder and start the service again", choice: destructive_advice, probability: 0.95}
+        - {linter: destructive-remediation, question: states_loss, when: "drop the index folder and start the service again", yes: 0.1}
+        - {linter: destructive-remediation, question: advice, when: "wipe the ledger and resync from scratch", choice: destructive_advice, probability: 0.95}
+        - {linter: destructive-remediation, question: states_loss, when: "wipe the ledger and resync from scratch", yes: 0.1}
+        - {linter: destructive-remediation, question: advice, when: "removing it loses only cached thumbnails", choice: destructive_advice, probability: 0.9}
+        - {linter: destructive-remediation, question: states_loss, when: "removing it loses only cached thumbnails", yes: 0.9}
+        - {linter: destructive-remediation, question: advice, when: "the replica has to be dropped", choice: own_action, probability: 0.9}
+        - {linter: destructive-remediation, question: states_loss, when: "the replica has to be dropped", yes: 0.1}
+        - {linter: destructive-remediation, question: advice, when: "purge staging bucket: %w", choice: own_action, probability: 0.9}
+        - {linter: destructive-remediation, question: states_loss, when: "purge staging bucket: %w", yes: 0.1}
+        # destructive-remediation does not read info and debug logs: "drop expired archive" and
+        # "purge the upload queue" are never asked, and a rule for them would only hide that.
+        # destructive-remediation asks about every constant error text and every warn-or-above log
+        # text, every other twin's too. Those are reports, not advice: one answer for the rest, after the specific ones above.
         - {linter: destructive-remediation, question: advice, choice: no_advice, probability: 0.9}
         - {linter: destructive-remediation, question: states_loss, yes: 0.5}
         # sentinel-name-vs-text
         - {linter: sentinel-name-vs-text, question: condition, when: "tenant record not found", choice: different, probability: 0.8}
         - {linter: sentinel-name-vs-text, question: condition, when: "tenant storage quota exceeded", choice: same, probability: 0.9}
         - {linter: sentinel-name-vs-text, question: condition, when: "backend hiccup", choice: insufficient, probability: 0.8}
+        - {linter: severe-event-understated, question: consequence, when: "\"message\":\"drop expired archive\"", choice: routine, probability: 0.95}
+        - {linter: severe-event-understated, question: on_purpose, when: "\"message\":\"drop expired archive\"", yes: 0.9}
+        - {linter: severe-event-understated, question: consequence, when: "\"message\":\"purge the upload queue\"", choice: routine, probability: 0.95}
+        - {linter: severe-event-understated, question: on_purpose, when: "\"message\":\"purge the upload queue\"", yes: 0.9}
         - {linter: sentinel-name-vs-text, question: condition, when: "cached lease is outdated", choice: different, probability: 0.5}
         # (the sentinel of error-needs-type's fixed twin)
         - {linter: sentinel-name-vs-text, question: condition, when: "invoice does not exist", choice: same, probability: 0.9}
