@@ -123,6 +123,24 @@ func normalized(a sdk.Answer) sdk.Answer {
 // orders of magnitude larger, so the two are not confused.
 const massNoise = 1e-9
 
+// MassNoise is massNoise for rules that add option probabilities themselves: two sums of the same
+// decimals may differ by this much, and a sum within it of a threshold is at the threshold.
+const MassNoise = massNoise
+
+// OptionMass adds the probabilities of the named options the way Check adds a distribution: in key
+// order with compensated summation, so one answer always gives one sum, exact up to MassNoise. An
+// option without a probability counts as 0. A rule that treats several options as one outcome
+// uses it instead of a loop over the map, whose order changes from call to call.
+func OptionMass(ps map[string]float64, options []string) float64 {
+	sub := make(map[string]float64, len(options))
+	for _, k := range options {
+		if p, ok := ps[k]; ok {
+			sub[k] = p
+		}
+	}
+	return mass(sub, 0)
+}
+
 // mass adds max(0, p-less) over the probabilities in key order with compensated (Neumaier)
 // summation, so the same map always gives the same sum, and the exact one up to massNoise.
 func mass(ps map[string]float64, less float64) float64 {

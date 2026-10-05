@@ -45,6 +45,9 @@ semantic:
         - {linter: log-sensitive-field, question: role, when: "\"message\":\"shutting down the feed poller\"", choice: public, probability: 0.9}
         - {linter: log-sensitive-field, question: role, when: "\"message\":\"tailing the access log\"", choice: public, probability: 0.9}
         - {linter: log-sensitive-field, question: role, when: "\"message\":\"tailing the access log was stopped by its caller\"", choice: public, probability: 0.9}
+        - {linter: log-sensitive-field, question: role, when: "\"message\":\"batch write rejected by the store", choice: public, probability: 0.9}
+        - {linter: log-sensitive-field, question: role, when: "\"message\":\"delivery of the pending notice failed\"", choice: public, probability: 0.9}
+        - {linter: log-sensitive-field, question: role, when: "\"message\":\"final flush on cancel failed", choice: public, probability: 0.9}
         # log-key-value-role
         - {linter: log-key-value-role, question: role, when: "key remaining_attempts, value elapsedAttempts", choice: conflict, probability: 0.9}
         - {linter: log-key-value-role, question: role, when: "key attempts_made, value elapsedAttempts", choice: same, probability: 0.9}
@@ -81,6 +84,28 @@ semantic:
         - {linter: severe-event-understated, question: on_purpose, when: "deleted expired sessions as requested", yes: 0.95}
         - {linter: severe-event-understated, question: consequence, when: "dropped by the sampler as configured", choice: unintended_loss, probability: 0.9}
         - {linter: severe-event-understated, question: on_purpose, when: "dropped by the sampler as configured", yes: 0.9}
+        - {linter: severe-event-understated, question: consequence, when: "the readings in it are gone", choice: unintended_loss, probability: 0.95}
+        - {linter: severe-event-understated, question: on_purpose, when: "the readings in it are gone", yes: 0.05}
+        - {linter: severe-event-understated, question: consequence, when: "the file was never stored", choice: unintended_loss, probability: 0.9}
+        - {linter: severe-event-understated, question: on_purpose, when: "the file was never stored", yes: 0.1}
+        - {linter: severe-event-understated, question: consequence, when: "the queued messages in it are lost for good", choice: unintended_loss, probability: 0.9}
+        - {linter: severe-event-understated, question: on_purpose, when: "the queued messages in it are lost for good", yes: 0.1}
+        - {linter: severe-event-understated, question: consequence, when: "the buffered entries are gone", choice: unintended_loss, probability: 0.9}
+        - {linter: severe-event-understated, question: on_purpose, when: "the buffered entries are gone", yes: 0.1}
+        - {linter: severe-event-understated, question: consequence, when: "no saved state file, starting with an empty state", choice: expected_absence, probability: 0.9}
+        - {linter: severe-event-understated, question: on_purpose, when: "no saved state file, starting with an empty state", yes: 0.5}
+        - {linter: severe-event-understated, question: consequence, when: "index snapshot not present", choice: expected_absence, probability: 0.9}
+        - {linter: severe-event-understated, question: on_purpose, when: "index snapshot not present", yes: 0.5}
+        - {linter: severe-event-understated, question: consequence, when: "\"branch\":[\"error is context.Canceled\"],\"level\":\"debug\",\"message\":\"delivery of the pending notice failed\"", choice: requested_stop, probability: 0.9}
+        - {linter: severe-event-understated, question: on_purpose, when: "delivery of the pending notice failed", yes: 0.5}
+        - {linter: severe-event-understated, question: consequence, when: "exiting without waiting for running jobs", choice: requested_stop, probability: 0.9}
+        - {linter: severe-event-understated, question: on_purpose, when: "exiting without waiting for running jobs", yes: 0.9}
+        - {linter: severe-event-understated, question: consequence, when: "the jobs it started keep running on their own", choice: requested_stop, probability: 0.9}
+        - {linter: severe-event-understated, question: on_purpose, when: "the jobs it started keep running on their own", yes: 0.9}
+        - {linter: severe-event-understated, question: consequence, when: "resuming the job whose host went away", choice: recovery, probability: 0.9}
+        - {linter: severe-event-understated, question: on_purpose, when: "resuming the job whose host went away", yes: 0.8}
+        - {linter: severe-event-understated, question: consequence, when: "unreachable peer expired", choice: routine, probability: 0.9}
+        - {linter: severe-event-understated, question: on_purpose, when: "unreachable peer expired", yes: 0.8}
         # severe-event-understated reads every info and debug message, the other linters' twins too.
         - {linter: severe-event-understated, question: consequence, when: "\"message\":\"user signed in\"", choice: routine, probability: 0.95}
         - {linter: severe-event-understated, question: on_purpose, when: "\"message\":\"user signed in\"", yes: 0.5}
