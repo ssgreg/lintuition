@@ -2,8 +2,18 @@
 
 ## Unreleased
 
+- `openai`: `reasoning-effort`, so a model that thinks first (qwen3.x, gemma4 on Ollama) answers
+  with its first token; a confident answer no longer fails on a confidence a rounding error above 1.
 - New linter `doc-vs-signature`: a doc comment that promises a returned result or error the
   function's signature does not have.
+- `destructive-remediation` (version 3) no longer reads debug and info logs, sends the log level
+  and the function called right after a log call, has an answer for a message that names the
+  program's own action, and counts its three non-destructive answers together. On 25 repositories
+  its 35 findings were all a program announcing its own deletion ("purge temp files" right before
+  purging them).
+- Answers to a choice question whose probabilities add up to more than 1, beyond what rounding to
+  two decimals explains (0.005 per positive entry), are rejected as invalid, for every linter and
+  backend; a sum just above 1 within that rounding is normalized to 1 before rules decide.
 - New linter `read-only-promise`: a doc comment that promises a function changes nothing while its
   body writes the receiver, a parameter or a package-level variable.
 
