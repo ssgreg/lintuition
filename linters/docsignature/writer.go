@@ -9,12 +9,19 @@ import (
 
 // An HTTP handler's doc often says "returns X" about what it writes to the client, on a function
 // with no results. To let the classifier tell that from a value given back to the Go caller, the
-// result claim carries a fact naming an output the function can write to, when the signature has
-// one: a parameter or the receiver whose type implements io.Writer or http.ResponseWriter, or a
-// value reached from one through exported (or same-package) fields and methods without arguments,
-// such as a framework context's Writer field or Response() method. The output is found through the
-// types only: a writer the function captures in a closure or reads from a package variable, or one
-// behind an interface such as any, is not seen, and the candidate is asked as it always was.
+// result claim carries a fact naming an http.ResponseWriter the function can reach, when the
+// signature has one: a parameter or the receiver whose type implements it, or a value reached
+// from one through exported (or same-package) fields and methods without arguments, such as a
+// framework context's Writer field or Response() method. The fact states a capability only: the
+// types do not show that the function writes a response, or that the response is what its doc
+// talks about.
+//
+// A plain io.Writer gives no fact. It is reachable from much that is not an output the doc could
+// mean (a test's t.Output(), an analysis pass's flag set, a trace or debug writer), and told only
+// that such a writer is there, the classifier discounted ordinary stale promises ("returns the
+// stored value") about as often as handler docs. Nor is a writer the function captures in a
+// closure, reads from a package variable or gets behind an interface such as any seen. In all
+// these cases the candidate is asked as it always was.
 
 // maxWriterHops bounds the path from a parameter to its writer: c.Writer is one hop,
 // c.Ctx.Writer two. maxWriterNodes bounds the whole walk from one parameter. A walk that runs out
@@ -32,22 +39,23 @@ var ioWriter = func() *types.Interface {
 	return types.NewInterfaceType([]*types.Func{types.NewFunc(0, nil, "Write", sig)}, nil).Complete()
 }()
 
-// writerKind names the output interface t implements, "http.ResponseWriter" or "io.Writer", or
-// returns "" for neither. A value whose pointer implements it counts too: a parameter, a receiver
-// or a field reached through a pointer is addressable, so its pointer methods can be called.
-func writerKind(t types.Type) string {
+// writerKind returns "http.ResponseWriter" when t implements it, and "" otherwise. When the value
+// is addressable (a parameter, a receiver, a field reached through a pointer or of an addressable
+// value), a pointer that implements it counts too, since its pointer methods can be called; a
+// method's result is not addressable.
+func writerKind(t types.Type, addressable bool) string {
 	t = types.Unalias(t)
 	if _, ok := t.(*types.TypeParam); ok {
 		return "" // its constraint is not the value: a writer constraint is rare, and missing it is safe
 	}
-	for _, c := range []types.Type{t, pointerTo(t)} {
-		if c == nil || !types.Implements(c, ioWriter) {
-			continue
-		}
-		if implementsResponseWriter(c) {
+	cands := []types.Type{t}
+	if addressable {
+		cands = append(cands, pointerTo(t))
+	}
+	for _, c := range cands {
+		if c != nil && types.Implements(c, ioWriter) && implementsResponseWriter(c) {
 			return "http.ResponseWriter"
 		}
-		return "io.Writer"
 	}
 	return ""
 }
@@ -87,8 +95,9 @@ func implementsResponseWriter(t types.Type) bool {
 	return types.Implements(t, rw)
 }
 
-// writerFact returns the fact naming the first output the signature reaches: the receiver first,
-// then the parameters in order, each by the shortest path. It returns "" when there is none. In a
+// writerFact returns the fact naming the first response writer the signature reaches: the receiver first,
+// then the parameters in order, each by the shortest path. It returns "" when there is none. A root
+// whose fact cannot be sent (a non-ASCII name, a long path) is passed over for the next one. In a
 // declared function a blank or unnamed parameter is skipped, since the body cannot use it; an
 // interface method's parameters are often unnamed and are named by position.
 func writerFact(pkg *types.Package, sig *types.Signature, declared bool) string {
@@ -108,7 +117,7 @@ func writerFact(pkg *types.Package, sig *types.Signature, declared bool) string 
 	for i := 0; i < sig.Params().Len(); i++ {
 		p := sig.Params().At(i)
 		if sig.Variadic() && i == sig.Params().Len()-1 {
-			continue // a slice of values, not one output
+			continue // a slice of values, not one writer
 		}
 		if !usable(p.Name(), declared) {
 			continue
@@ -126,27 +135,26 @@ func writerFact(pkg *types.Package, sig *types.Signature, declared bool) string 
 		case kind == "":
 			continue
 		case path == "":
-			fact = r.label + ", an " + kind
+			fact = r.label + " is an " + kind + " it could write a response to"
 		case r.name == "":
-			fact = r.label + ", holds an " + kind + " in " + path
+			fact = r.label + " gives access to an " + kind + " at " + path
 		default:
-			fact = r.label + ", holds an " + kind + " in " + r.name + "." + path
+			fact = r.label + " gives access to an " + kind + " at " + r.name + "." + path
 		}
-		if !plainFact.MatchString(fact) {
-			return "" // a non-ASCII identifier or a long path: no fact rather than one the policy refuses
+		if plainFact.MatchString(fact) {
+			return fact
 		}
-		return fact
 	}
 	return ""
+}
+
+func usable(name string, declared bool) bool {
+	return !declared || name != "" && name != "_"
 }
 
 // plainFact is what a fact string may look like under the payload policy: short, identifiers and
 // punctuation only.
 var plainFact = regexp.MustCompile(`^[A-Za-z0-9_ .,()]{1,120}$`)
-
-func usable(name string, declared bool) bool {
-	return !declared || name != "" && name != "_"
-}
 
 // findWriter walks from t breadth first, through fields of structs (behind pointers too) and the
 // results of methods without arguments, and returns the writer kind and the path of the first
@@ -157,9 +165,14 @@ func findWriter(pkg *types.Package, t types.Type) (kind, path string) {
 	type node struct {
 		t    types.Type
 		path []string
+		addr bool
 	}
-	queue := []node{{t: t}}
-	seen := map[types.Type]bool{}
+	type key struct {
+		t    types.Type
+		addr bool
+	}
+	queue := []node{{t: t, addr: true}}
+	seen := map[key]bool{}
 	nodes := 0
 	for len(queue) > 0 {
 		n := queue[0]
@@ -167,52 +180,54 @@ func findWriter(pkg *types.Package, t types.Type) (kind, path string) {
 		if nodes++; nodes > maxWriterNodes {
 			return "", ""
 		}
-		if k := writerKind(n.t); k != "" {
+		if k := writerKind(n.t, n.addr); k != "" {
 			return k, strings.Join(n.path, ".")
 		}
 		if len(n.path) == maxWriterHops {
 			continue
 		}
-		base := types.Unalias(n.t)
+		base, addr := types.Unalias(n.t), n.addr
 		if p, ok := base.(*types.Pointer); ok {
-			base = types.Unalias(p.Elem())
+			base, addr = types.Unalias(p.Elem()), true
 		}
 		if _, ok := base.(*types.TypeParam); ok {
 			continue
 		}
 		if named, ok := base.(*types.Named); ok {
-			if seen[named] {
+			if seen[key{named, addr}] {
 				continue
 			}
-			seen[named] = true
+			seen[key{named, addr}] = true
 		}
-		next := func(t types.Type, step string) {
-			queue = append(queue, node{t: t, path: append(append([]string(nil), n.path...), step)})
+		next := func(t types.Type, step string, addr bool) {
+			queue = append(queue, node{t: t, path: append(append([]string(nil), n.path...), step), addr: addr})
 		}
 		if s, ok := base.Underlying().(*types.Struct); ok {
 			for i := 0; i < s.NumFields(); i++ {
-				if f := s.Field(i); visible(pkg, f) {
-					next(f.Type(), f.Name())
+				// A blank field cannot be named, so it is no way to the writer.
+				if f := s.Field(i); f.Name() != "_" && visible(pkg, f) {
+					next(f.Type(), f.Name(), addr)
 				}
 			}
 		}
-		for _, m := range methods(base) {
+		for _, m := range methods(base, addr) {
 			if !visible(pkg, m) {
 				continue
 			}
 			sig := m.Type().(*types.Signature)
 			if sig.Params().Len() == 0 && sig.Results().Len() == 1 {
-				next(sig.Results().At(0).Type(), m.Name()+"()")
+				next(sig.Results().At(0).Type(), m.Name()+"()", false)
 			}
 		}
 	}
 	return "", ""
 }
 
-// methods returns the methods callable on an addressable value of type t, in name order.
-func methods(t types.Type) []*types.Func {
+// methods returns the methods callable on a value of type t, in name order: with the pointer
+// methods when the value is addressable.
+func methods(t types.Type, addressable bool) []*types.Func {
 	var ms *types.MethodSet
-	if types.IsInterface(t) {
+	if types.IsInterface(t) || !addressable {
 		ms = types.NewMethodSet(t)
 	} else {
 		ms = types.NewMethodSet(types.NewPointer(t))

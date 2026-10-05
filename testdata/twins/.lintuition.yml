@@ -261,7 +261,7 @@ semantic:
         - {linter: doc-vs-signature, question: returns_result, when: "returns any errors, and returns the entry to a pool", yes: 0.9}
         - {linter: doc-vs-signature, question: returns_result, when: "returns all descriptions of the collector", yes: 0.9}
         - {linter: doc-vs-signature, question: returns_result, when: "returns all observations through ch", yes: 0.05}
-        - {linter: doc-vs-signature, question: returns_to_caller, when: "writes the state as JSON to w", yes: 0.05}
+        - {linter: doc-vs-signature, question: returns_result, when: "writes the state as JSON to w", yes: 0.05}
         - {linter: doc-vs-signature, question: returns_result, when: "yields every item to yield", yes: 0.1}
         - {linter: doc-vs-signature, question: returns_result, when: "blocks and returns when ctx is done", yes: 0.05}
         - {linter: doc-vs-signature, question: returns_result, when: "returns c into the pool", yes: 0.05}
@@ -278,9 +278,13 @@ semantic:
         - {linter: doc-vs-signature, question: returns_error_to_caller, when: "returns the upstream status code and an error", yes: 0.9}
         - {linter: doc-vs-signature, question: returns_error_to_caller, when: "returns an error if the body exceeds the limit", yes: 0.9}
         - {linter: doc-vs-signature, question: returns_error_to_caller, yes: 0.05}
+        - {linter: doc-vs-signature, question: returns_result, when: "returns the decoded record", yes: 0.9}
+        - {linter: doc-vs-signature, question: returns_result, when: "returns the innermost scope enclosing pos", yes: 0.9}
+        - {linter: doc-vs-signature, question: returns_result, when: "returns its first address", yes: 0.9}
+        - {linter: doc-vs-signature, question: returns_result, when: "returns the stored value", yes: 0.9}
         - {linter: doc-vs-signature, question: returns_to_caller, when: "returns the upstream status code and an error", yes: 0.9}
         - {linter: doc-vs-signature, question: returns_to_caller, when: "returns an error if the body exceeds the limit", yes: 0.9}
-        - {linter: doc-vs-signature, question: returns_to_caller, when: "returns how many entries were committed", yes: 0.9}
+        - {linter: doc-vs-signature, question: returns_result, when: "returns how many entries were committed", yes: 0.9}
         - {linter: doc-vs-signature, question: returns_to_caller, when: "how long the service has been running", yes: 0.05}
         - {linter: doc-vs-signature, question: returns_to_caller, when: "most recent probe outcome", yes: 0.05}
         - {linter: doc-vs-signature, question: returns_to_caller, when: "orders of the current account", yes: 0.05}

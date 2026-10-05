@@ -140,7 +140,7 @@ func TestQuestions(t *testing.T) {
 		}
 	}
 	// The writer fact switches the result claim to its own question, and only the result claim.
-	qs := r.Questions(&sdk.Candidate{Local: map[string]string{"claim": claimResult, "writer": "parameter w, an io.Writer"}})
+	qs := r.Questions(&sdk.Candidate{Local: map[string]string{"claim": claimResult, "writer": "parameter w is an io.Writer it could write to"}})
 	if len(qs) != 2 || qs[0].ID != questionWriterError || qs[1].ID != questionWriter || !strings.Contains(qs[1].Text, "`writer`") {
 		t.Errorf("writer: %+v", qs)
 	}
@@ -158,7 +158,7 @@ func TestDecide(t *testing.T) {
 	r := &rule{threshold: 0.85}
 	result := &sdk.Candidate{Local: map[string]string{"name": "Sync", "claim": claimResult}}
 	errc := &sdk.Candidate{Local: map[string]string{"name": "Validate", "claim": claimError}}
-	writer := &sdk.Candidate{Local: map[string]string{"name": "Proxy", "claim": claimResult, "writer": "parameter w, an http.ResponseWriter"}}
+	writer := &sdk.Candidate{Local: map[string]string{"name": "Proxy", "claim": claimResult, "writer": "parameter w is an http.ResponseWriter it could write to"}}
 	for _, tc := range []struct {
 		name            string
 		c               *sdk.Candidate
@@ -309,16 +309,16 @@ func TestWriterExtraction(t *testing.T) {
 		got = append(got, fmt.Sprintf("%s %s %q", n, c.Local["claim"], w))
 	}
 	want := []string{
-		`1 result "parameter w, an http.ResponseWriter"`,
-		`2 result "parameter out, an io.Writer"`,
-		`3 result "parameter f, an io.Writer"`,
-		`4 result "receiver s, an io.Writer"`,
-		`5 result "parameter s, an io.Writer"`,
-		`6 result "receiver r, holds an http.ResponseWriter in r.w"`,
-		`7 result "parameter c, holds an http.ResponseWriter in c.Writer"`,
-		`8 result "parameter o, holds an http.ResponseWriter in o.in.resp.w"`,
-		`9 result "parameter c, holds an http.ResponseWriter in c.Response()"`,
-		`10 result "parameter 1, an http.ResponseWriter"`,
+		`1 result "parameter w is an http.ResponseWriter it could write a response to"`,
+		`2 result`,
+		`3 result`,
+		`4 result`,
+		`5 result`,
+		`6 result "receiver r gives access to an http.ResponseWriter at r.w"`,
+		`7 result "parameter c gives access to an http.ResponseWriter at c.Writer"`,
+		`8 result "parameter o gives access to an http.ResponseWriter at o.in.resp.w"`,
+		`9 result "parameter c gives access to an http.ResponseWriter at c.Response()"`,
+		`10 result "parameter 1 is an http.ResponseWriter it could write a response to"`,
 		`11 result`,
 		`12 result`,
 		`14 result`,
@@ -327,13 +327,24 @@ func TestWriterExtraction(t *testing.T) {
 		`17 result`,
 		`18 result`,
 		`19 result`,
-		`20 result "parameter m, holds an io.Writer in m.buf"`,
-		`21 result "parameter a, holds an http.ResponseWriter in a.in.resp.w"`,
-		`22 result "parameter s, holds an http.ResponseWriter in s.Short"`,
-		`23 result "the receiver, an io.Writer"`,
+		`20 result`,
+		`21 result "parameter a gives access to an http.ResponseWriter at a.in.resp.w"`,
+		`22 result "parameter s gives access to an http.ResponseWriter at s.Short"`,
+		`23 result`,
 		`24 result`,
 		`25 result`,
 		`26 result`,
+		`27 result`,
+		`28 result`,
+		`29 result`,
+		`30 result`,
+		`31 result`,
+		`32 result`,
+		`33 result "parameter b gives access to an http.ResponseWriter at b.w"`,
+		`34 result "parameter w is an http.ResponseWriter it could write a response to"`,
+		`35 result "parameter t gives access to an http.ResponseWriter at t.rw"`,
+		`36 result`,
+		`37 result "parameter p is an http.ResponseWriter it could write a response to"`,
 	}
 	if strings.Join(got, "\n") != strings.Join(want, "\n") {
 		t.Fatalf("candidates:\n%s\n\nwant:\n%s", strings.Join(got, "\n"), strings.Join(want, "\n"))
@@ -343,15 +354,29 @@ func TestWriterExtraction(t *testing.T) {
 // TestWriterWalkBounds checks that a walk that runs out of nodes finds nothing rather than a writer
 // past the bound, and that a writer within it is found.
 func TestWriterWalkBounds(t *testing.T) {
+	// A stand-in for net/http's ResponseWriter, built on a Header type of a package of that path.
+	http := types.NewPackage("net/http", "http")
+	header := types.NewNamed(types.NewTypeName(0, http, "Header", nil), types.NewMap(types.Typ[types.String], types.NewSlice(types.Typ[types.String])), nil)
+	sig := func(params, results *types.Tuple) *types.Signature {
+		return types.NewSignatureType(nil, nil, nil, params, results, false)
+	}
+	rw := types.NewInterfaceType([]*types.Func{
+		types.NewFunc(0, http, "Header", sig(nil, types.NewTuple(types.NewVar(0, nil, "", header)))),
+		ioWriter.Method(0),
+		types.NewFunc(0, http, "WriteHeader", sig(types.NewTuple(types.NewVar(0, nil, "code", types.Typ[types.Int])), nil)),
+	}, nil).Complete()
 	fields := func(n int) *types.Struct {
 		var fs []*types.Var
 		for i := 0; i < n; i++ {
 			fs = append(fs, types.NewField(0, nil, fmt.Sprintf("F%d", i), types.Typ[types.Int], false))
 		}
-		fs = append(fs, types.NewField(0, nil, "W", ioWriter, false))
+		fs = append(fs, types.NewField(0, nil, "W", rw, false))
 		return types.NewStruct(fs, nil)
 	}
-	if k, p := findWriter(nil, fields(10)); k != "io.Writer" || p != "W" {
+	if k, p := findWriter(nil, types.NewStruct([]*types.Var{types.NewField(0, nil, "W", ioWriter, false)}, nil)); k != "" {
+		t.Errorf("a plain io.Writer: %q %q", k, p)
+	}
+	if k, p := findWriter(nil, fields(10)); k != "http.ResponseWriter" || p != "W" {
 		t.Errorf("small: %q %q", k, p)
 	}
 	if k, p := findWriter(nil, fields(maxWriterNodes)); k != "" || p != "" {

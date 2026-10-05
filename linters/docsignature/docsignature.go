@@ -18,11 +18,11 @@
 // ErrX). A result that carries an error inside it (chan error, func() error, a struct with an error
 // field, a type parameter) is unsupported for the error claim: the doc may mean that error.
 //
-// For the result claim, a function with an output it writes to (an io.Writer or
-// http.ResponseWriter parameter or receiver, or one reached from it through fields and methods
-// without arguments, see writer.go) is asked a question of its own with a fact naming that output,
-// so the classifier can tell an HTTP handler's "returns the version", which is about the response,
-// from a value or an error promised to the Go caller.
+// For the result claim, a function that can reach an http.ResponseWriter (a parameter or the
+// receiver, or a value reached from one through fields and methods without arguments, see
+// writer.go) is asked questions of their own with a fact naming that writer, so the classifier can
+// tell an HTTP handler's "returns the version", which is about the response, from a value or an
+// error promised to the Go caller. The fact says the writer is there, not that it is used.
 package docsignature
 
 import (
@@ -315,11 +315,12 @@ func excludesError(it *types.Interface) bool {
 
 type rule struct{ threshold float64 }
 
-// A function with an output it writes to, named by the `writer` fact, is asked two questions
-// instead of returns_result. An HTTP handler's "returns the version" is about the response, which
-// questionWriter lets the classifier say; a promised error is not, since an error value never
-// reaches a client, and questionWriterError asks about it alone, so a doc that promises one is not
-// lost in the reading of the rest. Either answer is enough for a finding.
+// A function that can reach an http.ResponseWriter, named by the `writer` fact, is asked two
+// questions instead of returns_result. An HTTP handler's "returns the version" is about the
+// response, which questionWriter lets the classifier say; the fact says only that the writer is
+// there, not that the function writes to it. A promised error is never about the response, since an error value never reaches a
+// client, and questionWriterError asks about it alone, so a doc that promises one is not lost in
+// the reading of the rest. Either answer is enough for a finding.
 const (
 	questionWriter      = "returns_to_caller"
 	questionWriterError = "returns_error_to_caller"
@@ -334,7 +335,7 @@ func (r *rule) Questions(c *sdk.Candidate) []sdk.Question {
 		}, {
 			ID:   questionWriter,
 			Kind: sdk.Noul,
-			Text: "The documented function has no results, and `writer` names an output it writes to, such as the response an HTTP handler sends to its client. In the doc of such a function, \"returns X\" often means that X is written to that output. Does any sentence of `doc` promise something that only a Go return value could give the function's caller: an error value, or a value the doc says the caller gets back? One such sentence is enough. An error counts, alone or next to other values, as in \"returns an error if the upload fails\": an error value is never written to a client. A count or a flag the caller gets back counts, as in \"returns the number of bytes written\". These do not count: what the function returns, responds with or serves through that output, as in \"returns the list of users\" or \"returns the current configuration\" on a handler; a value the sentence says is written or sent to a client or an output; when or how it returns; returning something into a pool or to an owner; a value delivered another way, such as sent on a channel or passed to a callback; what it does; what another function or a request returns; a statement that it returns nothing.",
+			Text: "The documented function has no results, and `writer` names an http.ResponseWriter it can reach, so it may be an HTTP handler that writes a response to a client; the code does not show that it does. In the doc of an HTTP handler, \"returns X\" often means that X is sent in the response. Does any sentence of `doc` promise something that only a Go return value could give the function's caller: an error value, or a value the doc says the caller gets back? One such sentence is enough. An error counts, alone or next to other values, as in \"returns an error if the upload fails\": an error value is never written to a client. A count or a flag the caller gets back counts, as in \"returns the number of bytes written\". These do not count: what the function returns, responds with or serves as an HTTP response, as in \"returns the list of users\" or \"returns the current configuration\" on a handler; a value the sentence says is written or sent to a client or an output; when or how it returns; returning something into a pool or to an owner; a value delivered another way, such as sent on a channel or passed to a callback; what it does; what another function or a request returns; a statement that it returns nothing.",
 		}}
 	}
 	if c.Local["claim"] == claimResult {

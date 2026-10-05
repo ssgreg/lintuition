@@ -6,9 +6,12 @@ package docsignature
 
 import (
 	"context"
+	"flag"
 	"fmt"
+	"go/token"
 	"io"
 	"net/http"
+	"testing"
 )
 
 type Buffer struct{ data []byte }
@@ -213,7 +216,7 @@ func (j *Journal) Write(p []byte) (int, error) {
 	return len(p), nil
 }
 
-// Defect: the receiver is a writer, but the count is promised to the caller.
+// Defect: the receiver is an io.Writer, but the count is promised to the caller.
 
 // Commit appends the pending entries to the log file and returns how many entries were committed.
 func (j *Journal) Commit() { j.pending = nil } // want `doc of Commit says it returns a result, but Commit returns nothing`
@@ -262,3 +265,35 @@ type Keys interface {
 	// KeyState returns whether the stored key is still accepted by the vault.
 	KeyState(w http.ResponseWriter, r *http.Request)
 }
+
+// Defect: a test helper can reach a writer through t, but the record was meant for the caller.
+
+// Golden loads the golden file for name and returns the decoded record.
+func Golden(t *testing.T, name string) { t.Helper() } // want `doc of Golden says it returns a result, but Golden returns nothing`
+
+type Analyzer struct{ Flags flag.FlagSet }
+
+type Pass struct {
+	Analyzer *Analyzer
+	Pkg      string
+}
+
+// Defect: an analysis pass can reach a writer through its flags; the scope was meant for the caller.
+
+// Innermost returns the innermost scope enclosing pos.
+func Innermost(pass *Pass, pos token.Pos) { _ = pass.Pkg } // want `doc of Innermost says it returns a result, but Innermost returns nothing`
+
+// Defect: the writer is for tracing; the address was meant for the caller.
+
+// Resolve looks up host and returns its first address.
+func Resolve(host string, trace io.Writer) { fmt.Fprintln(trace, host) } // want `doc of Resolve says it returns a result, but Resolve returns nothing`
+
+type Cache struct {
+	items map[string]string
+	Log   io.Writer
+}
+
+// Defect: the receiver holds a diagnostic writer; the value was meant for the caller.
+
+// Fetch looks key up in the cache and returns the stored value.
+func (c *Cache) Fetch(key string) { fmt.Fprintln(c.Log, key) } // want `doc of Fetch says it returns a result, but Fetch returns nothing`
