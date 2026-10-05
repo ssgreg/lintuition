@@ -13,5 +13,7 @@ func String(k, v string) Field { return Field{} }
 
 type Logger struct{}
 
+func (l *Logger) Debug(ctx context.Context, text string, fs ...Field) {}
 func (l *Logger) Info(ctx context.Context, text string, fs ...Field)  {}
+func (l *Logger) Warn(ctx context.Context, text string, fs ...Field)  {}
 func (l *Logger) Error(ctx context.Context, text string, fs ...Field) {}

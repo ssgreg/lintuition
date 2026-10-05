@@ -162,6 +162,9 @@ semantic:
       # USD per million input tokens, for estimates and budgets; unset means unknown.
       price-per-mtok: 0
       account: ""
+      # Sent as reasoning_effort when set. A model that thinks first (qwen3.x, gemma4 on Ollama)
+      # needs none: it spends its one answer token on the thinking otherwise.
+      reasoning-effort: ""
     claude-code:
       # The claude executable (default: claude on PATH).
       command: claude
