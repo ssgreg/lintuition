@@ -27,6 +27,9 @@
 - `test-name-vs-assertion` no longer reads a failure the test arranges, or an error passed in, as
   the call's own: the request now carries the test's doc comment and whether the test passes the
   call an error, and the question asks about the call itself. Version 2.
+- `doc-vs-table` no longer reports a row whose case name only labels its input: a second question
+  asks whether the name states the facts the doc's condition depends on, and a contradiction found
+  in a name that does not abstains. Version 2.
 - `severe-event-understated` stops reading expected events as lost work: an absent optional file,
   a requested stop or cancel, the program's own recovery. It now sends the log level and a list of
   what the code checked on the way to the log (an error test with `errors.Is` or `os.IsNotExist`
