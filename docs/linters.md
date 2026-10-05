@@ -500,7 +500,9 @@ HTTP handler is the exception: "returns the version" on a handler that writes it
 handlers are documented, and the writer question lets the classifier answer no to it, while "returns
 the status code and an error" on the same handler stays a finding, since no client receives an error
 value. That split is the classifier's reading, not a check in code, so a handler doc can still be
-reported or abstain.
+reported or abstain. The trade-off runs the other way too: a stale value promise ("returns the
+stored value") on a function whose only output is a reachable `http.ResponseWriter` reads like a
+handler doc, can be excused as a response and may be missed. That recall loss is accepted.
 
 ### read-only-promise
 
