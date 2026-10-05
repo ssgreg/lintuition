@@ -387,7 +387,8 @@ Line comments (`PhaseQueued Phase = iota // waiting for a free worker`) are read
 
 **Reads:** comments of constants in a parenthesised block of at least two. A trailing comment in
 analysistest's expectation syntax (`// want` and a quoted or backquoted pattern) is a test mark, not
-the constant's comment, and is not read; `// wanted by the scheduler` is read as usual.
+the constant's comment: alone it is not read, and after a real note (`// the note // want ...`) only
+the note is read. `// wanted by the scheduler` is read as usual.
 
 **Sends:** the comment, and the block's constant names as the options. A comment that opens with its
 own constant's name (`// ModeFast skips the checksum.`) is sent with that opening replaced by "this

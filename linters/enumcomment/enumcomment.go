@@ -10,9 +10,9 @@
 //	)
 //
 // Code finds the shape: a comment (above the constant, or at the end of its line) on a single
-// constant of a parenthesised const block of at least two constants, and reads how it opens. A line
-// comment in analysistest's expectation syntax (want and a quoted or backquoted pattern) is a test
-// mark, not the constant's comment, and is not read. A
+// constant of a parenthesised const block of at least two constants, and reads how it opens. An
+// expectation in analysistest's syntax (want and a quoted or backquoted pattern) in a line comment,
+// alone or after a note and a further "//", is a test mark and is cut off before the comment is read. A
 // comment that opens with its own constant's name ("StateIdle is ...") is sent with that opening
 // replaced by "this constant", so the name cannot outvote the description; any other comment is sent
 // as written, so a neighbour's name it opens with, or its own name further on ("If trace is set"),
@@ -51,9 +51,10 @@ type Settings struct {
 // maxConstants bounds the options of one question: some backends label options with letters.
 const maxConstants = 20
 
-// wantRE matches a trailing comment in analysistest's expectation syntax: want, then a quoted or
-// backquoted pattern.
-var wantRE = regexp.MustCompile("^want\\s+(`[^`]*`|\"(?:[^\"\\\\]|\\\\.)*\")")
+// wantRE finds analysistest's expectation syntax in a line comment: want and a quoted or backquoted
+// pattern, either opening the comment or after a further "//" in it, as the twin harness reads it.
+// Everything from the match on is the expectation.
+var wantRE = regexp.MustCompile("(?:^|//[ \t]*)want[ \t]+(?:`[^`]*`|\"(?:[^\"\\\\]|\\\\.)*\")")
 
 // none is the option for a comment that describes no single constant.
 const none = "none"
@@ -136,8 +137,10 @@ func block(pass *analysis.Pass, gd *ast.GenDecl) []*sdk.Candidate {
 			// Directives such as //nolint are dropped by Text. A test expectation marks the line for
 			// analysistest and lintuition eval; it says nothing about the constant.
 			text := strings.TrimSpace(g.cg.Text())
-			if g.kind == "line" && wantRE.MatchString(text) {
-				continue
+			if g.kind == "line" {
+				if loc := wantRE.FindStringIndex(text); loc != nil {
+					text = strings.TrimSpace(text[:loc[0]])
+				}
 			}
 			if text != "" {
 				comments = append(comments, comment{vs, g.kind, text})
@@ -187,6 +190,7 @@ func judge(comments []comment, names []string) []verdict {
 		i          int
 		own        string
 		words, raw []string
+		same       string // the words with names kept, for comments of one constant
 	}
 	var compared []entry
 	for i, cm := range comments {
@@ -221,10 +225,12 @@ func judge(comments []comment, names []string) []verdict {
 			v.prose = cm.text
 		}
 		w, raw := template(toks, set)
-		// A doc and a line comment that say the same on one constant are one description.
+		// A doc and a line comment that say the same on one constant are one description. Names are
+		// kept here: "Enables ReadMode." and "Enables WriteMode." say different things.
+		same := strings.ToLower(strings.Join(raw, " "))
 		dup := false
 		for _, e := range compared {
-			if e.own == own && differing(e.words, w) == -1 {
+			if e.own == own && e.same == same {
 				dup = true
 				break
 			}
@@ -233,7 +239,7 @@ func judge(comments []comment, names []string) []verdict {
 			v.skip = true
 			continue
 		}
-		compared = append(compared, entry{i, own, w, raw})
+		compared = append(compared, entry{i, own, w, raw, same})
 	}
 	if len(compared) < 2 {
 		return out

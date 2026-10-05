@@ -237,6 +237,10 @@ func TestWantComments(t *testing.T) {
 		"// want `a doc comment is the constant's comment`\n" +
 		"WantE = 5\n" +
 		"WantF = 6 // want `a pattern` and more\n" +
+		"WantG = 7 // the real note // want `comment describes WantA, not WantG`\n" +
+		"WantH = 8 // a second real note //want \"one\" `two`\n" +
+		"WantI = 9 // a note // wanted by the scheduler\n" +
+		"WantJ = 10 // a note // want more retries\n" +
 		")\n"
 	fs := token.NewFileSet()
 	f, err := parser.ParseFile(fs, "p.go", src, parser.ParseComments)
@@ -251,9 +255,40 @@ func TestWantComments(t *testing.T) {
 		`WantC/line "wanted by the scheduler" `,
 		`WantD/line "want more retries here" `,
 		"WantE/doc \"want `a doc comment is the constant's comment`\" ",
+		`WantG/line "the real note" `,
+		`WantH/line "a second real note" `,
+		`WantI/line "a note // wanted by the scheduler" `,
+		`WantJ/line "a note // want more retries" `,
 	}
 	if strings.Join(got, "\n") != strings.Join(want, "\n") {
 		t.Fatalf("candidates:\n%s\n\nwant:\n%s", strings.Join(got, "\n"), strings.Join(want, "\n"))
+	}
+}
+
+// Comments of one constant are merged only when they say the same, names included.
+func TestSameConstantComments(t *testing.T) {
+	for _, tc := range []struct {
+		doc, line string
+		want      []string
+	}{
+		{"Enables ReadMode.", "Enables WriteMode.", []string{`ReadMode/doc "Enables ReadMode."`, `ReadMode/line "Enables WriteMode."`}},
+		{"Enables WriteMode.", "Enables ReadMode.", []string{`ReadMode/doc "Enables WriteMode."`, `ReadMode/line "Enables ReadMode."`}},
+		{"Enables ReadMode.", "enables ReadMode", []string{`ReadMode/doc "Enables ReadMode."`}},
+		{"the mode is on", "the mode is on", []string{`ReadMode/doc "the mode is on"`}},
+	} {
+		src := "package p\nconst (\n// " + tc.doc + "\nReadMode = 1 // " + tc.line + "\nWriteMode = 2\n)\n"
+		fs := token.NewFileSet()
+		f, err := parser.ParseFile(fs, "p.go", src, parser.ParseComments)
+		if err != nil {
+			t.Fatal(err)
+		}
+		var got []string
+		for _, c := range block(&analysis.Pass{Fset: fs}, f.Decls[0].(*ast.GenDecl)) {
+			got = append(got, fmt.Sprintf("%s %q%s", c.Subject, c.Payload.Prose["comment"], c.Unsupported))
+		}
+		if strings.Join(got, "\n") != strings.Join(tc.want, "\n") {
+			t.Errorf("%q + %q:\n%s\nwant:\n%s", tc.doc, tc.line, strings.Join(got, "\n"), strings.Join(tc.want, "\n"))
+		}
 	}
 }
 
