@@ -93,10 +93,10 @@ func TestShowcaseCommand(t *testing.T) {
 	dir, _ := filepath.Abs("../examples/showcase")
 	t.Chdir(dir)
 	code, out, errs := run("run", "./...")
-	if n := strings.Count(out, "\n") - strings.Count(out, "\n\t"); code != 1 || strings.Count(out, ": ") < 17 {
+	if n := strings.Count(out, "\n") - strings.Count(out, "\n\t"); code != 1 || strings.Count(out, ": ") < 18 {
 		t.Fatalf("exit %d, %d lines\n%s\n%s", code, n, out, errs)
 	}
-	if !strings.Contains(errs, "17 issue(s)") {
-		t.Fatalf("the showcase shows 17 findings: %s", errs)
+	if !strings.Contains(errs, "18 issue(s)") {
+		t.Fatalf("the showcase shows 18 findings: %s", errs)
 	}
 }

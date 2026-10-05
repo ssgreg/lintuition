@@ -14,6 +14,8 @@
 - Answers to a choice question whose probabilities add up to more than 1, beyond what rounding to
   two decimals explains (0.005 per positive entry), are rejected as invalid, for every linter and
   backend; a sum just above 1 within that rounding is normalized to 1 before rules decide.
+- New linter `read-only-promise`: a doc comment that promises a function changes nothing while its
+  body writes the receiver, a parameter or a package-level variable.
 - `normal-event-at-error` stops reading a structured failure as a routine event: in
   `logger.Error("closing the listener", zap.Error(err))` the message only names the operation and
   the error says it failed. It now sends whether the call logs a value of type error and what the
