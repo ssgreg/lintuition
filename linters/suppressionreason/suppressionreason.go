@@ -110,8 +110,8 @@ var ruleTables = map[string]struct {
 	rules map[string]string
 	cite  func(reason string) []string
 }{
-	"gosec":       {gosecRules, citeIDs(regexp.MustCompile(`^G[0-9]{3}$`))},
-	"staticcheck": {staticcheckRules, citeIDs(regexp.MustCompile(`^(?:SA|ST|QF|S)[0-9]{4}$`))},
+	"gosec":       {gosecRules, citeIDs(`G[0-9]{3}`)},
+	"staticcheck": {staticcheckRules, citeIDs(`(?:SA|ST|QF|S)[0-9]{4}`)},
 	"revive":      {reviveRules, citeRevive},
 }
 
@@ -119,19 +119,18 @@ var ruleTables = map[string]struct {
 // without surrounding brackets, quotes and sentence punctuation, is an ID or a list of IDs joined
 // by "," or "/" ("G304:", "(G204)", "G304/G703"). An ID inside a larger word is not a citation:
 // "G304.json" is a file, "BUG-G304" a ticket, "éG304" a word.
-func citeIDs(id *regexp.Regexp) func(string) []string {
+func citeIDs(id string) func(string) []string {
+	// The whole word must be the list: a path made of an ID and slashes ("/G304/", "SA1019/") is
+	// not one.
+	list := regexp.MustCompile(`^(?:` + id + `)(?:[,/](?:` + id + `))*$`)
 	return func(reason string) []string {
 		var out []string
 		for _, w := range strings.Fields(reason) {
 			w = strings.TrimRight(strings.TrimLeft(w, `(["'`), `)]"':,.;!?`)
-			parts := strings.FieldsFunc(w, func(r rune) bool { return r == ',' || r == '/' })
-			all := len(parts) > 0
-			for _, p := range parts {
-				all = all && id.MatchString(p)
+			if !list.MatchString(w) {
+				continue
 			}
-			if all {
-				out = append(out, parts...)
-			}
+			out = append(out, strings.FieldsFunc(w, func(r rune) bool { return r == ',' || r == '/' })...)
 		}
 		return out
 	}

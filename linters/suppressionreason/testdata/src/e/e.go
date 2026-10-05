@@ -296,3 +296,12 @@ func c45() {
 	_ = f.Close() //nolint:staticcheck // kept until the next major release, see SA1019.
 	_ = f.Close() //nolint:gosec // a constant mode ["G306"] for public fixtures
 }
+
+// A path made of an ID and slashes is not a citation: the general description, and a real
+// citation next to one stays the only rule.
+
+func c46() {
+	_ = f.Close() //nolint:gosec // the shared fixtures in /G304/ need these permissions
+	_ = f.Close() //nolint:staticcheck // the generated SA1019/ directory is shared by the tests
+	_ = f.Close() //nolint:gosec // G306: public permissions for the /G304/ fixtures
+}

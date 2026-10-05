@@ -126,6 +126,9 @@ func TestExtraction(t *testing.T) {
 		`44 gosec rule=G306 "G306: public fixtures, see ticket SEC-G304" suppressed="Poor file permissions used when writing to a file"`,
 		`45 staticcheck rule=SA1019 "kept until the next major release, see SA1019." suppressed="Using a deprecated function, variable, constant or field"`,
 		`45 gosec rule=G306 "a constant mode [\"G306\"] for public fixtures" suppressed="Poor file permissions used when writing to a file"`,
+		`46 gosec "the shared fixtures in /G304/ need these permissions"` + gosec,
+		`46 staticcheck "the generated SA1019/ directory is shared by the tests"` + staticcheck,
+		`46 gosec rule=G306 "G306: public permissions for the /G304/ fixtures" suppressed="Poor file permissions used when writing to a file"`,
 	}
 	if strings.Join(got, "\n") != strings.Join(want, "\n") {
 		t.Fatalf("candidates:\n%s\n\nwant:\n%s", strings.Join(got, "\n"), strings.Join(want, "\n"))
@@ -195,6 +198,13 @@ func TestCitedRule(t *testing.T) {
 		{"gosec", "G306: public, see BUG-G304", "G306", true},
 		{"gosec", "a constant name (G204).", "G204", true},
 		{"gosec", "G304,G703: one path", "", false},
+		{"gosec", "the public fixtures in /G304/ need these permissions", "", true},
+		{"staticcheck", "the generated SA1019/ directory is shared by test clients", "", true},
+		{"gosec", "G306: public permissions for /G304/ fixtures", "G306", true},
+		{"gosec", "lists cut short: G304/ and ,G304 and G304//G703", "", true},
+		{"gosec", "G304/G703: this path is constant", "", false},
+		{"gosec", "G304/G304: this path is constant", "G304", true},
+		{"gosec", "the public fixtures in testdata/G304/ need these permissions", "", true},
 		{"revive", "disable-line:unused-receiver,unused-parameter both", "", false},
 		{"revive", "disable-line:range-extra2 x", "range-extra2", true},
 		{"revive", "disable-line:Bad_Name x", "Bad_Name", true},
