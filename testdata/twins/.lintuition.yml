@@ -156,10 +156,17 @@ semantic:
         - {linter: enum-comment-shift, question: describes, when: "want `comment describes PhaseVerified", choice: none, probability: 0.9}
         # (the sentinel of test-name-vs-assertion's twin package: name and text agree)
         - {linter: sentinel-name-vs-text, question: condition, when: "unbalanced quote", choice: same, probability: 0.9}
+        - {linter: sentinel-name-vs-text, question: condition, when: '"text":"disk full"', choice: same, probability: 0.9}
         # test-name-vs-assertion
         - {linter: test-name-vs-assertion, question: name_says, when: "unquote rejects unbalanced quote", choice: error, probability: 0.95}
         - {linter: test-name-vs-assertion, question: name_says, when: "unquote accepts quoted word", choice: no_error, probability: 0.95}
         - {linter: test-name-vs-assertion, question: name_says, when: "unquote empty string", choice: input_only, probability: 0.95}
+        - {linter: test-name-vs-assertion, question: name_says, when: "save fails when the store refuses", choice: error, probability: 0.95}
+        - {linter: test-name-vs-assertion, question: name_says, when: "save survives a cache failure", choice: no_error, probability: 0.95}
+        - {linter: test-name-vs-assertion, question: name_says, when: '"test":"save cache write failure"', choice: input_only, probability: 0.9}
+        - {linter: test-name-vs-assertion, question: name_says, when: '"test":"wrap nil error"', choice: input_only, probability: 0.9}
+        - {linter: test-name-vs-assertion, question: name_says, when: "unquote rejects a single quote", choice: error, probability: 0.95}
+        - {linter: test-name-vs-assertion, question: name_says, when: "unquote accepts a bare word", choice: no_error, probability: 0.95}
         # doc-vs-table
         - {linter: doc-vs-table, question: condition, when: '"situation":"three days late', choice: met, probability: 0.95}
         - {linter: doc-vs-table, question: condition, when: '"situation":"a week before the date', choice: not_met, probability: 0.95}

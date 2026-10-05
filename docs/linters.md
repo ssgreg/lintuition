@@ -576,11 +576,23 @@ func TestUnquoteRejectsUnbalancedQuote(t *testing.T) {
 on a word boundary), its error, and the check on it: `if err != nil { t.Fatal }`, testify `NoError`,
 `Error` and the like.
 
-**Sends:** the test name as words ("unquote rejects unbalanced quote") and the call's name.
+**Sends:** the test name as words ("unquote rejects unbalanced quote"), the test's doc comment with
+its own name replaced by "this test" (empty when there is none), the call's name, and whether the
+test passes the call an error argument (bound to the parameters of the call's own signature: a
+method expression's receiver, an instantiated generic, a forwarded result pair). The last is a fixed
+phrase; "no error argument observed" says nothing about other setup.
 
-**Asks:** whether the name says the call should return an error, succeed, or only describes the input.
+**Asks:** whether the name says the call itself should return an error, succeed, or only describes
+the input or the setup. A failure the test arranges elsewhere is setup: `TestSyncUploadTimeout` names
+a timeout the test's fake causes, and its doc may say Sync retries and succeeds. So is an error that
+is the input: `TestWrapNilError` hands Wrap a nil error.
 
-**Decides:** reports when the name's answer differs from what the check requires. Threshold 0.9.
+**Decides:** reports when the name's answer differs from what the check requires. Threshold 0.9. A
+name that only describes the input or the setup is clean.
+
+**Misses:** a stale doc that contradicts the test name can override a clear name. When the name says
+Unquote accepts a bare word, the doc says it is refused and the check demands an error, the
+classifier follows the doc and the defect is not reported (0 of 3 runs on the twins).
 
 **Unsupported, strict again:** two functions match the name; the function is called more than once;
 the error is discarded or written again; `ErrorIs` (its target can be nil); anything in the failing

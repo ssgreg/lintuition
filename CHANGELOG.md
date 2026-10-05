@@ -24,6 +24,9 @@
   error is set without singling it out, a second question asks whether the message only names an
   action; if it does, the line is taken as a failure report and is not a finding, a recall
   trade-off.
+- `test-name-vs-assertion` no longer reads a failure the test arranges, or an error passed in, as
+  the call's own: the request now carries the test's doc comment and whether the test passes the
+  call an error, and the question asks about the call itself. Version 2.
 
 ## v0.1.0 (2026-10-02)
 
