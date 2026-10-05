@@ -1,8 +1,9 @@
 package a
 
+// 33 a block of more than 20 constants is unsupported, whatever its comments say
 const (
-	K01 = iota // the first of many: unsupported
-	K02
+	K01 = iota // the first of many
+	K02        // K02 is the second
 	K03
 	K04
 	K05

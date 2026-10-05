@@ -41,6 +41,10 @@
   what the code checked on the way to the log (an error test with `errors.Is` or `os.IsNotExist`
   while that error is still the one at hand, a receive from a context's Done channel or a signal
   channel), and its question has an answer for each of those cases.
+- `enum-comment-shift` masks its own constant's name only where a comment opens with it, sends
+  every other comment as written, and marks group comments and comments that match a neighbour's
+  but for a number or another word that names no constant as unsupported. Near-identical neighbours
+  and masked mid-sentence names made false findings on real code.
 
 ## v0.1.0 (2026-10-02)
 
