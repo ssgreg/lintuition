@@ -41,7 +41,8 @@ func writeSARIF(w io.Writer, issues []Issue, run Run) error {
 		PartialFingerprints map[string]string `json:"partialFingerprints,omitempty"`
 	}
 	type rule struct {
-		ID string `json:"id"`
+		ID      string `json:"id"`
+		HelpURI string `json:"helpUri,omitempty"`
 	}
 	levels := map[string]string{"error": "error", "warning": "warning", "info": "note", "note": "note"}
 	var results []result
@@ -66,7 +67,7 @@ func writeSARIF(w io.Writer, issues []Issue, run Run) error {
 	}
 	rules := []rule{}
 	for id := range ruleSet {
-		rules = append(rules, rule{ID: id})
+		rules = append(rules, rule{ID: id, HelpURI: run.docURL(id)})
 	}
 	sort.Slice(rules, func(i, j int) bool { return rules[i].ID < rules[j].ID })
 	if results == nil {
@@ -215,15 +216,20 @@ func writeJUnit(w io.Writer, issues []Issue) error {
 	return err
 }
 
-// writeGitHubActions writes workflow commands, ::warning file=...,line=...::message. Data and
-// properties are escaped as the runner expects, so a message cannot inject another command.
-func writeGitHubActions(w io.Writer, issues []Issue) error {
+// writeGitHubActions writes workflow commands, ::warning file=...,line=...::message, the linter's
+// docs on the message's second line. Data and properties are escaped as the runner expects, so a
+// message cannot inject another command.
+func writeGitHubActions(w io.Writer, issues []Issue, run Run) error {
 	levels := map[string]string{"error": "error", "warning": "warning", "info": "notice", "notice": "notice"}
 	var b strings.Builder
 	for _, is := range issues {
+		msg := is.Text
+		if u := run.docURL(is.FromLinter); u != "" {
+			msg += "\n" + u
+		}
 		fmt.Fprintf(&b, "::%s file=%s,line=%d,col=%d,title=%s::%s\n",
 			severity(is.Severity, levels, "warning"), ghProp(is.Pos.Filename), is.Pos.Line, is.Pos.Column,
-			ghProp(is.FromLinter), ghData(is.Text))
+			ghProp(is.FromLinter), ghData(msg))
 	}
 	_, err := io.WriteString(w, b.String())
 	return err

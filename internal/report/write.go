@@ -38,6 +38,8 @@ type LinterStatus struct {
 	Failed  int `json:"Failed"`
 	// NotAsked counts candidates left out because the budget ran out.
 	NotAsked int `json:"NotAsked"`
+	// DocURL is the linter's section in docs/linters.md; empty for a plugin linter.
+	DocURL string `json:"DocURL,omitempty"`
 }
 
 // Stats are the run totals.
@@ -71,7 +73,7 @@ func Write(c *config.Config, issues []Issue, run Run, stdout, stderr io.Writer) 
 		case "junit-xml":
 			fn = func(w io.Writer) error { return writeJUnit(w, issues) }
 		case "github-actions":
-			fn = func(w io.Writer) error { return writeGitHubActions(w, issues) }
+			fn = func(w io.Writer) error { return writeGitHubActions(w, issues, run) }
 		}
 		if err := to(d.Path, stdout, stderr, fn); err != nil {
 			return err

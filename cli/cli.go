@@ -200,6 +200,10 @@ func runCmd(code *int) *cobra.Command {
 			if err != nil {
 				return err
 			}
+			ver := lintuitionVersion()
+			for i := range res.Run.Linters {
+				res.Run.Linters[i].DocURL = report.DocURL(ver, res.Run.Linters[i].Name)
+			}
 			if err := report.Write(c, res.Issues, res.Run, cmd.OutOrStdout(), cmd.ErrOrStderr()); err != nil {
 				return err
 			}
@@ -383,6 +387,54 @@ func configCmd() *cobra.Command {
 	}
 	cmd.AddCommand(verify, path)
 	return cmd
+}
+
+// lintuitionVersion is the version of lintuition in this binary, for the docs links.
+func lintuitionVersion() string {
+	bi, _ := debug.ReadBuildInfo()
+	return docVersion(Version, bi)
+}
+
+// docVersion picks the lintuition version whose tag the docs links may use; empty means none, and
+// the links go to main. Some builds have none, whatever Version says: lintuition itself built from a
+// modified tree, and a custom binary whose lintuition dependency is replaced by a local directory or
+// by another module, a fork. Otherwise Version wins, then lintuition's own module: the main module,
+// or in a custom binary a dependency of the generated main, whose vcs settings describe that main
+// and not lintuition.
+func docVersion(stamped string, bi *debug.BuildInfo) string {
+	const path = "github.com/ssgreg/lintuition"
+	if bi == nil {
+		return stamped
+	}
+	version := ""
+	if bi.Main.Path == path {
+		if strings.HasSuffix(bi.Main.Version, "+dirty") {
+			return ""
+		}
+		for _, s := range bi.Settings {
+			if s.Key == "vcs.modified" && s.Value == "true" {
+				return ""
+			}
+		}
+		version = bi.Main.Version
+	} else {
+		for _, m := range bi.Deps {
+			if m.Path != path {
+				continue
+			}
+			version = m.Version
+			if m.Replace != nil {
+				if m.Replace.Path != path {
+					return ""
+				}
+				version = m.Replace.Version
+			}
+		}
+	}
+	if stamped != "" {
+		return stamped
+	}
+	return version
 }
 
 func versionCmd() *cobra.Command {

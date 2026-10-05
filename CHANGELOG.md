@@ -1,5 +1,13 @@
 # Changelog
 
+## Unreleased
+
+- A finding from a built-in linter links to that linter's section in `docs/linters.md`: `helpUri`
+  on the SARIF rule, a second line in the GitHub Actions annotation, and `DocURL` on the linter in
+  the JSON report's `Linters`. A release build links to the docs at its tag; any other build, one
+  from a modified tree or against a fork of lintuition, links to `main`. A plugin linter has no
+  docs here and gets no link, even under a built-in's name. Text output is unchanged.
+
 ## v0.2.0 (2026-10-05)
 
 Two new linters, and the false positives of the first ones fixed. On 25 real repositories (16
