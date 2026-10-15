@@ -4,8 +4,8 @@ go 1.26.0
 
 require (
 	github.com/spf13/cobra v1.10.2
-	golang.org/x/mod v0.41.0
-	golang.org/x/tools v0.50.0
+	golang.org/x/mod v0.42.0
+	golang.org/x/tools v0.51.0
 	gopkg.in/yaml.v3 v3.0.1
 )
 
